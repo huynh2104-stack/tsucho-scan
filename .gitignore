@@ -1,0 +1,22 @@
+# Môi trường & bí mật
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Dữ liệu cá nhân (ảnh sổ ngân hàng, file kết quả) — không đưa lên git
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
