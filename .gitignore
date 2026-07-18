@@ -3,6 +3,9 @@
 .venv/
 venv/
 
+# Cache kết quả API (chứa dữ liệu giao dịch cá nhân)
+.cache/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -14,6 +17,12 @@ input/*
 !input/.gitkeep
 output/*
 !output/.gitkeep
+
+# Dữ liệu giao dịch thật (file chuẩn tay, output Claude Cowork, memory phiên Cowork)
+mau-*.xlsx
+Claude Cowork Outputs/
+skills/
+thùng-rác/
 
 # IDE / OS
 .vscode/
