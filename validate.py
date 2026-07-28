@@ -55,28 +55,150 @@ def _balance_chains(first: list[dict], second: list[dict]) -> bool:
     """
     anchors = []
     for tx in reversed(first):
-        if tx.get("balance") is not None:
-            anchors.append(tx["balance"])
-            if len(anchors) >= 3:
+        bal = tx.get("balance")
+        if bal is not None:
+            anchors.append(bal)
+            # Mốc neo cũng có thể bị dính mã 取扱店/店番 (110552003 = 110552 + 003).
+            # Nhánh gỡ dính bên dưới chỉ áp cho dòng ĐÍCH, nên phải thử cả ở đây —
+            # thiếu chỗ này thì sổ 徳島大正 bị cắt thành 4 sheet rời.
+            if bal >= 1000:
+                anchors.append(bal // 1000)
+            if len(anchors) >= 6:
                 break
     if not anchors:
         return False
 
     for start in anchors:
-        running = start
-        checks = 0
-        for tx in second:
-            running += (tx.get("amount_in") or 0) - (tx.get("amount_out") or 0)
+        # Bao dung lỗi "số tiền nằm nhầm cột 出金/入金" — chính engine kiểm tra kép
+        # vẫn sửa được lỗi này, nên nó không được phép làm hỏng việc nối sổ.
+        # Giữ song song các số dư có thể có (tập rất nhỏ vì chỉ đi vài dòng).
+        running = {start}
+        hits = 0          # số mốc 残高 đã xác nhận khớp
+        for tx in second[:6]:
+            move = (tx.get("amount_in") or 0) - (tx.get("amount_out") or 0)
+            one_sided = bool(tx.get("amount_in")) != bool(tx.get("amount_out"))
+            nxt = {r + move for r in running}
+            if one_sided:
+                nxt |= {r - move for r in running}
+            running = nxt
+
             bal = tx.get("balance")
-            if bal is not None:
-                if bal == running:
-                    return True
-                if bal >= 1000 and bal // 1000 == running:  # 残高 dính mã 取扱店
-                    return True
-                checks += 1
-                if checks >= 3:
-                    break
+            if bal is None:
+                continue
+            # Khớp trực tiếp, hoặc 残高 còn dính mã 取扱店 (189709 = 189 + 709)
+            ok = {r for r in running if r == bal or (bal >= 1000 and bal // 1000 == r)}
+            if not ok:
+                break     # mâu thuẫn → giả thuyết mốc này sai, thử mốc khác
+            running = ok  # chốt lại theo số in trên sổ
+            hits += 1
+            # Đòi 2 mốc liên tiếp: 1 mốc dễ trùng ngẫu nhiên khi đã bao dung cả
+            # đổi cột lẫn dính mã — từng gộp nhầm 23 dòng 西日本 vào sổ 福岡.
+            if hits >= 2:
+                return True
+        if hits >= 1 and sum(1 for t in second if t.get("balance") is not None) == 1:
+            return True   # khối chỉ có đúng 1 mốc để kiểm thì 1 lần là hết mức
     return False
+
+
+_META_KEYS = ("bank_name", "store_no", "account_no", "holder")
+
+
+def _row_signature(tx: dict) -> tuple[int, int]:
+    """Dấu vân tay định dạng của 1 dòng: (区分 là mã số?, có 取扱店?).
+
+    Skill Cowork: nhận dạng sổ bằng ĐỊNH DẠNG DÒNG, không bằng chữ viết tay.
+    西日本 dùng mã số 200/100/510 + cột 取扱店; 福岡 dùng chữ CDカード/CDフリコミ.
+    """
+    kind = str(tx.get("kind") or "")
+    return (1 if re.fullmatch(r"\d{3}", kind) else 0,
+            1 if tx.get("store_code") else 0)
+
+
+def _sig_profile(rows: list[dict]) -> tuple[float, float]:
+    real = [t for t in rows if not t.get("is_note")]
+    if not real:
+        return (0.0, 0.0)
+    sigs = [_row_signature(t) for t in real]
+    return (sum(s[0] for s in sigs) / len(sigs), sum(s[1] for s in sigs) / len(sigs))
+
+
+def split_mixed_accounts(accounts: list[dict], min_side: int = 5) -> list[dict]:
+    """Tách 1 account mà model đã trộn nhầm 2 sổ khác nhau vào chung.
+
+    Một ảnh scan thường chụp 2 sổ cùng lúc; model (nhất là flash-lite) đôi khi
+    trả về cả 2 trong một account. Dấu hiệu để cắt phải có ĐỦ hai điều kiện:
+    chuỗi 残高 đứt tại đó, VÀ dấu vân tay định dạng dòng đổi hẳn (đo được ở
+    trang 4: 24 dòng 福岡 dính 24 dòng 西日本).
+    """
+    result = []
+    for acc in accounts:
+        txs = acc.get("transactions") or []
+        cut, best_diff = None, 0.5   # 0.5 là ngưỡng tối thiểu để dám cắt
+        if len(txs) >= 2 * min_side:
+            for i in range(min_side, len(txs) - min_side + 1):
+                prev, cur = txs[i - 1], txs[i]
+                pb, cb = prev.get("balance"), cur.get("balance")
+                if pb is None or cb is None:
+                    continue
+                move = (cur.get("amount_in") or 0) - (cur.get("amount_out") or 0)
+                if cb - pb == move:
+                    continue  # chuỗi vẫn liền → không phải chỗ giáp ranh
+                before, after = _sig_profile(txs[:i]), _sig_profile(txs[i:])
+                diff = max(abs(a - b) for a, b in zip(before, after))
+                # Lấy chỗ tín hiệu MẠNH NHẤT, không phải chỗ đứt đầu tiên: chuỗi
+                # còn đứt vì lỗi đọc số, cắt vội sẽ lệch vài dòng (đo được: cắt
+                # ở 19 thay vì 24 làm 5 dòng 福岡 lạc sang sổ 西日本).
+                if diff > best_diff:
+                    cut, best_diff = i, diff
+        if cut is None:
+            result.append(acc)
+            continue
+        head, tail = dict(acc), dict(acc)
+        head["transactions"] = txs[:cut]
+        tail["transactions"] = txs[cut:]
+        # Tên/số tài khoản đã đọc được thuộc về sổ nào thì chưa biết → để trống
+        # phần sau, các bước sau (bìa sổ, --banks) sẽ điền.
+        for key in _META_KEYS:
+            tail[key] = None
+        result.extend([head, tail])
+    return result
+
+
+def apply_cover_metadata(accounts: list[dict]) -> list[dict]:
+    """Chuyển thông tin trên trang BÌA sang sổ đứng ngay sau nó.
+
+    Nhiều sổ (vd 百十四銀行) chỉ in 銀行名/店番号/口座番号/名義 ở bìa, còn trang
+    giao dịch thì không có gì. Trang bìa được model trả về dưới dạng account
+    không có dòng nào — dùng nó điền vào các ô trống của sổ kế tiếp rồi bỏ đi.
+    """
+    result = []
+    pending: dict = {}
+    pending_unit = None
+    for acc in accounts:
+        # Trang nào có thông tin sổ (bìa, hoặc trang giao dịch in tên ở footer)
+        # đều cập nhật "sổ hiện hành". Bìa sổ mới = sang sổ khác.
+        # Không dùng "0 giao dịch" làm điều kiện: bìa hay bị model đọc ra 1 dòng rác.
+        if any(acc.get(k) for k in _META_KEYS):
+            for key in _META_KEYS:
+                if acc.get(key):
+                    pending[key] = acc[key]
+            pending_unit = acc.get("source_unit")
+
+        if not acc.get("transactions"):
+            continue  # bìa thuần: không tạo sheet riêng
+
+        # Chỉ lan sang TRANG KHÁC. Một ảnh có thể chứa 2 sổ khác nhau (trang 5-6:
+        # 西日本 + 福岡) — lan trong cùng ảnh sẽ gán nhầm tên sổ này cho sổ kia.
+        # KHÔNG xóa pending: các trang sau vẫn thuộc sổ này cho tới bìa kế tiếp,
+        # vì trang giao dịch hiếm khi in tên ngân hàng.
+        same_page = (pending_unit is not None
+                     and acc.get("source_unit") == pending_unit)
+        if pending and not same_page:
+            acc = dict(acc)
+            for key in _META_KEYS:
+                acc[key] = acc.get(key) or pending.get(key)
+        result.append(acc)
+    return result
 
 
 def merge_accounts(accounts: list[dict]) -> list[dict]:
@@ -109,7 +231,36 @@ def merge_accounts(accounts: list[dict]) -> list[dict]:
             "holder": acc.get("holder"),
             "transactions": list(acc.get("transactions", [])),
         })
-    return merged
+    return _merge_same_account(merged)
+
+
+def _merge_same_account(groups: list[dict]) -> list[dict]:
+    """Nối các nhóm kề nhau CÙNG một tài khoản dù chuỗi 残高 đứt.
+
+    Sau bước nối bằng chuỗi vẫn còn nhóm rời khi model đọc sai vài con số ở chỗ
+    sang trang. Nhưng nếu trang bìa cho biết cùng 銀行名 + 口座番号 thì đó chắc
+    chắn là một sổ (bìa mới = sổ mới), nên gộp lại thành 1 sheet như người làm tay.
+    Không giấu lỗi: chỗ nối không chứng minh được sẽ bị chính checksum bắt và tô
+    vàng 残高不一致 ở bước validate_transactions.
+    """
+    out: list[dict] = []
+    for grp in groups:
+        prev = out[-1] if out else None
+        # Đòi BẰNG CHỨNG DƯƠNG: phải biết rõ số tài khoản và trùng nhau.
+        # Nếu chấp nhận "cả hai đều None" thì 2 sổ khác nhau trong cùng 1 ảnh
+        # (trang 5-6: 西日本 + 福岡) sẽ bị gộp thành một sheet — đã đo được.
+        same = (
+            prev is not None
+            and grp.get("bank_name")
+            and prev.get("bank_name") == grp.get("bank_name")
+            and grp.get("account_no")
+            and prev.get("account_no") == grp.get("account_no")
+        )
+        if same:
+            prev["transactions"] = prev["transactions"] + grp["transactions"]
+            continue
+        out.append(grp)
+    return out
 
 
 def _shift_balances(transactions: list[dict], offset: int) -> list[dict]:
@@ -129,6 +280,60 @@ def _count_mismatch(rows: list[dict]) -> int:
     return sum(1 for r in rows if "残高不一致" in r.get("reason", ""))
 
 
+def _move_of(tx: dict) -> int:
+    return (tx.get("amount_in") or 0) - (tx.get("amount_out") or 0)
+
+
+def _shift_segments(transactions: list[dict]) -> list[dict] | None:
+    """Dịch cột 残高 lùi 1 hàng cho TỪNG ĐOẠN lệch, thay vì cả cột.
+
+    Khi model bỏ sót 1 dòng (hay gặp nhất: dòng 繰越 đầu trang), 残高 của các
+    dòng sau đó lùi 1 hàng — mỗi dòng mang số dư của dòng trên nó. Nếu model
+    bỏ sót thêm dòng nữa ở giữa thì từ đó trở đi lại tự khớp lại, nên _shift_balances
+    (dịch cả cột) không cứu được: nó sửa được đoạn đầu thì phá đoạn sau.
+
+    Ở đây tìm các đoạn liên tiếp mà giả thuyết "lệch 1 hàng" khớp số học còn
+    giả thuyết "thẳng hàng" thì không, rồi chỉ dịch trong đoạn đó.
+    Trả về None nếu không có đoạn nào đủ dài (>= 3 dòng).
+    """
+    idxs = [i for i, tx in enumerate(transactions) if tx.get("balance") is not None]
+    if len(idxs) < 4:
+        return None
+
+    bal = [transactions[i]["balance"] for i in idxs]
+    # Tổng biến động giữa 2 dòng có 残高 liên tiếp (gồm cả dòng giữa không in 残高)
+    moves = [
+        sum(_move_of(transactions[k]) for k in range(idxs[p - 1] + 1, idxs[p] + 1))
+        for p in range(1, len(idxs))
+    ]
+
+    last = len(idxs) - 1
+    # suspect[p] (p = 1..last): giả thuyết "lệch 1 hàng" khớp còn "thẳng hàng" sai
+    suspect = {}
+    for p in range(1, len(idxs)):
+        aligned = bal[p] - bal[p - 1] == moves[p - 1]
+        shifted = p < last and bal[p + 1] - bal[p] == moves[p - 1]
+        suspect[p] = shifted and not aligned
+
+    # Gom thành các đoạn liên tiếp p = a..b, chỉ nhận đoạn >= 3 dòng.
+    # Đoạn đó nghĩa là: số dư thật của dòng idxs[q] chính là bal[q+1] (q = a-1..b).
+    result = [dict(tx) for tx in transactions]
+    found = False
+    a = None
+    for p in range(1, len(idxs) + 1):
+        if suspect.get(p):
+            a = p if a is None else a
+            continue
+        if a is not None:
+            b = p - 1
+            if b - a + 1 >= 3:
+                for q in range(a - 1, min(b, last - 1) + 1):
+                    result[idxs[q]]["balance"] = bal[q + 1]
+                found = True
+            a = None
+    return result if found else None
+
+
 def validate_transactions(transactions: list[dict]) -> list[dict]:
     """Thêm các key: date (ISO), status ("ok"/"fixed"/"check"), reason.
 
@@ -143,9 +348,14 @@ def validate_transactions(transactions: list[dict]) -> list[dict]:
     # Thử giả thuyết "cột 残高 bị lệch 1 hàng" khi có nhiều dòng lệch
     n_bad = _count_mismatch(result)
     if n_bad >= 3:
+        candidates = [_shift_balances(transactions, off) for off in (1, -1)]
+        segmented = _shift_segments(transactions)
+        if segmented is not None:
+            candidates.append(segmented)  # lệch theo từng đoạn (bỏ sót dòng giữa chừng)
+
         best, best_bad = result, n_bad
-        for offset in (1, -1):
-            candidate = _validate_pass(_shift_balances(transactions, offset))
+        for shifted in candidates:
+            candidate = _validate_pass(shifted)
             cand_bad = _count_mismatch(candidate)
             if cand_bad < best_bad:
                 best, best_bad = candidate, cand_bad
@@ -159,7 +369,89 @@ def validate_transactions(transactions: list[dict]) -> list[dict]:
                         row["status"] = "fixed"
             result = best
 
+    _fill_partial_dates(result)
+    _flag_row_number_gaps(result)
     return result
+
+
+def _fill_partial_dates(rows: list[dict]) -> None:
+    """Điền năm cho những ngày chỉ in tháng.ngày (vd "11.14" → 2025-11-14).
+
+    Nhiều sổ chỉ in năm ở dòng đầu hoặc khi sang năm mới. Giao dịch trong sổ luôn
+    theo thứ tự thời gian nên năm suy được từ dòng có ngày đầy đủ gần nhất; nếu
+    tháng/ngày lùi lại so với dòng trước thì đã sang năm sau.
+    """
+    def _month_day(row) -> tuple[int, int] | None:
+        nums = re.findall(r"\d+", str(row.get("date_raw") or ""))
+        return (int(nums[0]), int(nums[1])) if len(nums) == 2 else None
+
+    def _apply(row, guess: date, note: str) -> None:
+        row["date"] = guess.isoformat()
+        # Đã đọc được ngày → gỡ cờ 日付不明 mà pass trước đã gắn
+        parts = [p for p in row.get("reason", "").split("・") if p and p != "日付不明"]
+        still_bad = [p for p in parts
+                     if "不一致" in p or "疑い" in p or p == "低信頼度"]
+        row["reason"] = "・".join(parts + [note])
+        row["status"] = "check" if still_bad else "fixed"
+
+    # Xuôi: lấy năm của dòng đầy đủ gần nhất phía TRƯỚC
+    last = None
+    for row in rows:
+        if row.get("date"):
+            last = date.fromisoformat(row["date"])
+            continue
+        md = _month_day(row)
+        if last is None or md is None:
+            continue
+        for year in (last.year, last.year + 1):   # tháng lùi lại = đã sang năm mới
+            try:
+                guess = date(year, *md)
+            except ValueError:
+                break
+            if guess >= last:
+                _apply(row, guess, "年を前行から補完")
+                last = guess
+                break
+
+    # Ngược: các dòng ĐẦU sổ chưa có mốc phía trước thì suy từ dòng đầy đủ phía SAU
+    nxt = None
+    for row in reversed(rows):
+        if row.get("date"):
+            nxt = date.fromisoformat(row["date"])
+            continue
+        md = _month_day(row)
+        if nxt is None or md is None:
+            continue
+        for year in (nxt.year, nxt.year - 1):
+            try:
+                guess = date(year, *md)
+            except ValueError:
+                break
+            if guess <= nxt:
+                _apply(row, guess, "年を後行から補完")
+                nxt = guess
+                break
+
+
+def _flag_row_number_gaps(rows: list[dict]) -> None:
+    """Cảnh báo khi số thứ tự dòng in trên sổ bị nhảy cóc (model bỏ sót dòng).
+
+    Sổ in sẵn số 01..24 ở lề trái. Số nhảy = chắc chắn thiếu dòng, và thiếu dòng
+    là nguyên nhân gốc làm cả cột 残高 lệch — phải báo cho người dùng biết chứ
+    không được lặng lẽ "tự sửa" bằng số suy ra.
+    """
+    prev = None
+    for row in rows:
+        cur = row.get("row_no")
+        if cur is None:
+            continue
+        # Số thứ tự nhỏ đi = sang trang mới (01 lại từ đầu), không phải nhảy cóc
+        if prev is not None and 1 < cur - prev:
+            missing = cur - prev - 1
+            note = f"行番号 {prev}→{cur}: {missing}行抜けの疑い"
+            row["reason"] = "・".join(filter(None, [row.get("reason"), note]))
+            row["status"] = "check"
+        prev = cur
 
 
 def _split_fused(balance: int | None) -> tuple[int | None, str | None]:
@@ -215,6 +507,9 @@ def _clear_mismatch(row: dict, note: str) -> None:
 
 def _validate_pass(transactions: list[dict]) -> list[dict]:
     _normalize_te_codes(transactions)
+    # Sổ không in cột 取扱店 thì 残高 không thể dính mã → tắt các nhánh tách,
+    # nếu không 387,089 bị xé thành 387 + "089" (đã đo được ở sổ 福岡 trang 5-6)
+    allow_fused = any(tx.get("store_code") for tx in transactions)
     result = []
     prev_balance = None   # số dư của dòng có 残高 gần nhất (đã cộng dồn kỳ vọng)
     prev_bal_row = None   # dòng in 残高 gần nhất (để sửa lùi khi phát hiện dính mã)
@@ -253,10 +548,10 @@ def _validate_pass(transactions: list[dict]) -> list[dict]:
         chain_verified = False  # dòng này đã được chuỗi 残高 xác minh số học chưa
         if balance is not None and prev_balance is not None:
             move = amount_in - amount_out
-            cur2, cur_code = _split_fused(balance)
+            cur2, cur_code = _split_fused(balance) if allow_fused else (None, None)
             # Chỉ sửa lùi dòng trước khi nó chưa bị nghi vấn gì khác
             prev2, prev_code = (None, None)
-            if (prev_is_direct and prev_bal_row is not None
+            if (allow_fused and prev_is_direct and prev_bal_row is not None
                     and "残高不一致" not in prev_bal_row.get("reason", "")):
                 prev2, prev_code = _split_fused(prev_balance)
 
@@ -316,26 +611,53 @@ def _validate_pass(transactions: list[dict]) -> list[dict]:
             if not chain_verified:
                 following = transactions[idx + 1:]
                 one_sided = (amount_in == 0) != (amount_out == 0)
-                for pcand, pref in ((prev_balance, None), (alt_prev, alt_prev_row)):
-                    if pcand is None or chain_verified:
+
+                # Ứng viên số dư dòng trước: (giá trị, dòng cần sửa, mã tách ra).
+                # Mốc neo có thể CÒN dính mã 店番 mà chưa nhánh nào gỡ (sổ 徳島大正:
+                # 4006003 = 4,006 + 003) — không thử ở đây thì cả trang lệch theo.
+                prev_cands = []
+                for pv, pref in ((prev_balance, None), (alt_prev, alt_prev_row)):
+                    if pv is None:
                         continue
+                    prev_cands.append((pv, pref, None))
+                    fix_row = pref if pref is not None else (
+                        prev_bal_row if prev_is_direct else None)
+                    if allow_fused and pv >= 1000 and fix_row is not None:
+                        prev_cands.append((pv // 1000, fix_row, f"{pv % 1000:03d}"))
+
+                for pcand, pref, pcode in prev_cands:
+                    if chain_verified:
+                        break
                     for swap in (False, True):
                         if swap and not one_sided:
                             continue
                         derived = pcand + (-move if swap else move)
-                        if derived != balance and not _lookahead_ok(derived, following):
+                        # 残高 dòng này cũng có thể đang dính mã
+                        cur_fused = (allow_fused and balance >= 1000
+                                     and derived == balance // 1000)
+                        if (derived != balance and not cur_fused
+                                and not _lookahead_ok(derived, following)):
                             continue
                         # Bằng chứng đủ mạnh → áp dụng bộ giả thuyết này
                         if pref is not None:
                             pref["balance"] = pcand
-                            _clear_mismatch(pref, "残高を検算で補正")
+                            if pcode:
+                                pref["store_code"] = pref.get("store_code") or pcode
+                                _clear_mismatch(pref, "残高から取扱店を分離")
+                            else:
+                                _clear_mismatch(pref, "残高を検算で補正")
                         if swap:
                             row["amount_out"], row["amount_in"] = (
                                 amount_in or None, amount_out or None)
                             amount_out, amount_in = amount_in, amount_out
                             move = -move
                             fixes.append("金額の列を入替")
-                        if derived != balance:
+                        if cur_fused:
+                            row["store_code"] = (row.get("store_code")
+                                                 or f"{balance % 1000:03d}")
+                            fixes.append("残高から取扱店を分離")
+                            row["balance"] = balance = derived
+                        elif derived != balance:
                             fixes.append(f"残高を検算で補正(印字読取 {balance:,})")
                             row["balance"] = balance = derived
                         chain_verified = True

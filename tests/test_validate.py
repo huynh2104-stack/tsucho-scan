@@ -1,6 +1,12 @@
 """Test cho validate.py với dữ liệu giả."""
 
-from validate import convert_wareki, merge_accounts, validate_transactions
+from validate import (
+    apply_cover_metadata,
+    convert_wareki,
+    merge_accounts,
+    split_mixed_accounts,
+    validate_transactions,
+)
 
 
 # ---------- convert_wareki ----------
@@ -31,7 +37,8 @@ def test_ngay_khong_hop_le_tra_none():
 
 # ---------- validate_transactions ----------
 
-def _tx(date_raw="6-01-15", out=None, inn=None, bal=None, conf="high", desc="テスト"):
+def _tx(date_raw="6-01-15", out=None, inn=None, bal=None, conf="high", desc="テスト",
+        store=None, n=None):
     return {
         "date_raw": date_raw,
         "description": desc,
@@ -39,6 +46,8 @@ def _tx(date_raw="6-01-15", out=None, inn=None, bal=None, conf="high", desc="テ
         "amount_in": inn,
         "balance": bal,
         "confidence": conf,
+        "store_code": store,
+        "row_no": n,
     }
 
 
@@ -171,9 +180,11 @@ def test_co_it_nhat_mot_zandaka_thi_khong_danh_dau_toan_bo():
 
 
 def test_tach_zandaka_dinh_ma_toriatsukaiten():
-    # Lỗi thật ở trang 3: 残高 189 dính mã 取扱店 709 thành 189709
+    # Lỗi thật ở trang 3: 残高 189 dính mã 取扱店 709 thành 189709.
+    # store ở dòng đầu = bằng chứng sổ CÓ in cột 取扱店 (sổ không có cột này thì
+    # 387,089 không được phép xé thành 387|089 — ca sổ 福岡 trang 5-6).
     rows = validate_transactions([
-        _tx(out=38, bal=189),
+        _tx(out=38, bal=189, store="709"),
         _tx(inn=202_000, bal=202_189_720),   # thật ra là 202,189 + mã 720
         _tx(out=201_524, bal=665),           # 202,189 - 201,524 = 665: khớp sau khi tách
     ])
@@ -187,8 +198,8 @@ def test_tach_zandaka_dinh_ma_toriatsukaiten():
 def test_tach_zandaka_dinh_ma_sua_lui_dong_dau():
     # Dòng ĐẦU dính mã (chưa kiểm chứng được) → dòng sau phát hiện và sửa lùi
     rows = validate_transactions([
-        _tx(bal=189_709),                    # thật ra 189 + mã 709
-        _tx(inn=202_000, bal=202_189),       # 189 + 202,000 = 202,189: khớp khi tách dòng đầu
+        _tx(bal=189_709),                            # thật ra 189 + mã 709
+        _tx(inn=202_000, bal=202_189, store="720"),  # 189 + 202,000 = 202,189: khớp khi tách dòng đầu
     ])
     assert rows[0]["balance"] == 189
     assert rows[0]["store_code"] == "709"
@@ -201,8 +212,8 @@ def test_chuoi_dinh_ma_lien_tiep_duoc_go_het():
     rows = validate_transactions([
         _tx(bal=189_709),                    # 189|709
         _tx(inn=202_000, bal=202_189_720),   # 202,189|720
-        _tx(out=201_524, bal=665_709),       # 665|709
-        _tx(inn=216_489, bal=217_154),       # dòng sạch
+        _tx(out=201_524, bal=665_709),               # 665|709
+        _tx(inn=216_489, bal=217_154, store="709"),  # dòng sạch, đọc được mã 取扱店
     ])
     assert [r["balance"] for r in rows] == [189, 202_189, 665, 217_154]
     assert all("残高不一致" not in r["reason"] for r in rows)
@@ -356,3 +367,190 @@ def test_khong_gop_hai_so_that_su_khac_nhau():
         _acc("西日本シティ銀行", [_tx(inn=22_000, bal=25_866)]),
     ])
     assert len(accounts) == 2
+
+
+# ---------- tách 2 sổ bị model trộn chung ----------
+
+def _fuku(bal, out=None, inn=None):
+    return {**_tx(out=out, inn=inn, bal=bal), "kind": "CDフリコミ", "extra_text": "ﾃ055"}
+
+
+def _nishi(bal, out=None, inn=None):
+    return {**_tx(out=out, inn=inn, bal=bal, store="720"), "kind": "200"}
+
+
+def test_tach_account_bi_tron_hai_so():
+    # Ca thật trang 4 (flash-lite): 24 dòng 福岡 + 24 dòng 西日本 nằm chung 1 account
+    txs = [_fuku(100_000)] + [_fuku(100_000 - 1_000 * i, out=1_000) for i in range(1, 6)]
+    txs += [_nishi(500_000)] + [_nishi(500_000 - 2_000 * i, out=2_000) for i in range(1, 6)]
+    accounts = split_mixed_accounts([_acc("福岡銀行", txs)])
+    assert len(accounts) == 2
+    assert len(accounts[0]["transactions"]) == 6
+    assert accounts[0]["bank_name"] == "福岡銀行"
+    assert accounts[1]["bank_name"] is None    # chưa biết sổ sau là sổ nào
+
+
+def test_khong_tach_so_binh_thuong_du_chuoi_dut_mot_cho():
+    # Chuỗi đứt vì đọc sai 1 số, nhưng định dạng dòng không đổi → KHÔNG được tách
+    txs = [_nishi(100_000)] + [_nishi(100_000 - 1_000 * i, out=1_000) for i in range(1, 6)]
+    txs += [_nishi(88_888)] + [_nishi(88_888 - 1_000 * i, out=1_000) for i in range(1, 6)]
+    accounts = split_mixed_accounts([_acc("西日本シティ銀行", txs)])
+    assert len(accounts) == 1
+
+
+def test_khong_tach_khi_so_qua_ngan():
+    txs = [_fuku(100_000), _nishi(500_000)]
+    assert len(split_mixed_accounts([_acc(None, txs)])) == 1
+
+
+# ---------- metadata trang bìa ----------
+
+def test_bia_so_dien_thong_tin_cho_so_ke_tiep():
+    # Sổ 百十四銀行 chỉ in 銀行名/店番/口座番号 ở BÌA, trang giao dịch không có
+    accounts = apply_cover_metadata([
+        {"bank_name": "百十四銀行", "store_no": "662", "account_no": "0323401",
+         "holder": "有限会社 見本", "transactions": []},
+        _acc(None, [_tx(bal=100_000)]),
+    ])
+    assert len(accounts) == 1            # trang bìa không thành sheet riêng
+    assert accounts[0]["bank_name"] == "百十四銀行"
+    assert accounts[0]["account_no"] == "0323401"
+
+
+def test_hai_so_trong_cung_mot_anh_khong_lay_ten_cua_nhau():
+    # Trang 5-6: 1 ảnh chứa 西日本 + 福岡. Model chỉ đọc ra tên sổ đầu; nếu lan
+    # sang sổ sau thì 2 sổ bị gộp thành 1 sheet (đã đo được với flash-lite).
+    accounts = apply_cover_metadata([
+        {**_acc("西日本シティ銀行", [_tx(bal=100_000)]), "source_unit": 0},
+        {**_acc(None, [_tx(bal=387_089)]), "source_unit": 0},
+    ])
+    assert accounts[1]["bank_name"] is None
+
+
+def test_bia_trang_truoc_van_lan_sang_trang_sau():
+    accounts = apply_cover_metadata([
+        {"bank_name": "百十四銀行", "store_no": "662", "account_no": "0323401",
+         "holder": None, "transactions": [], "source_unit": 0},
+        {**_acc(None, [_tx(bal=100_000)]), "source_unit": 1},
+    ])
+    assert accounts[0]["bank_name"] == "百十四銀行"
+
+
+def test_khong_gop_hai_so_deu_khong_ro_so_tai_khoan():
+    accounts = merge_accounts([
+        _acc("西日本シティ銀行", [_tx(bal=100_000)]),
+        _acc("西日本シティ銀行", [_tx(bal=999_999)]),   # chuỗi không nối, account_no None
+    ])
+    assert len(accounts) == 2
+
+
+def test_gop_hai_khoi_cung_so_tai_khoan_du_chuoi_dut():
+    # PDF 24 trang: model đọc sai vài số ở chỗ sang trang làm chuỗi đứt, nhưng
+    # bìa cho biết cùng 銀行名 + 口座番号 → vẫn là 1 sổ, gộp thành 1 sheet
+    a = {**_acc("百十四銀行", [_tx(bal=100_000)]), "account_no": "0323401"}
+    b = {**_acc("百十四銀行", [_tx(bal=999_999)]), "account_no": "0323401"}
+    accounts = merge_accounts([a, b])
+    assert len(accounts) == 1
+    assert len(accounts[0]["transactions"]) == 2
+
+
+def test_bia_so_khong_de_len_thong_tin_da_doc_duoc():
+    accounts = apply_cover_metadata([
+        {"bank_name": "百十四銀行", "store_no": "662", "account_no": None,
+         "holder": None, "transactions": []},
+        {**_acc("福岡銀行", [_tx(bal=100_000)]), "account_no": "615001"},
+    ])
+    assert accounts[0]["bank_name"] == "福岡銀行"     # tên đọc từ trang giao dịch thắng
+    assert accounts[0]["account_no"] == "615001"
+    assert accounts[0]["store_no"] == "662"          # ô trống thì lấy từ bìa
+
+
+# ---------- lệch cột 残高 theo ĐOẠN (model bỏ sót dòng giữa chừng) ----------
+
+def test_bo_sot_dong_kurikoshi_lam_lech_ca_doan_duoc_dich_lai():
+    # Ca thật trang 5-6: model không xuất dòng 繰越 (残高 78,036) nên mỗi dòng
+    # mang số dư của dòng TRÊN nó. Dịch cả cột không cứu được vì đoạn sau lại
+    # tự khớp lại — phải dịch riêng từng đoạn.
+    rows = validate_transactions([
+        _tx(out=6_617, bal=78_036),      # số dư thật 71,419
+        _tx(inn=260_000, bal=71_419),    # thật 331,419
+        _tx(out=257_976, bal=331_419),   # thật 73,443
+        _tx(out=73_000, bal=73_443),     # thật 443
+        _tx(inn=341_595, bal=443),       # dòng cuối: không còn số dư để dịch tới
+    ])
+    assert [r["balance"] for r in rows[:4]] == [71_419, 331_419, 73_443, 443]
+    assert all("残高不一致" not in r["reason"] for r in rows[:4])
+    assert "残高の行ずれを自動補正" in rows[0]["reason"]
+
+
+def test_khong_dich_doan_khi_chuoi_von_da_dung():
+    # Sổ bình thường: không được "phát hiện" lệch đoạn ở đâu cả
+    rows = validate_transactions([
+        _tx(bal=100_000),
+        _tx(inn=50_000, bal=150_000),
+        _tx(out=30_000, bal=120_000),
+        _tx(out=20_000, bal=100_000),
+        _tx(inn=5_000, bal=105_000),
+    ])
+    assert all(r["status"] == "ok" for r in rows)
+    assert [r["balance"] for r in rows] == [100_000, 150_000, 120_000, 100_000, 105_000]
+
+
+# ---------- ngày chỉ in tháng.ngày ----------
+
+def test_dien_nam_cho_ngay_thieu_nam():
+    # Sổ 福岡 trang 3: model trả "11.14" (mất năm) → suy từ dòng có năm đầy đủ
+    rows = validate_transactions([
+        _tx(date_raw="7-11-05", bal=100_000),
+        _tx(date_raw="11.14", out=30_000, bal=70_000),
+    ])
+    assert rows[0]["date"] == "2025-11-05"
+    assert rows[1]["date"] == "2025-11-14"
+    assert "年を前行から補完" in rows[1]["reason"]
+    assert "日付不明" not in rows[1]["reason"]
+
+
+def test_dien_nam_qua_giao_thua_thi_tang_nam():
+    rows = validate_transactions([
+        _tx(date_raw="7-12-28", bal=100_000),
+        _tx(date_raw="1.05", out=30_000, bal=70_000),   # tháng lùi lại → sang năm sau
+    ])
+    assert rows[1]["date"] == "2026-01-05"
+
+
+def test_dien_nam_nguoc_tu_dong_sau_cho_dau_so():
+    # Ca thật p3-4: các dòng ĐẦU sổ mất năm, dòng có năm nằm mãi phía dưới
+    rows = validate_transactions([
+        _tx(date_raw="11.14", bal=100_000),
+        _tx(date_raw="12.20", out=30_000, bal=70_000),
+        _tx(date_raw="7-12-25", out=10_000, bal=60_000),
+    ])
+    assert [r["date"] for r in rows] == ["2025-11-14", "2025-12-20", "2025-12-25"]
+    assert "年を後行から補完" in rows[0]["reason"]
+
+
+def test_khong_doan_nam_khi_ca_so_khong_co_ngay_nao_day_du():
+    rows = validate_transactions([_tx(date_raw="11.14", bal=100_000)])
+    assert rows[0]["date"] is None
+    assert "日付不明" in rows[0]["reason"]
+
+
+# ---------- số thứ tự dòng in sẵn trên sổ (01..24) ----------
+
+def test_so_thu_tu_dong_nhay_coc_bao_thieu_dong():
+    rows = validate_transactions([
+        _tx(bal=100_000, n=1),
+        _tx(inn=50_000, bal=150_000, n=2),
+        _tx(out=30_000, bal=120_000, n=5),   # 2→5: thiếu 2 dòng in trên sổ
+    ])
+    assert "行番号 2→5: 2行抜けの疑い" in rows[2]["reason"]
+    assert rows[2]["status"] == "check"
+
+
+def test_so_thu_tu_quay_ve_dau_la_sang_trang_khong_bao_loi():
+    rows = validate_transactions([
+        _tx(bal=100_000, n=23),
+        _tx(inn=50_000, bal=150_000, n=24),
+        _tx(out=30_000, bal=120_000, n=1),   # sang trang mới, không phải nhảy cóc
+    ])
+    assert all("行番号" not in r["reason"] for r in rows)

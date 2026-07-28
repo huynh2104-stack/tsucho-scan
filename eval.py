@@ -58,8 +58,8 @@ def _find_columns(ws):
                 headers["desc"] = c
             elif "備考" in v:
                 headers["remark"] = c
-            elif v.startswith("お支払"):
-                headers["out"] = c
+            elif v.startswith("お支払") or v.startswith("お引き出し"):
+                headers["out"] = c   # 徳島大正 dùng「お引き出し金額」
             elif v.startswith("お預り"):
                 headers["in"] = c
             elif "残高" in v and "チェック" not in v:
@@ -145,6 +145,35 @@ def _amount_marks(gt, out, row_texts: list[str]) -> tuple[str, str | None]:
     return ("ĐÚNG" if gt_num == got_num else "SAI"), text_mark
 
 
+def _row_key(row):
+    """Khóa nhận dạng 1 dòng để căn chuỗi. 残高 gần như duy nhất nên ưu tiên."""
+    if isinstance(row["bal"], int):
+        return ("b", row["bal"])
+    return ("x", row["date"], str(row["out"]), str(row["in"]))
+
+
+def _align(gt_rows, out_rows) -> list[tuple[int, int | None]]:
+    """Ghép dòng chuẩn ↔ dòng máy bằng CĂN CHUỖI (difflib).
+
+    Ghép theo vị trí sẽ hỏng dây chuyền khi máy sót/thêm 1 dòng: mọi dòng sau đó
+    lệch đi một bậc và bị chấm sai hàng loạt (đo được: 百十四 báo 147/208 trong
+    khi thực tế 203/208 số dư trùng). Căn chuỗi chịu được thiếu/thừa dòng.
+    """
+    gk = [_row_key(r) for r in gt_rows]
+    ok = [_row_key(r) for r in out_rows]
+    pairs: list[tuple[int, int | None]] = []
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, gk, ok, autojunk=False).get_opcodes():
+        if tag in ("equal", "replace"):
+            # Trong đoạn khác nhau vẫn ghép theo thứ tự để còn chấm ngày/摘要
+            for d in range(i2 - i1):
+                j = j1 + d
+                pairs.append((i1 + d, j if j < j2 else None))
+        elif tag == "delete":       # chuẩn có, máy không có → mất dòng
+            pairs.extend((i, None) for i in range(i1, i2))
+        # tag == "insert": máy thừa dòng — không trừ điểm ở đây
+    return pairs
+
+
 def compare_sheet(gt_ws, out_ws) -> dict:
     gt_rows = _read_rows(gt_ws)
     out_rows = _read_rows(out_ws)
@@ -153,21 +182,12 @@ def compare_sheet(gt_ws, out_ws) -> dict:
 
     print(f"\n=== Sheet chuẩn「{gt_ws.title.strip()}」 ↔ kết quả「{out_ws.title.strip()}」"
           f" (chuẩn {len(gt_rows)} dòng / kết quả {len(out_rows)} dòng) ===")
-    used = set()
-    for i, g in enumerate(gt_rows):
-        # Tìm dòng kết quả có cùng 残高 (ưu tiên), không có thì theo vị trí
-        match = None
-        for j, o in enumerate(out_rows):
-            if j not in used and g["bal"] is not None and o["bal"] == g["bal"]:
-                match = j
-                break
-        if match is None and i < len(out_rows) and i not in used:
-            match = i
+    for i, match in _align(gt_rows, out_rows):
+        g = gt_rows[i]
         if match is None:
             stats["missing"] += 1
             print(f"  dòng {i + 2}: MẤT DÒNG ({g['date']} {g['desc'][:20]})")
             continue
-        used.add(match)
         o = out_rows[match]
 
         row_texts = [o["desc"]] + [x[1] for x in (o["out"], o["in"]) if isinstance(x, tuple)]
@@ -215,29 +235,66 @@ def main() -> int:
     out_wb = load_workbook(sys.argv[1])
     gt_wb = load_workbook(sys.argv[2])
 
-    def _match_sheet(gt_title: str, used: set):
-        """Ghép sheet theo tên (chuẩn có thể là file Cowork với tên 西銀/福銀...)."""
-        want = gt_title.strip()
+    def _match_sheet(gt_ws, used: set):
+        """Ghép sheet chuẩn với sheet kết quả — chấm theo NỘI DUNG là chính.
+
+        Tên không đáng tin: model đọc sai tên viết tay (貯銀/西銀), và khi 1 sổ bị
+        tách nhầm thành nhiều sheet thì sheet mang đúng tên có thể chỉ có 1 dòng
+        trong khi sheet「口座7」mới là phần chính. Số 残高 trùng nhau là bằng chứng
+        thật; tên chỉ dùng để phá hòa.
+        """
+        want = gt_ws.title.strip()
+        gt_bals = {r["bal"] for r in _read_rows(gt_ws) if isinstance(r["bal"], int)}
+
+        best, best_key = None, (0, 0)
         for ws in out_wb.worksheets:
-            if ws.title.strip() == want and ws.title not in used:
-                return ws
-        for ws in out_wb.worksheets:  # chứa nhau (西銀 ⊂ 西日本シティ銀行 thì không, nhưng ngược lại có)
+            if ws.title in used:
+                continue
             t = ws.title.strip()
-            if (want in t or t in want) and ws.title not in used:
+            bals = {r["bal"] for r in _read_rows(ws) if isinstance(r["bal"], int)}
+            overlap = len(gt_bals & bals)
+            name_bonus = 1 if (want == t or want in t or t in want) else 0
+            if (overlap, name_bonus) > best_key:
+                best, best_key = ws, (overlap, name_bonus)
+
+        if best is not None:
+            return best
+        # Không sổ nào trùng 残高 (vd chuẩn không có cột 残高) → đành ghép theo tên
+        for ws in out_wb.worksheets:
+            t = ws.title.strip()
+            if (want == t or want in t or t in want) and ws.title not in used:
                 return ws
         return None
 
     totals = []
     used: set = set()
     for idx, gt_ws in enumerate(gt_wb.worksheets):
-        out_ws = _match_sheet(gt_ws.title, used)
-        if out_ws is None and idx < len(out_wb.worksheets):
-            out_ws = out_wb.worksheets[idx]  # dự phòng: ghép theo thứ tự
+        out_ws = _match_sheet(gt_ws, used)
+        if out_ws is None:
+            # Dự phòng: ghép theo thứ tự, nhưng CHỈ với sheet chưa dùng — máy có thể
+            # đặt tên khác (口座1) khi không đọc được tên ngân hàng.
+            free = [ws for ws in out_wb.worksheets if ws.title not in used]
+            if idx < len(out_wb.worksheets) and free:
+                out_ws = free[0]
+                print(f"※ ghép theo thứ tự: chuẩn「{gt_ws.title}」↔ kết quả「{out_ws.title}」")
         if out_ws is None:
             print(f"THIẾU SHEET: chuẩn có「{gt_ws.title}」nhưng kết quả không có")
+            totals.append({"rows": len(_read_rows(gt_ws)), "missing": len(_read_rows(gt_ws)),
+                           "date": 0, "out": 0, "in": 0, "bal": 0,
+                           "desc_ok": 0, "desc_near": 0, "text_kept": 0, "text_total": 0})
             continue
         used.add(out_ws.title)
-        totals.append(compare_sheet(gt_ws, out_ws))
+        stats = compare_sheet(gt_ws, out_ws)
+        stats["name"] = gt_ws.title.strip()
+        totals.append(stats)
+
+    if len(totals) > 1:
+        print("\n===== THEO TỪNG SỔ =====")
+        for t in totals:
+            r = t["rows"] or 1
+            print(f"  {t.get('name', '?'):<16} {t['rows']:>4} dòng | mất {t['missing']:>3} | "
+                  f"ngày {t['date']:>3} | 出金 {t['out']:>3} | 入金 {t['in']:>3} | "
+                  f"残高 {t['bal']:>3} | 摘要 {t['desc_ok']:>3}(+{t['desc_near']})")
 
     n = sum(t["rows"] for t in totals) or 1
     print("\n===== TỔNG KẾT =====")

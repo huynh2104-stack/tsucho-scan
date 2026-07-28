@@ -6,7 +6,12 @@ from pathlib import Path
 
 from extract import ExtractError, extract_transactions
 from export import export_accounts
-from validate import merge_accounts, validate_transactions
+from validate import (
+    apply_cover_metadata,
+    merge_accounts,
+    split_mixed_accounts,
+    validate_transactions,
+)
 
 # Giá USD / 1 triệu token (input, output) để ước tính chi phí mỗi lần chạy
 # (sonnet-5: giá khuyến mãi đến 31/08/2026, sau đó 3/15)
@@ -52,8 +57,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--rotate", type=int, choices=[0, 90, 180, 270], default=0,
-        help="Xoay ảnh N độ theo chiều kim đồng hồ trước khi gửi "
-             "(dùng khi trang giao dịch bị nằm ngang trong bản scan)",
+        help="Xoay ảnh/trang PDF N độ theo chiều kim đồng hồ trước khi gửi "
+             "(dùng khi bản scan bị nằm ngang hoặc lộn ngược)",
     )
     parser.add_argument(
         "--no-cache", action="store_true",
@@ -74,8 +79,10 @@ def main() -> int:
             args.input, rotate=args.rotate, use_cache=not args.no_cache
         )
 
-        # Gộp các account thực chất là 1 sổ bị tách nhầm (chuỗi 残高 nối tiếp khớp)
-        merged = merge_accounts(result["accounts"])
+        # Tách account mà model trộn nhầm 2 sổ → bìa sổ điền thông tin cho sổ
+        # sau nó → gộp các khối thực chất là 1 sổ (chuỗi 残高 nối tiếp khớp)
+        accounts_raw = split_mixed_accounts(result["accounts"])
+        merged = merge_accounts(apply_cover_metadata(accounts_raw))
 
         # --banks ghi đè tên sổ theo thứ tự sheet (kể cả khi model tự đọc ra tên khác)
         bank_names = [b.strip() for b in args.banks.split(",")] if args.banks else []

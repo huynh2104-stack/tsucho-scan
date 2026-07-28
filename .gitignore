@@ -24,6 +24,9 @@ Claude Cowork Outputs/
 skills/
 thùng-rác/
 
+# Log chạy thật (chứa tên ngân hàng, tên file sổ của khách)
+data/
+
 # IDE / OS
 .vscode/
 .idea/

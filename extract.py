@@ -21,7 +21,7 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "extract_prompt.txt"
 # Cache kết quả theo nội dung file: chạy lại cùng ảnh = không gọi API = $0
 CACHE_DIR = Path(__file__).parent / ".cache"
 # Tăng số này mỗi khi đổi tham số gọi API (schema, độ phân giải...) để cache cũ hết hạn
-_CACHE_VERSION = "9"
+_CACHE_VERSION = "10"
 
 # Giới hạn dung lượng (API: ảnh ~5MB, PDF ~32MB)
 MAX_IMAGE_MB = 5
@@ -30,6 +30,14 @@ MAX_PDF_MB = 32
 
 class ExtractError(Exception):
     """Lỗi trích xuất — message đã thân thiện, in thẳng cho người dùng."""
+
+
+class PageSkipped(ExtractError):
+    """Riêng 1 trang không dùng được (bìa sổ, trang trắng, quá mờ).
+
+    Khi chạy nhiều trang thì bỏ qua trang đó và đi tiếp, không làm hỏng cả lần
+    chạy — PDF sổ ngân hàng gần như luôn có trang bìa và trang giải thích.
+    """
 
 
 def _load_system_prompt() -> str:
@@ -60,8 +68,41 @@ def _rotate_image(data: bytes, degrees_cw: int) -> bytes:
     return buf.getvalue()
 
 
-def _prepare_file(path: Path, rotate: int = 0) -> tuple[str, bytes]:
-    """Đọc file, nhận diện định dạng, xoay nếu cần → (media_type, bytes)."""
+def _split_pdf_pages(data: bytes, rotate: int = 0) -> list[bytes]:
+    """Tách PDF nhiều trang thành danh sách PDF 1 trang (xoay nếu cần).
+
+    Gửi cả tập nhiều trang trong 1 lần gọi làm model trả lời quá dài rồi bị cắt
+    giữa chừng (MAX_TOKENS). Tách trang còn cho phép cache theo từng trang.
+    PDF 1 trang không xoay thì giữ nguyên bytes gốc (cache cũ vẫn dùng được).
+    """
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError as e:
+        raise ExtractError(
+            "Chưa cài thư viện đọc PDF. Chạy: python -m pip install pypdf"
+        ) from e
+
+    reader = PdfReader(io.BytesIO(data))
+    if len(reader.pages) <= 1 and not rotate:
+        return [data]
+
+    pages = []
+    for page in reader.pages:
+        if rotate:
+            page.rotate(rotate)   # bản scan bị lật ngược/nằm ngang
+        writer = PdfWriter()
+        writer.add_page(page)
+        buf = io.BytesIO()
+        writer.write(buf)
+        pages.append(buf.getvalue())
+    return pages
+
+
+def _prepare_units(path: Path, rotate: int = 0) -> list[tuple[str, str, bytes]]:
+    """Đọc file → danh sách đơn vị gọi API: (nhãn, media_type, bytes).
+
+    Ảnh → 1 đơn vị. PDF nhiều trang → mỗi trang 1 đơn vị (xem _split_pdf_pages).
+    """
     data = path.read_bytes()
     media_type = _detect_media_type(data)
     if media_type is None:
@@ -71,23 +112,27 @@ def _prepare_file(path: Path, rotate: int = 0) -> tuple[str, bytes]:
         )
 
     if media_type == "application/pdf":
+        pages = _split_pdf_pages(data, rotate)
+        units = [
+            (path.name if len(pages) == 1 else f"{path.name} (trang {i + 1})",
+             media_type, page)
+            for i, page in enumerate(pages)
+        ]
+    else:
         if rotate:
-            raise ExtractError(
-                "Tùy chọn --rotate chỉ hỗ trợ ảnh. Với PDF hãy xuất từng trang "
-                "thành ảnh rồi xoay, hoặc scan lại cho thẳng."
-            )
-    elif rotate:
-        data = _rotate_image(data, rotate)
-        media_type = "image/jpeg"
+            data = _rotate_image(data, rotate)
+            media_type = "image/jpeg"
+        units = [(path.name, media_type, data)]
 
-    size_mb = len(data) / (1024 * 1024)
-    limit = MAX_PDF_MB if media_type == "application/pdf" else MAX_IMAGE_MB
-    if size_mb > limit:
-        raise ExtractError(
-            f"File quá lớn ({size_mb:.1f}MB, giới hạn {limit}MB). "
-            "Hãy giảm kích thước ảnh hoặc chia nhỏ PDF."
-        )
-    return media_type, data
+    for label, mtype, blob in units:
+        size_mb = len(blob) / (1024 * 1024)
+        limit = MAX_PDF_MB if mtype == "application/pdf" else MAX_IMAGE_MB
+        if size_mb > limit:
+            raise ExtractError(
+                f"'{label}' quá lớn ({size_mb:.1f}MB, giới hạn {limit}MB). "
+                "Hãy giảm kích thước ảnh hoặc chia nhỏ PDF."
+            )
+    return units
 
 
 def _parse_json(text: str) -> dict:
@@ -156,8 +201,9 @@ def parse_model_output(text: str) -> dict:
         transactions = []
         for row in acc.get("rows", []):
             # 2 định dạng: mảng theo vị trí (Claude) hoặc object có tên trường (Gemini)
-            extra = kind = store = note = None
+            extra = kind = store = note = row_no = None
             if isinstance(row, dict):
+                row_no = _to_int(row.get("n"))
                 date_raw = row.get("d") or row.get("date")
                 desc = row.get("m") or row.get("desc")
                 out = row.get("o", row.get("out"))
@@ -176,6 +222,7 @@ def parse_model_output(text: str) -> dict:
             is_note = bool(note)
             extra_clean, stray_store = _clean_extra(extra)
             transactions.append({
+                "row_no": row_no,                  # số thứ tự dòng in trên sổ (01..24)
                 "date_raw": str(date_raw or ""),
                 "kind": kind,                      # 区分: 200/100/振込/CDカード...
                 "description": note if is_note else str(desc or ""),
@@ -259,6 +306,7 @@ def _call_claude(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tup
 # Schema ép Gemini trả JSON đúng cấu trúc (constrained decoding):
 # không thể hỏng JSON, không thể lẫn ô giữa các trường.
 # Trường theo bố cục sổ (đã được user duyệt qua Claude Cowork):
+# n=số thứ tự dòng in ở lề trái (01..24) — dùng để phát hiện dòng bị bỏ sót,
 # d=日付, k=区分 (200/100/振込/CDカード...), m=摘要 (tên đối tác, KHÔNG chứa số),
 # x=備考 (テ055, (282)...), t=取扱店 (709/720...), o=出金, i=入金, b=残高,
 # L=số mờ, note=dòng ghi chú không phải giao dịch (繰越, 未記帳...)
@@ -282,6 +330,7 @@ _GEMINI_SCHEMA = {
                         "items": {
                             "type": "object",
                             "properties": {
+                                "n": {"type": "string", "nullable": True},
                                 "d": {"type": "string", "nullable": True},
                                 "k": {"type": "string", "nullable": True},
                                 "m": {"type": "string", "nullable": True},
@@ -331,7 +380,10 @@ def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tup
         pass  # SDK cũ không có tham số này → dùng mặc định
 
     response = None
-    for attempt in range(3):
+    # Bậc miễn phí giới hạn theo PHÚT (~10 req/phút) — PDF nhiều trang chắc chắn
+    # chạm ngưỡng, nên chờ lâu dần thay vì bỏ cuộc sau 3 lần.
+    backoff = [20, 30, 45, 60, 60]
+    for attempt in range(len(backoff) + 1):
         try:
             response = client.models.generate_content(
                 model=model,
@@ -357,14 +409,16 @@ def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tup
                     "https://aistudio.google.com/apikey rồi điền vào .env."
                 ) from e
             # Lỗi tạm thời (quá tải/giới hạn tốc độ) → chờ rồi tự thử lại
-            if code in (429, 500, 503) and attempt < 2:
-                print(f"  Gemini bận ({code}), chờ 20 giây thử lại...")
-                time.sleep(20)
+            if code in (429, 500, 503) and attempt < len(backoff):
+                wait = backoff[attempt]
+                print(f"      Gemini bận ({code}), chờ {wait} giây rồi thử lại...")
+                time.sleep(wait)
                 continue
             if code == 429:
                 raise ExtractError(
                     "Gemini đang giới hạn tốc độ (bậc miễn phí có hạn mức theo phút/ngày). "
-                    "Chờ 1 phút rồi thử lại."
+                    "Chờ vài phút rồi chạy lại — các trang đã xong đã lưu cache nên "
+                    "chạy lại không tốn thêm lượt gọi."
                 ) from e
             raise ExtractError(f"Lỗi Gemini API ({code}): {getattr(e, 'message', e)}") from e
 
@@ -425,15 +479,36 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True) ->
     # Mỗi trang gọi riêng (cache theo trang) rồi nối sổ bằng chuỗi 残高 ở bước sau
     prompt = _load_system_prompt()
     caller = _call_gemini if is_gemini else _call_claude
+    units = [unit for path in paths for unit in _prepare_units(path, rotate)]
+
     accounts: list = []
     usage_total = {"input_tokens": 0, "output_tokens": 0}
     all_cached = True
-    for path in paths:
-        single = _extract_single(path, rotate, use_cache, model, prompt, caller)
+    skipped = []
+    for i, unit in enumerate(units):
+        if len(units) > 1:
+            print(f"  [{i + 1}/{len(units)}] {unit[0]} ...")
+        try:
+            single = _extract_single(unit, rotate, use_cache, model, prompt, caller)
+        except PageSkipped as e:
+            if len(units) == 1:
+                raise
+            skipped.append(unit[0])   # bìa sổ / trang trắng: bỏ qua, chạy tiếp
+            print(f"      → bỏ qua: {e}")
+            continue
+        for acc in single["accounts"]:
+            # Nhớ trang nguồn: thông tin trang bìa chỉ được lan sang TRANG KHÁC,
+            # không lan giữa 2 sổ nằm chung một ảnh (xem apply_cover_metadata)
+            acc["source_unit"] = i
         accounts.extend(single["accounts"])
         usage_total["input_tokens"] += single["usage"]["input_tokens"]
         usage_total["output_tokens"] += single["usage"]["output_tokens"]
         all_cached = all_cached and single["cached"]
+
+    if not accounts:
+        raise ExtractError(
+            "Không đọc được giao dịch nào. Đã bỏ qua: " + ", ".join(skipped)
+        )
 
     return {
         "accounts": accounts,
@@ -443,10 +518,12 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True) ->
     }
 
 
-def _extract_single(path: Path, rotate: int, use_cache: bool, model: str, prompt: str, caller) -> dict:
-    """Trích xuất 1 file (có cache riêng theo file)."""
+def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
+                    model: str, prompt: str, caller) -> dict:
+    """Trích xuất 1 đơn vị = 1 ảnh hoặc 1 trang PDF (có cache riêng theo nội dung)."""
+    label, media_type, data = unit
     key = hashlib.sha256(
-        path.read_bytes()
+        data
         + f"|v{_CACHE_VERSION}|{rotate}|{model}|".encode()
         + prompt.encode()
     ).hexdigest()
@@ -456,7 +533,7 @@ def _extract_single(path: Path, rotate: int, use_cache: bool, model: str, prompt
         result["cached"] = True
         return result
 
-    files = [_prepare_file(path, rotate)]
+    files = [(media_type, data)]
 
     # Model thỉnh thoảng trả JSON hỏng giữa chừng → tự thử lại 1 lần
     last_error = None
@@ -474,13 +551,21 @@ def _extract_single(path: Path, rotate: int, use_cache: bool, model: str, prompt
     if "error" in result:
         reason = result.get("message", "")
         if result["error"] == "not_bankbook":
-            raise ExtractError(f"'{path.name}' không phải sổ ngân hàng (通帳). {reason}")
-        raise ExtractError(
-            f"'{path.name}' quá mờ hoặc không đọc được. Hãy chụp lại rõ nét hơn. {reason}"
+            raise PageSkipped(f"'{label}' không phải sổ ngân hàng (通帳). {reason}")
+        raise PageSkipped(
+            f"'{label}' quá mờ hoặc không đọc được. Hãy chụp lại rõ nét hơn. {reason}"
         )
 
-    if not any(acc["transactions"] for acc in result.get("accounts", [])):
-        raise ExtractError(f"Không tìm thấy giao dịch nào trong '{path.name}'.")
+    accounts = result.get("accounts", [])
+    if not any(acc["transactions"] for acc in accounts):
+        # Trang bìa: không có giao dịch nhưng có 銀行名/店番号/口座番号/名義 —
+        # giữ lại để điền vào phần đầu file Excel (xem apply_cover_metadata)
+        has_meta = any(
+            acc.get(k) for acc in accounts
+            for k in ("bank_name", "store_no", "account_no", "holder")
+        )
+        if not has_meta:
+            raise PageSkipped(f"Không tìm thấy giao dịch nào trong '{label}'.")
 
     result["usage"] = usage
     result["cached"] = False

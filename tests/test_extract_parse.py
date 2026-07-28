@@ -2,7 +2,13 @@
 
 import pytest
 
-from extract import ExtractError, _detect_media_type, parse_model_output
+from extract import (
+    ExtractError,
+    _detect_media_type,
+    _prepare_units,
+    _split_pdf_pages,
+    parse_model_output,
+)
 
 
 # ---------- parse_model_output ----------
@@ -123,6 +129,19 @@ def test_parse_khong_co_json_bao_loi_than_thien():
         parse_model_output("xin loi, toi khong doc duoc")
 
 
+def test_parse_so_thu_tu_dong_in_tren_so():
+    # n = số in sẵn ở lề trái (01..24); dùng để phát hiện dòng bị bỏ sót
+    text = '{"accounts":[{"rows":[{"n":"01","d":"07-03-19","m":"ATM","i":1000,"b":5000}]}]}'
+    tx = parse_model_output(text)["accounts"][0]["transactions"][0]
+    assert tx["row_no"] == 1
+
+
+def test_parse_khong_co_so_thu_tu_thi_none():
+    text = '{"accounts":[{"rows":[{"d":"07-03-19","m":"ATM","i":1000,"b":5000}]}]}'
+    tx = parse_model_output(text)["accounts"][0]["transactions"][0]
+    assert tx["row_no"] is None
+
+
 # ---------- _detect_media_type ----------
 
 def test_nhan_dien_jpeg():
@@ -145,3 +164,52 @@ def test_nhan_dien_pdf():
 
 def test_dinh_dang_la_khong_biet_tra_none():
     assert _detect_media_type(b"hello world!") is None
+
+
+# ---------- tách trang PDF ----------
+
+def _pdf_bytes(n_pages: int) -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(n_pages):
+        writer.add_blank_page(width=200, height=300)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def test_pdf_nhieu_trang_duoc_tach_tung_trang():
+    # Gửi gộp nhiều trang làm model trả lời quá dài rồi bị cắt (MAX_TOKENS)
+    pages = _split_pdf_pages(_pdf_bytes(3))
+    assert len(pages) == 3
+    assert all(p.startswith(b"%PDF-") for p in pages)
+
+
+def test_pdf_mot_trang_giu_nguyen_bytes():
+    # Giữ nguyên bytes gốc để cache của file 1 trang không bị mất hiệu lực
+    data = _pdf_bytes(1)
+    assert _split_pdf_pages(data) == [data]
+
+
+def test_pdf_xoay_180_cho_ban_scan_lon_nguoc(tmp_path):
+    # Bản scan PDF lộn ngược (通帳：見本) — trước đây --rotate bị cấm với PDF
+    from pypdf import PdfReader
+
+    path = tmp_path / "so.pdf"
+    path.write_bytes(_pdf_bytes(2))
+    units = _prepare_units(path, rotate=180)
+    for _label, _mtype, blob in units:
+        import io
+
+        assert PdfReader(io.BytesIO(blob)).pages[0].get("/Rotate") == 180
+
+
+def test_prepare_units_tach_pdf_va_dat_nhan_theo_trang(tmp_path):
+    path = tmp_path / "so.pdf"
+    path.write_bytes(_pdf_bytes(2))
+    units = _prepare_units(path)
+    assert [u[0] for u in units] == ["so.pdf (trang 1)", "so.pdf (trang 2)"]
+    assert all(u[1] == "application/pdf" for u in units)
