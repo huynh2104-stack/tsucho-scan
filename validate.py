@@ -401,6 +401,13 @@ def _fill_partial_dates(rows: list[dict]) -> None:
             last = date.fromisoformat(row["date"])
             continue
         md = _month_day(row)
+        if md is None and last is not None and not row.get("is_note"):
+            # Dòng KHÔNG in ngày (sổ ゆうちょ: dòng 料金 đi kèm giao dịch ngay trên
+            # thì bỏ trống cả 年月日 lẫn 取扱店). Không phải lỗi đọc — thừa kế
+            # ngày của dòng trên, nếu không sẽ báo động giả 日付不明 hàng loạt.
+            if not str(row.get("date_raw") or "").strip():
+                _apply(row, last, "日付は前行と同じ(印字なし)")
+            continue
         if last is None or md is None:
             continue
         for year in (last.year, last.year + 1):   # tháng lùi lại = đã sang năm mới

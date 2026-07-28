@@ -529,6 +529,25 @@ def test_dien_nam_nguoc_tu_dong_sau_cho_dau_so():
     assert "年を後行から補完" in rows[0]["reason"]
 
 
+def test_dong_khong_in_ngay_thua_ke_ngay_dong_tren():
+    # Sổ ゆうちょ: dòng 料金 (phí) đi kèm giao dịch ngay trên nên KHÔNG in lại
+    # 年月日 và 取扱店. Model trả null là đúng — không được báo 日付不明.
+    rows = validate_transactions([
+        _tx(date_raw="7-04-25", out=50_000, bal=100_000, desc="ウツカ ノボル"),
+        _tx(date_raw="", out=440, bal=99_560, desc="料金"),
+    ])
+    assert rows[1]["date"] == "2025-04-25"
+    assert "日付不明" not in rows[1]["reason"]
+    assert "日付は前行と同じ(印字なし)" in rows[1]["reason"]
+
+
+def test_dong_dau_so_khong_in_ngay_van_bao_khong_ro():
+    # Không có dòng nào phía trước để thừa kế → phải báo, không được bịa
+    rows = validate_transactions([_tx(date_raw="", bal=100_000, desc="料金")])
+    assert rows[0]["date"] is None
+    assert "日付不明" in rows[0]["reason"]
+
+
 def test_khong_doan_nam_khi_ca_so_khong_co_ngay_nao_day_du():
     rows = validate_transactions([_tx(date_raw="11.14", bal=100_000)])
     assert rows[0]["date"] is None
