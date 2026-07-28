@@ -62,11 +62,20 @@ def _find_columns(ws):
                 headers["out"] = c   # 徳島大正 dùng「お引き出し金額」
             elif v.startswith("お預り"):
                 headers["in"] = c
-            elif "残高" in v and "チェック" not in v:
-                headers["bal"] = c
+            elif ("残高" in v or "現在高" in v) and "チェック" not in v:
+                headers["bal"] = c   # ゆうちょ dùng「現在高（貸付高）」
         if {"date", "desc", "out", "in", "bal"} <= set(headers):
             return r, headers
     return 1, {"date": 1, "desc": 2, "out": 3, "in": 4, "bal": 5}  # form cũ
+
+
+def _has_header(ws) -> bool:
+    """Sheet này có phải bảng giao dịch không (file chuẩn có thể kèm sheet phụ)."""
+    header_row, _ = _find_columns(ws)
+    return header_row != 1 or any(
+        "年月日" in str(ws.cell(row=1, column=c).value or "")
+        for c in range(1, min(ws.max_column, 12) + 1)
+    )
 
 
 def _read_rows(ws):
@@ -177,8 +186,9 @@ def _align(gt_rows, out_rows) -> list[tuple[int, int | None]]:
 def compare_sheet(gt_ws, out_ws) -> dict:
     gt_rows = _read_rows(gt_ws)
     out_rows = _read_rows(out_ws)
-    stats = {"rows": len(gt_rows), "missing": 0, "date": 0, "out": 0, "in": 0,
-             "bal": 0, "desc_ok": 0, "desc_near": 0, "text_kept": 0, "text_total": 0}
+    stats = {"rows": len(gt_rows), "missing": 0, "date": 0, "date_n": 0, "out": 0,
+             "in": 0, "bal": 0, "desc_ok": 0, "desc_near": 0,
+             "text_kept": 0, "text_total": 0}
 
     print(f"\n=== Sheet chuẩn「{gt_ws.title.strip()}」 ↔ kết quả「{out_ws.title.strip()}」"
           f" (chuẩn {len(gt_rows)} dòng / kết quả {len(out_rows)} dòng) ===")
@@ -193,13 +203,18 @@ def compare_sheet(gt_ws, out_ws) -> dict:
         row_texts = [o["desc"]] + [x[1] for x in (o["out"], o["in"]) if isinstance(x, tuple)]
         out_mark, out_text = _amount_marks(g["out"], o["out"], row_texts)
         in_mark, in_text = _amount_marks(g["in"], o["in"], row_texts)
+        # Dòng chuẩn để TRỐNG ngày (dòng 料金 nối tiếp dòng trên, sổ ゆうちょ) thì
+        # chuẩn không khẳng định gì về ngày → không chấm, thay vì bắt phải trống.
         marks = {
-            "date": "ĐÚNG" if g["date"] == o["date"] else "SAI",
+            "date": "－" if not g["date"]
+                    else ("ĐÚNG" if g["date"] == o["date"] else "SAI"),
             "out": out_mark,
             "in": in_mark,
             "bal": "ĐÚNG" if g["bal"] == o["bal"] else "SAI",
             "desc": _desc_score(g["desc"], o["desc"]),
         }
+        if marks["date"] != "－":
+            stats["date_n"] += 1
         for k in ("date", "out", "in", "bal"):
             if marks[k] == "ĐÚNG":
                 stats[k] += 1
@@ -269,6 +284,10 @@ def main() -> int:
     totals = []
     used: set = set()
     for idx, gt_ws in enumerate(gt_wb.worksheets):
+        if not _has_header(gt_ws):
+            # File chuẩn có thể kèm sheet phụ (GROUND_TRUTH thô, BENCHMARK...)
+            print(f"(bỏ qua sheet「{gt_ws.title}」— không phải bảng giao dịch)")
+            continue
         out_ws = _match_sheet(gt_ws, used)
         if out_ws is None:
             # Dự phòng: ghép theo thứ tự, nhưng CHỈ với sheet chưa dùng — máy có thể
@@ -279,9 +298,10 @@ def main() -> int:
                 print(f"※ ghép theo thứ tự: chuẩn「{gt_ws.title}」↔ kết quả「{out_ws.title}」")
         if out_ws is None:
             print(f"THIẾU SHEET: chuẩn có「{gt_ws.title}」nhưng kết quả không có")
-            totals.append({"rows": len(_read_rows(gt_ws)), "missing": len(_read_rows(gt_ws)),
-                           "date": 0, "out": 0, "in": 0, "bal": 0,
-                           "desc_ok": 0, "desc_near": 0, "text_kept": 0, "text_total": 0})
+            n_gt = len(_read_rows(gt_ws))
+            totals.append({"rows": n_gt, "missing": n_gt, "date": 0, "date_n": n_gt,
+                           "out": 0, "in": 0, "bal": 0, "desc_ok": 0, "desc_near": 0,
+                           "text_kept": 0, "text_total": 0})
             continue
         used.add(out_ws.title)
         stats = compare_sheet(gt_ws, out_ws)
@@ -300,7 +320,10 @@ def main() -> int:
     print("\n===== TỔNG KẾT =====")
     print(f"  Số dòng chuẩn      : {n}")
     print(f"  Mất dòng           : {sum(t['missing'] for t in totals)}")
-    for label, key in (("Ngày", "date"), ("出金", "out"), ("入金", "in"), ("残高", "bal")):
+    dn = sum(t["date_n"] for t in totals) or n
+    print(f"  {'Ngày':<19}: {sum(t['date'] for t in totals)}/{dn} đúng"
+          + (f"   (chuẩn bỏ trống {n - dn} dòng — không chấm)" if dn != n else ""))
+    for label, key in (("出金", "out"), ("入金", "in"), ("残高", "bal")):
         print(f"  {label:<19}: {sum(t[key] for t in totals)}/{n} đúng")
     ok = sum(t["desc_ok"] for t in totals)
     near = sum(t["desc_near"] for t in totals)

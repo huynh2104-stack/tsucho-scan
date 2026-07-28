@@ -2,6 +2,7 @@
 
 from validate import (
     apply_cover_metadata,
+    compose_dakuten,
     convert_wareki,
     merge_accounts,
     split_mixed_accounts,
@@ -494,6 +495,34 @@ def test_khong_dich_doan_khi_chuoi_von_da_dung():
     ])
     assert all(r["status"] == "ok" for r in rows)
     assert [r["balance"] for r in rows] == [100_000, 150_000, 120_000, 100_000, 105_000]
+
+
+# ---------- dấu đục katakana ----------
+
+def test_ghep_dau_duc_roi_vao_chu_truoc():
+    # Sổ in kana nửa chiều rộng, model hay chép dấu đục thành ký tự riêng
+    assert compose_dakuten("ニシタ゛ チ゛コ") == "ニシダ ヂコ"
+    assert compose_dakuten("CDカート゛") == "CDカード"
+    assert compose_dakuten("ハ゜") == "パ"
+    # Kana nửa chiều rộng không có dạng ghép → mở sang đầy đủ
+    assert compose_dakuten("ﾆｼﾀﾞ ﾊﾙｶ") == "ニシダ ハルカ"
+
+
+def test_khong_doi_ky_hieu_ngoai_kana():
+    # Chỉ đụng tới kana; dấu ngoặc pháp nhân giữ nguyên dạng in trên sổ
+    assert compose_dakuten("カ）タカマツデンコウ") == "カ）タカマツデンコウ"
+    assert compose_dakuten("RKS（カイホ゜ケBIZ") == "RKS（カイポケBIZ"
+
+
+def test_khong_doi_chu_to_thanh_chu_nho():
+    # Sổ in CHỮ TO (フイ/シヤ) — không được hiện đại hóa thành ファ/シャ
+    assert compose_dakuten("シンセイフイナンシヤル") == "シンセイフイナンシヤル"
+    assert compose_dakuten("センコーシヨウジ（カ") == "センコーシヨウジ（カ"
+
+
+def test_ghep_dau_duc_trong_pipeline():
+    rows = validate_transactions([_tx(bal=100_000, desc="ニシタ゛ チヅコ")])
+    assert rows[0]["description"] == "ニシダ チヅコ"
 
 
 # ---------- ngày chỉ in tháng.ngày ----------

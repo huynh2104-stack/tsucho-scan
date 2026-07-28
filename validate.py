@@ -1,6 +1,7 @@
 """Kiểm tra checksum số dư và chuyển ngày 和暦 → YYYY-MM-DD."""
 
 import re
+import unicodedata
 from datetime import date
 
 # Năm gốc của các niên hiệu: năm thực = gốc + năm niên hiệu
@@ -468,6 +469,27 @@ def _split_fused(balance: int | None) -> tuple[int | None, str | None]:
     return None, None
 
 
+# Dấu đục đứng rời sau kana đầy đủ → ký tự tổ hợp, để NFC ghép vào chữ trước
+_SPACING_DAKUTEN = str.maketrans({"゛": "゙", "゜": "゚"})
+# Kana nửa chiều rộng: không có dạng ghép nửa rộng nên phải đổi cả cụm sang đầy đủ
+_HALFWIDTH_KANA = re.compile(r"[｡-ﾟ]+")
+
+
+def compose_dakuten(text: str | None) -> str | None:
+    """Ghép dấu đục rời vào chữ trước: "ニシタ゛" → "ニシダ", "ﾆｼﾀﾞ" → "ニシダ".
+
+    Sổ in katakana nửa chiều rộng, dấu đục là glyph riêng nên model hay chép
+    thành 2 ký tự. Chỉ ghép dấu và mở rộng kana nửa rộng — GIỮ NGUYÊN cách viết
+    CHỮ TO của sổ (フイ/シヤ không đổi thành ファ/シャ) và các ký hiệu khác
+    (「（」 không đổi thành「(」).
+    """
+    if not text:
+        return text
+    text = _HALFWIDTH_KANA.sub(
+        lambda m: unicodedata.normalize("NFKC", m.group()), text)
+    return unicodedata.normalize("NFC", text.translate(_SPACING_DAKUTEN))
+
+
 def _normalize_te_codes(transactions: list[dict]) -> None:
     """Sổ kiểu Fukuoka: mã 備考 dạng「ﾃ055」hay bị model nhét nhầm sang 取扱店
     (mất chữ ﾃ). Nếu tài khoản có dùng 備考 kiểu ﾃ thì trả mã lạc về đúng chỗ."""
@@ -513,6 +535,9 @@ def _clear_mismatch(row: dict, note: str) -> None:
 
 
 def _validate_pass(transactions: list[dict]) -> list[dict]:
+    for tx in transactions:
+        for key in ("description", "kind", "extra_text"):
+            tx[key] = compose_dakuten(tx.get(key))
     _normalize_te_codes(transactions)
     # Sổ không in cột 取扱店 thì 残高 không thể dính mã → tắt các nhánh tách,
     # nếu không 387,089 bị xé thành 387 + "089" (đã đo được ở sổ 福岡 trang 5-6)
