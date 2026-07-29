@@ -4,9 +4,7 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from export import export_accounts
-
-HEADER_ROW = 7
+from export import HEADER_ROW, export_accounts, verification_summary
 
 
 def _tx(out=None, inn=None, bal=None, status="ok", reason="", **kw):
@@ -139,3 +137,39 @@ def test_o_khong_chac_chan_to_vang(tmp_path):
     bal_col = hs.index("差引残高 (円)") + 1
     assert str(ws.cell(row=HEADER_ROW + 1, column=desc_col).fill.start_color.rgb).endswith("FFF2CC")
     assert str(ws.cell(row=HEADER_ROW + 2, column=bal_col).fill.start_color.rgb).endswith("FFF2CC")
+
+
+# ---------- mức độ bảo đảm ----------
+
+def test_muc_do_bao_dam_toan_bo_khop():
+    v = verification_summary([_tx(out=100, bal=900), _tx(inn=50, bal=950)])
+    assert v["chain_ok"] is True
+    assert v["need_check"] == 0
+    assert "残高チェーン検証済" in v["level"]
+
+
+def test_muc_do_bao_dam_con_dong_can_soat():
+    v = verification_summary([
+        _tx(out=100, bal=900),
+        _tx(inn=50, bal=999, status="check", reason="残高不一致"),
+    ])
+    assert v["chain_ok"] is False
+    assert v["need_check"] == 1
+    assert "1行が要確認" in v["level"]
+
+
+def test_muc_do_bao_dam_khong_doc_duoc_so_du():
+    # Không có 残高 nào → "sạch" là ảo, phải nói rõ chưa kiểm chứng được
+    v = verification_summary([_tx(out=100), _tx(inn=50)])
+    assert v["chain_ok"] is False
+    assert "未検証" in v["level"]
+
+
+def test_ghi_muc_do_bao_dam_bang_GIA_TRI_khong_phai_cong_thuc(tmp_path):
+    # Phải là giá trị tính sẵn: công thức chưa tính thì chương trình khác đọc ra rỗng
+    out = tmp_path / "v.xlsx"
+    export_accounts([_acc([_tx(out=100, bal=900), _tx(inn=50, bal=950)])], str(out))
+    ws = load_workbook(out, data_only=True).active
+    assert ws["A6"].value == "検証レベル"
+    assert "残高チェーン検証済" in str(ws["B6"].value)
+    assert "取引 2行" in str(ws["F6"].value)

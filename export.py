@@ -39,7 +39,37 @@ DATE_FMT = "yyyy-mm-dd"
 THIN = Side(style="thin", color="B0B0B0")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
-HEADER_ROW = 7  # bảng bắt đầu dưới khối thông tin
+HEADER_ROW = 8  # bảng bắt đầu dưới khối thông tin (5 dòng info + 1 dòng bảo đảm)
+VERIFY_ROW = 6  # dòng "mức độ bảo đảm"
+
+OK_FILL = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+WARN_FILL = PatternFill(start_color="FCE5CD", end_color="FCE5CD", fill_type="solid")
+
+
+def verification_summary(txs: list[dict]) -> dict:
+    """Mức độ bảo đảm của sheet — nói rõ dữ liệu này được kiểm chứng tới đâu.
+
+    Chuỗi 残高 chỉ chứng minh tính NHẤT QUÁN NỘI BỘ: nó không phát hiện được
+    dòng bị bỏ sót hay tên đối tác đọc sai. Vì vậy phải ghi thẳng ra file, để
+    người xem biết còn phải soát gì chứ không tưởng "không có ô vàng là xong".
+    """
+    real = [t for t in txs if not t.get("is_note")]
+    n = len(real)
+    verified = sum(1 for t in real if t.get("status") in ("ok", "fixed"))
+    fixed = sum(1 for t in real if t.get("status") == "fixed")
+    need = sum(1 for t in real if t.get("status") == "check")
+    has_bal = any(t.get("balance") is not None for t in real)
+
+    if not has_bal:
+        level = "未検証（残高が読取れず検算不可）"
+    elif need == 0:
+        level = "残高チェーン検証済（全行一致）"
+    else:
+        level = f"一部未検証（{need}行が要確認）"
+    return {
+        "rows": n, "verified": verified, "fixed": fixed,
+        "need_check": need, "level": level, "chain_ok": has_bal and need == 0,
+    }
 
 
 def _sheet_title(bank_name: str | None, index: int) -> str:
@@ -87,6 +117,23 @@ def _write_sheet(ws, acc: dict, source_name: str) -> None:
          fill=UNCERTAIN)
     _set(ws, 2, 6, "Ô xanh lá = đã tự sửa bằng kiểm tra số dư（緑＝残高検算で自動修正）",
          fill=FIXED_FILL)
+
+    # ---- Mức độ bảo đảm: giá trị tính sẵn (KHÔNG dùng công thức) để cả người
+    # đọc lẫn chương trình khác đều lấy được — công thức Excel chưa tính thì
+    # đọc bằng thư viện sẽ ra rỗng.
+    v = verification_summary(txs)
+    _set(ws, VERIFY_ROW, 1, "検証レベル", font=ARIAL_BOLD)
+    _set(ws, VERIFY_ROW, 2, v["level"], font=ARIAL_BOLD,
+         fill=OK_FILL if v["chain_ok"] else WARN_FILL)
+    _set(ws, VERIFY_ROW, 6,
+         f"取引 {v['rows']}行 / 残高検算OK {v['verified']}行 / 自動修正 {v['fixed']}行 "
+         f"/ 要確認 {v['need_check']}行",
+         fill=OK_FILL if v["chain_ok"] else WARN_FILL)
+    _set(ws, VERIFY_ROW, 7, None)
+    # Cảnh báo giới hạn của phép kiểm: người dùng phải tự soát số DÒNG và tên
+    _set(ws, VERIFY_ROW + 0, 8,
+         "※ 残高チェーンは行の抜け・摘要の誤読を検出できません。行数と名前は原本と照合してください。",
+         font=NOTE_FONT)
 
     # ---- Cột động theo bố cục sổ
     headers = ["年月日(西暦)", "区分", "摘要"]
