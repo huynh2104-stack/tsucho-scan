@@ -3,18 +3,21 @@
 /**
  * Khung phải: kết quả trình bày GIỐNG MẶT SỔ THẬT, sửa được trực tiếp.
  *
- * Hai chế độ khác nhau rõ rệt:
- *   • Trang hiện tại — CHỈ mặt sổ đang xem, như cầm đúng một trang sổ trên tay.
- *   • Dạng danh sách — nối tất cả; đây là chế độ duy nhất mà click mặt sổ bên
- *     trái làm bảng cuộn tới đúng phần. Cuộn bằng `scrollTop` của CHÍNH cột này,
- *     không dùng scrollIntoView (nó kéo cả trang trôi theo).
+ * Nguồn dữ liệu là KHO TÍCH LUỸ theo từng mặt sổ (`ResultStore`), không phải
+ * kết quả của một lần quét. Nhờ vậy quét thêm mặt mới không xoá kết quả các mặt
+ * đã quét trước — đó từng là bug làm người dùng tưởng mất dữ liệu.
  *
- * Tên cột giữ tiếng Nhật + chú thích tiếng Việt/Anh NGAY CẠNH (WEB_PLAN §8).
+ * Hai chế độ:
+ *   • Trang hiện tại — CHỈ mặt sổ đang xem.
+ *   • Dạng danh sách — nối tất cả; chỉ chế độ này mới cuộn tới mặt được chọn,
+ *     và cuộn bằng scrollTop của CHÍNH khung này (không kéo cả trang).
+ *
+ * Tên cột giữ tiếng Nhật + chú thích bản địa ngay cạnh (WEB_PLAN §8).
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
-import type { Account, ScanPayload, Sheet, Tx } from "@/lib/api";
+import type { AccountMeta, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
 const parseYen = (s: string) => {
@@ -24,8 +27,11 @@ const parseYen = (s: string) => {
 
 export type OptCols = { store: boolean; extra: boolean; kind: boolean };
 export type ViewMode = "page" | "list";
-export type TxRef = { acc: number; row: number };
+
+/** Địa chỉ một dòng trong kho: mặt sổ nào, khối nào, dòng thứ mấy. */
+export type TxRef = { sheet: string; block: number; row: number };
 export type EditFn = (ref: TxRef, field: keyof Tx, value: string | number | null) => void;
+export type RowActionFn = (ref: TxRef) => void;
 
 /** Cột 検算 tính LẠI từ dữ liệu đang hiển thị — sửa ô là đổi ngay. */
 function checkColumn(rows: Tx[]): ("OK" | "NG" | "―")[] {
@@ -110,14 +116,21 @@ function Row({
   cols,
   chk,
   ref_,
+  dim,
+  t,
   onEdit,
+  onDelete,
 }: {
   tx: Tx;
   n: number;
   cols: OptCols;
   chk: "OK" | "NG" | "―";
   ref_: TxRef;
+  /** Đang lọc và dòng này không khớp → làm mờ thay vì ẩn, để không mất mạch sổ. */
+  dim: boolean;
+  t: Dict;
   onEdit: EditFn;
+  onDelete: RowActionFn;
 }) {
   const flag = tx.status === "check" || chk === "NG";
   const fixed = tx.status === "fixed";
@@ -125,9 +138,9 @@ function Row({
 
   return (
     <tr
-      className={`border-b border-rule2 ${note ? "italic text-ink3" : ""} ${
+      className={`group border-b border-rule2 ${note ? "italic text-ink3" : ""} ${
         n % 2 === 0 ? "bg-band" : ""
-      } hover:bg-accentpale/30`}
+      } ${dim ? "opacity-25" : ""} hover:bg-accentpale/30`}
     >
       <td className="tnum w-8 border-r border-rule2 bg-card2 px-1 text-center text-[10.5px] text-ink3">
         {tx.row_no || String(n).padStart(2, "0")}
@@ -205,53 +218,72 @@ function Row({
       >
         {chk}
       </td>
-      <td className="max-w-[150px] truncate px-2 py-0.5 text-[11px]" title={tx.reason}>
+      <td className="max-w-[140px] truncate px-2 py-0.5 text-[11px]" title={tx.reason}>
         {tx.status === "check" && <span className="text-warnink">⚠ {tx.reason}</span>}
         {fixed && <span className="text-inink">✓ {tx.reason}</span>}
+      </td>
+      <td className="w-7 px-0.5">
+        <button
+          onClick={() => onDelete(ref_)}
+          title={t.deleteRow}
+          className="flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+        >
+          ×
+        </button>
       </td>
     </tr>
   );
 }
 
-/** Một thẻ sổ: đầu thẻ có badge + nút, thân là bảng, chân là dòng tổng.
+/** Một thẻ sổ: đầu thẻ, bảng, chân thẻ có tổng.
  *
  * ĐỊNH NGHĨA Ở MỨC MODULE, không lồng trong ReviewPane: component khai báo bên
  * trong một component khác là kiểu MỚI sau mỗi lần render, khiến React tháo và
  * dựng lại toàn bộ cây con — mất vị trí cuộn và mất focus khi đang gõ.
  */
 function AccountCard({
-  acc,
-  accIndex,
+  meta,
   rows,
+  refs,
   index,
   fallbackTitle,
   cols,
   head,
   t,
+  filter,
   onEdit,
-  onToggleCol,
+  onDeleteRow,
   onAddRow,
   onAutoBalance,
 }: {
-  acc: Account;
-  accIndex: number;
-  rows: { tx: Tx; ref: TxRef }[];
+  meta: AccountMeta;
+  rows: Tx[];
+  refs: TxRef[];
   index: number;
   fallbackTitle: string;
   cols: OptCols;
   head: React.ReactNode;
   t: Dict;
+  filter: string;
   onEdit: EditFn;
-  onToggleCol: (k: keyof OptCols) => void;
-  onAddRow: (accIndex: number, sheetId: string | null) => void;
-  onAutoBalance: (accIndex: number) => void;
+  onDeleteRow: RowActionFn;
+  onAddRow: (ref: TxRef) => void;
+  onAutoBalance: (sheet: string, block: number) => void;
 }) {
-  const chk = checkColumn(rows.map((r) => r.tx));
-  const real = rows.filter((r) => !r.tx.is_note);
-  const totalOut = real.reduce((s, r) => s + (r.tx.amount_out ?? 0), 0);
-  const totalIn = real.reduce((s, r) => s + (r.tx.amount_in ?? 0), 0);
-  const lastBal = [...rows].reverse().find((r) => r.tx.balance != null)?.tx.balance;
+  const chk = checkColumn(rows);
+  const real = rows.filter((r) => !r.is_note);
   const needCheck = chk.filter((c) => c === "NG").length;
+
+  const q = filter.trim().toLowerCase();
+  const matches = (tx: Tx) =>
+    !q ||
+    `${tx.description ?? ""} ${tx.kind ?? ""}`.toLowerCase().includes(q);
+
+  // Đang lọc thì tổng tính theo CÁC DÒNG KHỚP — đó là điều người dùng muốn biết
+  const counted = q ? real.filter(matches) : real;
+  const totalOut = counted.reduce((s, r) => s + (r.amount_out ?? 0), 0);
+  const totalIn = counted.reduce((s, r) => s + (r.amount_in ?? 0), 0);
+  const lastBal = [...rows].reverse().find((r) => r.balance != null)?.balance;
 
   return (
     <section className="m-2.5 overflow-hidden rounded-xl border border-rule bg-card shadow-[var(--shadow)]">
@@ -259,20 +291,20 @@ function AccountCard({
         <span className="tnum flex h-6 w-6 flex-none items-center justify-center rounded-md bg-accent text-[11.5px] font-bold text-accentink">
           {index + 1}
         </span>
-        <div className="min-w-0">
-          <p className="truncate text-[13.5px] font-bold">
-            {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt
-                sổ thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang
-                xem trang nào. */}
-            {acc.bank_name || fallbackTitle}
-            {acc.account_no && (
-              <span className="ml-1.5 font-normal text-ink3">· {acc.account_no}</span>
-            )}
-          </p>
-        </div>
-
+        <p className="min-w-0 truncate text-[13.5px] font-bold">
+          {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt sổ
+              thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang xem gì. */}
+          {meta.bank_name || fallbackTitle}
+          {meta.account_no && (
+            <span className="ml-1.5 font-normal text-ink3">· {meta.account_no}</span>
+          )}
+        </p>
         <span className="flex-1" />
-
+        {q && (
+          <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[11px] font-semibold text-accent">
+            {t.matched(counted.length)}
+          </span>
+        )}
         {needCheck > 0 && (
           <span className="tnum rounded-md bg-warnbg px-2 py-0.5 text-[11px] font-semibold text-warnink">
             {needCheck} NG
@@ -284,15 +316,18 @@ function AccountCard({
         <table className="w-full border-collapse text-[13.5px]">
           {head}
           <tbody>
-            {rows.map((r, i) => (
+            {rows.map((tx, i) => (
               <Row
-                key={`${r.ref.acc}-${r.ref.row}`}
-                tx={r.tx}
+                key={`${refs[i].sheet}-${refs[i].block}-${refs[i].row}`}
+                tx={tx}
                 n={i + 1}
                 cols={cols}
                 chk={chk[i]}
-                ref_={r.ref}
+                ref_={refs[i]}
+                dim={!!q && !matches(tx)}
+                t={t}
                 onEdit={onEdit}
+                onDelete={onDeleteRow}
               />
             ))}
           </tbody>
@@ -301,14 +336,14 @@ function AccountCard({
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-card2 px-3 py-2">
         <button
-          onClick={() => onAddRow(accIndex, rows.at(-1)?.tx.sheet_id ?? null)}
+          onClick={() => onAddRow(refs[refs.length - 1])}
           className="rounded-lg border border-dashed border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accent hover:text-accent"
           title={t.addRowHint}
         >
           + {t.addRow}
         </button>
         <button
-          onClick={() => onAutoBalance(accIndex)}
+          onClick={() => onAutoBalance(refs[0].sheet, refs[0].block)}
           title={t.autoBalanceHint}
           className="rounded-lg border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink"
         >
@@ -321,16 +356,18 @@ function AccountCard({
         <span className="tnum text-[11.5px] text-ink3">
           {t.totalIn} <b className="text-inink">¥{yen(totalIn)}</b>
         </span>
-        <span className="tnum rounded-md bg-card3 px-2 py-0.5 text-[11.5px] text-ink2">
-          {t.lastBalance} <b className="text-ink">¥{yen(lastBal ?? null)}</b>
-        </span>
+        {!q && (
+          <span className="tnum rounded-md bg-card3 px-2 py-0.5 text-[11.5px] text-ink2">
+            {t.lastBalance} <b className="text-ink">¥{yen(lastBal ?? null)}</b>
+          </span>
+        )}
       </footer>
     </section>
   );
 }
 
 export default function ReviewPane({
-  result,
+  store,
   sheets,
   activeSheet,
   mode,
@@ -338,10 +375,11 @@ export default function ReviewPane({
   onToggleCol,
   onModeChange,
   onEdit,
+  onDeleteRow,
   onAddRow,
   onAutoBalance,
 }: {
-  result: ScanPayload | null;
+  store: ResultStore;
   sheets: Sheet[];
   activeSheet: string | null;
   mode: ViewMode;
@@ -349,38 +387,39 @@ export default function ReviewPane({
   onToggleCol: (k: keyof OptCols) => void;
   onModeChange: (m: ViewMode) => void;
   onEdit: EditFn;
-  onAddRow: (accIndex: number, sheetId: string | null) => void;
-  onAutoBalance: (accIndex: number) => void;
+  onDeleteRow: RowActionFn;
+  onAddRow: (ref: TxRef) => void;
+  onAutoBalance: (sheet: string, block: number) => void;
 }) {
   const { t } = useT();
   const g = t.colGloss;
   const scroller = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState("");
 
   const sheetName = useMemo(
     () => Object.fromEntries(sheets.map((s) => [s.id, s.name])),
     [sheets],
   );
 
-  /** Các khối dòng của MỘT mặt sổ, kèm vị trí gốc để sửa đúng ô. */
-  const blocksOf = (sid: string) => {
-    if (!result) return [];
-    const out: { acc: Account; accIndex: number; rows: { tx: Tx; ref: TxRef }[] }[] = [];
-    result.accounts.forEach((acc, ai) => {
-      acc.transactions.forEach((tx, ri) => {
-        if (tx.sheet_id !== sid) return;
-        const last = out.at(-1);
-        if (last && last.acc === acc) last.rows.push({ tx, ref: { acc: ai, row: ri } });
-        else out.push({ acc, accIndex: ai, rows: [{ tx, ref: { acc: ai, row: ri } }] });
-      });
-    });
-    return out;
-  };
+  /** Mặt sổ đã có kết quả, theo đúng thứ tự đang hiện ở cột trái. */
+  const scanned = useMemo(
+    () => sheets.filter((s) => store[s.id]?.blocks?.length),
+    [sheets, store],
+  );
 
-  /* Cuộn TRONG cột kết quả, không kéo cả trang.
-     Không dùng scrollIntoView() — nó cuộn MỌI khung cha cuộn được.
-     Không dùng offsetTop — nó tính theo offsetParent, có thể không phải khung
-     này. Chênh lệch getBoundingClientRect + scrollTop hiện tại là cách chắc
-     chắn đúng trong mọi bố cục. */
+  const totalRows = useMemo(
+    () =>
+      Object.values(store).reduce(
+        (n, r) => n + r.blocks.reduce((m, b) => m + b.rows.filter((x) => !x.is_note).length, 0),
+        0,
+      ),
+    [store],
+  );
+
+  /* Cuộn TRONG cột kết quả.
+     Không scrollIntoView() — nó cuộn mọi khung cha. Không offsetTop — tính theo
+     offsetParent, có thể không phải khung này. Cuộn TỨC THÌ vì bước nhảy giữa
+     các mặt sổ thường vài nghìn pixel. */
   useEffect(() => {
     if (mode !== "list" || !activeSheet) return;
     const box = scroller.current;
@@ -388,20 +427,8 @@ export default function ReviewPane({
     if (!box || !target) return;
     const delta =
       target.getBoundingClientRect().top - box.getBoundingClientRect().top;
-    // Cuộn TỨC THÌ, không "smooth": bước nhảy giữa các mặt sổ thường vài nghìn
-    // pixel — cuộn mượt qua chừng đó vừa lâu vừa làm hoa mắt, và trong một số
-    // môi trường (ẩn tab, prefers-reduced-motion) nó bị bỏ qua hoàn toàn.
     box.scrollTop = box.scrollTop + delta;
-  }, [activeSheet, mode, result]);
-
-  if (!result) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-[15px] font-semibold text-ink2">{t.reviewEmpty}</p>
-        <p className="max-w-xs text-[12.5px] text-ink3">{t.reviewEmptyHint}</p>
-      </div>
-    );
-  }
+  }, [activeSheet, mode, store]);
 
   const head = (
     <thead>
@@ -416,10 +443,43 @@ export default function ReviewPane({
         {cols.store && <Th jp="取扱店" vn="" align="center" width="76px" />}
         {cols.extra && <Th jp="備考" vn="" align="center" width="76px" />}
         <Th jp="検算" vn="" align="center" width="38px" />
-        <Th jp="確認メモ" vn="" width="150px" />
+        <Th jp="確認メモ" vn="" width="140px" />
+        <Th jp="" vn="" width="28px" />
       </tr>
     </thead>
   );
+
+  const cardsOf = (sheetId: string, startIndex = 0) => {
+    const data = store[sheetId];
+    if (!data) return null;
+    return data.blocks.map((block, bi) => (
+      <AccountCard
+        key={`${sheetId}-${bi}`}
+        meta={block.meta}
+        rows={block.rows}
+        refs={block.rows.map((_, ri) => ({ sheet: sheetId, block: bi, row: ri }))}
+        index={startIndex + bi}
+        fallbackTitle={sheetName[sheetId] ?? sheetId}
+        cols={cols}
+        head={head}
+        t={t}
+        filter={filter}
+        onEdit={onEdit}
+        onDeleteRow={onDeleteRow}
+        onAddRow={onAddRow}
+        onAutoBalance={onAutoBalance}
+      />
+    ));
+  };
+
+  if (scanned.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+        <p className="text-[15px] font-semibold text-ink2">{t.reviewEmpty}</p>
+        <p className="max-w-xs text-[12.5px] text-ink3">{t.reviewEmptyHint}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -429,7 +489,7 @@ export default function ReviewPane({
           <p className="text-[13.5px] font-bold">
             {t.reviewTitle}
             <span className="tnum ml-1.5 font-normal text-ink3">
-              ({result.totals.rows} {t.rowsShort})
+              ({totalRows} {t.rowsShort})
             </span>
           </p>
           <p className="text-[11px] text-ink3">{t.reviewSubtitle}</p>
@@ -458,94 +518,73 @@ export default function ReviewPane({
                 : "bg-card text-ink2 hover:bg-card2"
             }`}
           >
-            {t.viewAsList} ({result.sheet_ids.length})
+            {t.viewAsList} ({scanned.length})
           </button>
         </div>
       </div>
 
-      {/* Thân cột — CHÍNH khung này cuộn, không phải cả trang */}
+      {/* Bộ lọc theo nội dung — chỉ để XEM, không ảnh hưởng file xuất */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-rule2 bg-card2 px-3 py-1.5">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="flex-none text-ink3" aria-hidden>
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="M15.5 15.5 21 21" />
+        </svg>
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={t.filterPlaceholder}
+          className="min-w-0 flex-1 rounded-md border border-rule bg-card px-2 py-1 text-[12.5px] placeholder:text-ink3"
+        />
+        {filter && (
+          <button
+            onClick={() => setFilter("")}
+            className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:text-ink"
+          >
+            {t.filterClear}
+          </button>
+        )}
+        <span className="text-[10.5px] text-ink3">{t.filterNote}</span>
+      </div>
+
+      {/* Thân cột — CHÍNH khung này cuộn */}
       <div ref={scroller} className="thin-scroll min-h-0 flex-1 overflow-auto">
         {mode === "page" ? (
-          (() => {
-            if (!activeSheet) {
-              return <p className="p-4 text-[12.5px] text-ink3">{t.pickSheetForPage}</p>;
-            }
-            const blocks = blocksOf(activeSheet);
-            if (blocks.length === 0) {
-              return (
-                <p className="p-4 text-[12.5px] text-ink3">
-                  {t.sheetNoResult(sheetName[activeSheet] ?? activeSheet)}
-                </p>
-              );
-            }
-            return blocks.map((b, bi) => (
-              <AccountCard
-                key={bi}
-                acc={b.acc}
-                accIndex={b.accIndex}
-                rows={b.rows}
-                index={bi}
-                fallbackTitle={sheetName[activeSheet] ?? activeSheet}
-                cols={cols}
-                head={head}
-                t={t}
-                onEdit={onEdit}
-                onToggleCol={onToggleCol}
-                onAddRow={onAddRow}
-                onAutoBalance={onAutoBalance}
-              />
-            ));
-          })()
+          !activeSheet ? (
+            <p className="p-4 text-[12.5px] text-ink3">{t.pickSheetForPage}</p>
+          ) : !store[activeSheet]?.blocks?.length ? (
+            <p className="p-4 text-[12.5px] text-ink3">
+              {t.sheetNoResult(sheetName[activeSheet] ?? activeSheet)}
+            </p>
+          ) : (
+            cardsOf(activeSheet)
+          )
         ) : (
-          result.sheet_ids.map((sid, si) => {
-            const blocks = blocksOf(sid);
-            return (
-              <section key={sid} data-sheet={sid} className="scroll-mt-0">
+          <>
+            {scanned.map((s, si) => (
+              <section key={s.id} data-sheet={s.id}>
                 <h3
                   className={`sticky top-0 z-20 flex items-center gap-2 border-y border-rule px-3 py-1.5 text-[12px] font-semibold ${
-                    activeSheet === sid
-                      ? "bg-accentpale text-ink"
-                      : "bg-card3 text-ink2"
+                    activeSheet === s.id ? "bg-accentpale text-ink" : "bg-card3 text-ink2"
                   }`}
                 >
                   <span className="tnum text-ink3">{si + 1}.</span>
-                  {sheetName[sid] ?? sid}
+                  {s.name}
                   <span className="tnum font-normal text-ink3">
-                    {blocks.reduce((n, b) => n + b.rows.length, 0)} {t.rowsShort}
+                    {store[s.id].blocks.reduce((n, b) => n + b.rows.length, 0)}{" "}
+                    {t.rowsShort}
                   </span>
                 </h3>
-                {blocks.length === 0 ? (
-                  <p className="px-3 py-2 text-[12px] text-ink3">{t.stNoRows}</p>
-                ) : (
-                  blocks.map((b, bi) => (
-                    <AccountCard
-                      key={bi}
-                      acc={b.acc}
-                      accIndex={b.accIndex}
-                      rows={b.rows}
-                      index={bi}
-                      fallbackTitle={sheetName[sid] ?? sid}
-                      cols={cols}
-                      head={head}
-                      t={t}
-                      onEdit={onEdit}
-                      onToggleCol={onToggleCol}
-                      onAddRow={onAddRow}
-                      onAutoBalance={onAutoBalance}
-                    />
-                  ))
-                )}
+                {cardsOf(s.id)}
               </section>
-            );
-          })
+            ))}
+            {/* Đệm cuối: không có nó thì mặt sổ CUỐI không cuộn lên sát đầu
+                khung được — cuộn kịch đáy mà phía trên vẫn lòi mặt trước. */}
+            <div aria-hidden className="h-[calc(100dvh-14rem)]" />
+          </>
         )}
-        {/* Đệm cuối: không có nó thì mặt sổ CUỐI không thể cuộn lên sát đầu
-            khung — cuộn kịch đáy mà tiêu đề mặt cuối vẫn nằm giữa màn hình,
-            phía trên còn lòi phần của mặt trước. */}
-        {mode === "list" && <div aria-hidden className="h-[calc(100dvh-14rem)]" />}
       </div>
 
-      {/* Chân cột: nhắc giới hạn + tuỳ chọn cột phụ */}
+      {/* Chân cột: cột phụ + nhắc sửa được */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-rule bg-card px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-wider text-ink3">
           {t.optionalCols}

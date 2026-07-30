@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { sheetImage, type Sheet } from "@/lib/api";
+import { sheetImage, type AutofixPlan, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -112,6 +112,10 @@ export default function SheetViewer({
   onReset,
   onUndo,
   onScanThis,
+  onDelete,
+  onAutofix,
+  onSplit,
+  autofix,
 }: {
   wsId: string;
   sheet: Sheet | null;
@@ -127,6 +131,10 @@ export default function SheetViewer({
   onReset: () => void;
   onUndo: () => void;
   onScanThis: () => void;
+  onDelete: () => void;
+  onAutofix: () => void;
+  onSplit: (x: number) => void;
+  autofix: AutofixPlan | null;
 }) {
   const { t } = useT();
 
@@ -285,6 +293,11 @@ export default function SheetViewer({
         <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
           {scanning ? t.scanning : t.scanThisPage}
         </Tool>
+        <Tool onClick={onDelete} disabled={busy} title={t.deleteSheet}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
+          </svg>
+        </Tool>
       </div>
 
       {/* ── Vùng ảnh: 70% chiều rộng khung ────────────────────── */}
@@ -346,6 +359,42 @@ export default function SheetViewer({
           )}
         </div>
       </div>
+
+      {/* ── Cắt nhanh thông minh — chạy bằng thuật toán nên $0 ── */}
+      {autofix && (autofix.steps.length > 0 || autofix.gutter !== null) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-accentpale/50 px-3 py-1.5">
+          <span className="text-[11.5px] font-semibold text-accent">{t.autofixTitle}</span>
+          {autofix.steps.length > 0 && (
+            <>
+              <span className="text-[11.5px] text-ink2">
+                {autofix.steps
+                  .map((st) =>
+                    st.kind === "crop"
+                      ? t.afCrop
+                      : st.kind === "rotate"
+                        ? t.afRotate(st.degrees)
+                        : t.afTilt(st.degrees),
+                  )
+                  .join(" · ")}
+              </span>
+              <Tool tone="accent" onClick={onAutofix} disabled={busy} title={t.autofixApply}>
+                {t.autofixApply}
+              </Tool>
+            </>
+          )}
+          {autofix.gutter !== null && (
+            <Tool
+              onClick={() => onSplit(autofix.gutter!)}
+              disabled={busy}
+              title={t.splitHint}
+            >
+              ⇥ {t.splitTwo}
+            </Tool>
+          )}
+          <span className="flex-1" />
+          <span className="text-[10.5px] text-ink3">{t.autofixNo180}</span>
+        </div>
+      )}
 
       {/* ── Chân khung: thanh trượt chỉnh tinh ────────────────── */}
       <div className="flex flex-col gap-1.5 border-t border-rule bg-card px-3 py-2">

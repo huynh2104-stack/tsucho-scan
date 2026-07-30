@@ -15,6 +15,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addSheets,
   adjustSheets,
+  autofixApply,
+  autofixPlan,
+  buildAccounts,
   createWorkspace,
   cropSheet,
   deleteSheet,
@@ -23,15 +26,17 @@ import {
   getWorkspace,
   listenEvents,
   renameBook,
+  renameSheet,
   resetSheets,
   rotateSheets,
-  undoSheet,
   saveBlob,
+  splitSheet,
   startScan,
-  type Account,
+  undoSheet,
+  type AutofixPlan,
   type PerSheet,
+  type ResultStore,
   type ScanEvent,
-  type ScanPayload,
   type Tx,
   type Workspace,
 } from "@/lib/api";
@@ -42,9 +47,12 @@ import SheetViewer from "@/components/SheetViewer";
 import ReviewPane, {
   type EditFn,
   type OptCols,
+  type RowActionFn,
+  type TxRef,
   type ViewMode,
 } from "@/components/ReviewPane";
 import ExportDialog, { type ExportOpts } from "@/components/ExportDialog";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 const WS_KEY = "tsucho.ws";
 
@@ -56,9 +64,19 @@ export default function Workbench() {
   const [active, setActive] = useState<string | null>(null);
   const [lastTicked, setLastTicked] = useState<string | null>(null);
 
-  const [result, setResult] = useState<ScanPayload | null>(null);
+  // KHO kết quả theo TỪNG mặt sổ. Trước đây giữ một ScanPayload duy nhất nên
+  // quét mặt mới là ghi đè, làm mất kết quả các mặt đã quét — chính là bug cũ.
+  const [store, setStore] = useState<ResultStore>({});
   const [states, setStates] = useState<Record<string, ScanState>>({});
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [autofix, setAutofix] = useState<AutofixPlan | null>(null);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    message: string;
+    warning?: string;
+    label: string;
+    danger?: boolean;
+    run: () => void;
+  } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanEvent | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,7 +96,9 @@ export default function Workbench() {
       const saved = localStorage.getItem(WS_KEY);
       if (saved) {
         try {
-          setWs(await getWorkspace(saved));
+          const w = await getWorkspace(saved);
+          setWs(w);
+          setStore(w.results ?? {});      // kết quả đã quét sống qua F5
           return;
         } catch {
           localStorage.removeItem(WS_KEY);
@@ -98,20 +118,63 @@ export default function Workbench() {
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
 
-  const perSheet: Record<string, PerSheet> = useMemo(
-    () =>
-      Object.fromEntries(
-        (result?.per_sheet ?? []).filter((p) => p.rows > 0).map((p) => [p.sheet_id, p]),
-      ),
-    [result],
-  );
+  /** Thống kê từng mặt sổ, tính lại từ kho — kể cả các ô người dùng vừa sửa. */
+  const perSheet: Record<string, PerSheet> = useMemo(() => {
+    const out: Record<string, PerSheet> = {};
+    for (const [sid, data] of Object.entries(store)) {
+      let rows = 0,
+        need = 0,
+        fixed = 0;
+      for (const b of data.blocks) {
+        let prev: number | null = null;
+        for (const tx of b.rows) {
+          if (tx.is_note) {
+            if (tx.balance != null) prev = tx.balance;
+            continue;
+          }
+          rows += 1;
+          // Tính lại NG theo dữ liệu hiện tại, không dùng status đã đóng băng
+          if (tx.balance != null) {
+            if (prev != null) {
+              const want = prev - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
+              if (want !== tx.balance) need += 1;
+            }
+            prev = tx.balance;
+          } else if (tx.status === "check") {
+            need += 1;
+          }
+          if (tx.status === "fixed") fixed += 1;
+        }
+      }
+      if (rows > 0) out[sid] = { sheet_id: sid, rows, need_check: need, fixed };
+    }
+    return out;
+  }, [store]);
+
+  // Xem ảnh nào thì hỏi backend luôn "có cần chỉnh gì không". Chạy bằng thuật
+  // toán nên không tốn phí; sha256 vào deps để ảnh đổi là tính lại.
+  useEffect(() => {
+    if (!ws || !activeSheet) {
+      setAutofix(null);
+      return;
+    }
+    let alive = true;
+    autofixPlan(ws.id, activeSheet.id)
+      .then((p) => alive && setAutofix(p))
+      .catch(() => alive && setAutofix(null));
+    return () => {
+      alive = false;
+    };
+  }, [ws?.id, activeSheet?.id, activeSheet?.sha256]);
 
   /** Chạy một thao tác đổi workspace. Trả về true nếu thành công. */
   const guard = async (fn: () => Promise<Workspace>): Promise<boolean> => {
     setBusy(true);
     setErr(null);
     try {
-      setWs(await fn());
+      const w = await fn();
+      setWs(w);
+      if (w.results) setStore(w.results);
       return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -181,7 +244,6 @@ export default function Workbench() {
 
     try {
       const job = await startScan(ws.id, ids);
-      setJobId(job.id);
 
       stopSse.current = listenEvents(
         job.id,
@@ -217,15 +279,16 @@ export default function Workbench() {
         async () => {
           try {
             const done = await getJob(job.id);
-            if (done.result) {
-              setResult(done.result);
-              // Quét xong mà khung phải trống thì người dùng tưởng thất bại →
-              // tự mở mặt sổ đầu tiên CÓ giao dịch (bỏ qua trang bìa 0 dòng)
-              const first = done.result.per_sheet.find((p) => p.rows > 0);
-              if (first) setActive(first.sheet_id);
-            }
             if (done.error) setErr(done.error);
-            setWs(await getWorkspace(ws.id));
+            // Nạp lại từ backend: kho đã được lưu theo TỪNG mặt sổ nên kết quả
+            // các mặt quét trước vẫn còn nguyên.
+            const w = await getWorkspace(ws.id);
+            setWs(w);
+            setStore(w.results ?? {});
+            // Quét xong mà khung phải trống thì người dùng tưởng thất bại →
+            // tự mở mặt sổ đầu tiên vừa quét mà CÓ giao dịch
+            const first = ids.find((id) => w.results?.[id]?.blocks?.length);
+            if (first) setActive(first);
           } catch (e) {
             setErr(e instanceof Error ? e.message : String(e));
           }
@@ -238,74 +301,76 @@ export default function Workbench() {
     }
   };
 
-  /** Sửa một ô — giữ ngay tại client, xuất file lấy bản này. */
-  const editCell: EditFn = (ref, field, value) => {
-    setResult((prev) => {
-      if (!prev) return prev;
-      const accounts = prev.accounts.map((acc, ai) =>
-        ai !== ref.acc
-          ? acc
-          : {
-              ...acc,
-              transactions: acc.transactions.map((tx, ri) =>
-                ri === ref.row ? ({ ...tx, [field]: value } as Tx) : tx,
-              ),
-            },
+  /** Đổi một dòng trong kho. Mọi hàm sửa đều đi qua đây cho gọn. */
+  const patchRows = (
+    sheetId: string,
+    blockIndex: number,
+    fn: (rows: Tx[]) => Tx[],
+  ) => {
+    setStore((prev) => {
+      const data = prev[sheetId];
+      if (!data) return prev;
+      const blocks = data.blocks.map((b, bi) =>
+        bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
       );
-      return { ...prev, accounts };
+      return { ...prev, [sheetId]: { ...data, blocks } };
     });
   };
 
-  /** Thêm một dòng trống — dùng khi máy bỏ sót dòng (lỗi chuỗi số dư không bắt được). */
-  const addRow = (accIndex: number, sheetId: string | null) => {
-    setResult((prev) => {
-      if (!prev) return prev;
-      const accounts = prev.accounts.map((acc, ai) => {
-        if (ai !== accIndex) return acc;
-        const blank: Tx = {
-          date: null,
-          date_raw: null,
-          kind: null,
-          description: null,
-          extra_text: null,
-          store_code: null,
-          amount_out: null,
-          amount_in: null,
-          balance: null,
-          status: "ok",
-          reason: "",
-          sheet_id: sheetId,
-        };
-        return { ...acc, transactions: [...acc.transactions, blank] };
-      });
-      return { ...prev, accounts };
-    });
-  };
+  /** Sửa một ô — giữ tại client, xuất file lấy đúng bản đang thấy. */
+  const editCell: EditFn = (ref, field, value) =>
+    patchRows(ref.sheet, ref.block, (rows) =>
+      rows.map((tx, i) => (i === ref.row ? ({ ...tx, [field]: value } as Tx) : tx)),
+    );
 
-  /** Suy số dư còn trống từ chuỗi: prev − rút + gửi. Không sửa ô đã có số. */
-  const autoBalance = (accIndex: number) => {
-    setResult((prev) => {
-      if (!prev) return prev;
-      const accounts = prev.accounts.map((acc, ai) => {
-        if (ai !== accIndex) return acc;
-        let running: number | null = null;
-        const transactions = acc.transactions.map((tx) => {
-          if (tx.balance != null) {
-            running = tx.balance;
-            return tx;
-          }
-          if (running == null || tx.is_note) return tx;
-          running = running - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
-          return { ...tx, balance: running };
-        });
-        return { ...acc, transactions };
-      });
-      return { ...prev, accounts };
+  /** Xoá một dòng (có hỏi lại) — dùng khi model đọc thừa một dòng. */
+  const deleteRow: RowActionFn = (ref) =>
+    setConfirm({
+      title: t.confirmDeleteRowTitle,
+      message: t.confirmDeleteRowMsg,
+      label: t.deleteRow,
+      danger: true,
+      run: () =>
+        patchRows(ref.sheet, ref.block, (rows) => rows.filter((_, i) => i !== ref.row)),
     });
-  };
+
+  /** Thêm dòng trống — dùng khi máy bỏ sót dòng (chuỗi số dư không bắt được). */
+  const addRow = (ref: TxRef) =>
+    patchRows(ref.sheet, ref.block, (rows) => [
+      ...rows,
+      {
+        date: null,
+        date_raw: null,
+        kind: null,
+        description: null,
+        extra_text: null,
+        store_code: null,
+        amount_out: null,
+        amount_in: null,
+        balance: null,
+        status: "ok",
+        reason: "",
+        sheet_id: ref.sheet,
+      },
+    ]);
+
+  /** Suy số dư còn trống từ chuỗi: trước − rút + gửi. Không sửa ô đã có số. */
+  const autoBalance = (sheetId: string, blockIndex: number) =>
+    patchRows(sheetId, blockIndex, (rows) => {
+      let running: number | null = null;
+      return rows.map((tx) => {
+        if (tx.balance != null) {
+          running = tx.balance;
+          return tx;
+        }
+        if (running == null || tx.is_note) return tx;
+        running = running - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
+        return { ...tx, balance: running };
+      });
+    });
 
   const doExport = async (o: ExportOpts) => {
-    if (!jobId || !result) return;
+    if (!ws || Object.keys(store).length === 0) return;
     setExporting(true);
     setErr(null);
     try {
@@ -318,13 +383,13 @@ export default function Workbench() {
               ? [active]
               : undefined;
 
-      const { blob, filename } = await exportFile(jobId, {
+      const { blob, filename } = await exportFile(ws.id, {
         format: o.format,
         structure: o.structure,
         add_total: o.add_total,
         name: o.name || "tsucho",
         sheet_ids: scopeIds,
-        accounts: result.accounts as Account[],
+        accounts: buildAccounts(sheets, store),
       });
       saveBlob(blob, filename);
       setShowExport(false);
@@ -385,13 +450,23 @@ export default function Workbench() {
               <button
                 onClick={() => {
                   const ids = tickedIds();
-                  setTicked(new Set());
-                  if (active && ids.includes(active)) setActive(null);
-                  if (ws) {
-                    void (async () => {
-                      for (const id of ids) await guard(() => deleteSheet(ws.id, id));
-                    })();
-                  }
+                  if (!ws || ids.length === 0) return;
+                  const withResult = ids.filter((id) => store[id]?.blocks?.length).length;
+                  setConfirm({
+                    title: t.confirmDeleteManyTitle,
+                    message: t.confirmDeleteManyMsg(ids.length),
+                    warning:
+                      withResult > 0 ? t.confirmDeleteManyHasResult(withResult) : undefined,
+                    label: t.deleteSheet,
+                    danger: true,
+                    run: () => {
+                      setTicked(new Set());
+                      if (active && ids.includes(active)) setActive(null);
+                      void (async () => {
+                        for (const id of ids) await guard(() => deleteSheet(ws.id, id));
+                      })();
+                    },
+                  });
                 }}
                 title={t.remove}
                 className="rounded-md p-1 text-ink3 hover:bg-danger/10 hover:text-danger"
@@ -432,6 +507,9 @@ export default function Workbench() {
               onToggle={toggle}
               onToggleRange={toggleRange}
               onActivate={setActive}
+              onRename={(id, name) =>
+                ws && void guard(() => renameSheet(ws.id, id, name))
+              }
             />
           </div>
 
@@ -458,13 +536,53 @@ export default function Workbench() {
             onCrop={(box) =>
               ws && active && void guard(() => cropSheet(ws.id, editTarget(), box))
             }
-            onReset={() =>
-              ws && active && void guard(() => resetSheets(ws.id, editTarget()))
-            }
+            onReset={() => {
+              if (!ws || !active) return;
+              setConfirm({
+                title: t.confirmResetTitle,
+                message: t.confirmResetMsg,
+                label: t.resetImage,
+                run: () => void guard(() => resetSheets(ws.id, editTarget())),
+              });
+            }}
             onUndo={() =>
               ws && active && void guard(() => undoSheet(ws.id, editTarget()))
             }
             onScanThis={() => active && void runScan([active])}
+            onDelete={() => {
+              if (!ws || !active) return;
+              const hasResult = !!store[active]?.blocks?.length;
+              setConfirm({
+                title: t.confirmDeleteSheetTitle,
+                message: t.confirmDeleteSheetMsg(activeSheet?.name ?? ""),
+                warning: hasResult ? t.confirmDeleteSheetHasResult : undefined,
+                label: t.deleteSheet,
+                danger: true,
+                run: () => {
+                  setActive(null);
+                  setTicked((p) => {
+                    const n = new Set(p);
+                    n.delete(active);
+                    return n;
+                  });
+                  void guard(() => deleteSheet(ws.id, active));
+                },
+              });
+            }}
+            autofix={autofix}
+            onAutofix={() => {
+              if (!ws || !active || !autofix?.steps.length) return;
+              void guard(() => autofixApply(ws.id, active, autofix.steps));
+            }}
+            onSplit={(x) => {
+              if (!ws || !active) return;
+              setConfirm({
+                title: t.confirmSplitTitle,
+                message: t.confirmSplitMsg,
+                label: t.splitTwo,
+                run: () => void guard(() => splitSheet(ws.id, active, x)),
+              });
+            }}
           />
         </section>
 
@@ -472,7 +590,7 @@ export default function Workbench() {
         <section className="flex min-h-0 flex-col bg-page">
           <div className="min-h-0 flex-1">
             <ReviewPane
-              result={result}
+              store={store}
               sheets={sheets}
               activeSheet={active}
               mode={mode}
@@ -480,6 +598,7 @@ export default function Workbench() {
               onToggleCol={(k) => setCols((p) => ({ ...p, [k]: !p[k] }))}
               onModeChange={setMode}
               onEdit={editCell}
+              onDeleteRow={deleteRow}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
             />
@@ -498,7 +617,7 @@ export default function Workbench() {
             />
             <button
               onClick={() => setShowExport(true)}
-              disabled={!result || !jobId}
+              disabled={Object.keys(store).length === 0}
               className="flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -517,11 +636,25 @@ export default function Workbench() {
         {t.caveat}
       </p>
 
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title ?? ""}
+        message={confirm?.message ?? ""}
+        warning={confirm?.warning}
+        confirmLabel={confirm?.label ?? ""}
+        danger={confirm?.danger}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          confirm?.run();
+          setConfirm(null);
+        }}
+      />
+
       <ExportDialog
         open={showExport}
         bookName={ws?.book_name ?? ""}
         tickedCount={ticked.size}
-        totalCount={result?.sheet_ids.length ?? sheets.length}
+        totalCount={Object.keys(store).length || sheets.length}
         hasCurrent={!!active}
         busy={exporting}
         onCancel={() => setShowExport(false)}

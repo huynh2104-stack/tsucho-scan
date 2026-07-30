@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from export import export_accounts
 
-from . import export_csv, jobs, workspace
+from . import autofix, export_csv, jobs, results, workspace
 
 app = FastAPI(title="tsucho-scan API", version="0.2.0")
 
@@ -63,7 +63,13 @@ def create_ws() -> dict:
 
 @app.get("/api/ws/{ws_id}")
 def get_ws(ws_id: str) -> dict:
-    return workspace.to_json(_ws(ws_id))
+    """Workspace + MỌI kết quả đã quét (khoá theo mặt sổ).
+
+    Nhờ trả kèm kết quả mà F5 hay khởi động lại server vẫn thấy lại những gì đã
+    quét — trước đây quét mặt mới là mất sạch kết quả các mặt cũ.
+    """
+    ws = _ws(ws_id)
+    return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.patch("/api/ws/{ws_id}")
@@ -92,7 +98,8 @@ async def add_sheets(ws_id: str, files: list[UploadFile]) -> dict:
 def delete_sheet(ws_id: str, sheet_id: str) -> dict:
     ws = _ws(ws_id)
     workspace.remove(ws, sheet_id)
-    return workspace.to_json(ws)
+    results.drop(ws_id, sheet_id)
+    return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.patch("/api/ws/{ws_id}/sheets/{sheet_id}")
@@ -210,6 +217,75 @@ def reset_sheets(ws_id: str, body: dict = Body(...)) -> dict:
     return workspace.to_json(ws)
 
 
+
+# ── Cắt nhanh thông minh (thuật toán, KHÔNG gọi model nên $0) ────────
+
+@app.get("/api/ws/{ws_id}/sheets/{sheet_id}/autofix")
+def autofix_plan(ws_id: str, sheet_id: str) -> dict:
+    """Đề xuất các bước chỉnh, chưa áp dụng gì."""
+    from PIL import Image
+
+    ws = _ws(ws_id)
+    sheet = _sheet(ws, sheet_id)
+    img = Image.open(sheet.dir(ws.id) / "current.png")
+    img.load()
+    return autofix.plan(img)
+
+
+@app.post("/api/ws/{ws_id}/autofix")
+def autofix_apply(ws_id: str, body: dict = Body(...)) -> dict:
+    """Áp dụng kế hoạch cắt nhanh cho MẶT SỔ đang xem."""
+    ws = _ws(ws_id)
+    ids = body.get("sheet_ids") or []
+    if len(ids) != 1:
+        raise HTTPException(400, "Cắt nhanh áp dụng cho mặt sổ đang xem")
+    sheet = _sheet(ws, ids[0])
+
+    steps = body.get("steps") or []
+    if not steps:
+        raise HTTPException(400, "Không có bước nào để áp dụng")
+
+    try:
+        for i, st in enumerate(steps):
+            kind = st.get("kind")
+            # Chỉ bước ĐẦU chụp ảnh hoàn tác (snapshot=i==0) — để một lần bấm
+            # "Hoàn tác" trả về đúng trạng thái TRƯỚC khi cắt nhanh, chứ không
+            # phải về giữa chừng chuỗi bước.
+            if kind == "rotate":
+                workspace.rotate(ws, sheet, int(st["degrees"]) % 360, snapshot=i == 0)
+            elif kind == "tilt":
+                workspace.adjust(ws, sheet, fine_deg=float(st["degrees"]), snapshot=i == 0)
+            elif kind == "crop":
+                b = st["box"]
+                workspace.crop(
+                    ws, sheet,
+                    (float(b["left"]), float(b["top"]), float(b["right"]), float(b["bottom"])),
+                    snapshot=i == 0,
+                )
+            else:
+                raise HTTPException(400, f"Bước không hiểu: {kind}")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    ws.save()
+    return workspace.to_json(ws)
+
+
+@app.post("/api/ws/{ws_id}/split")
+def split_sheet(ws_id: str, body: dict = Body(...)) -> dict:
+    """Tách 1 ảnh chứa 2 sổ thành 2 mặt sổ riêng (trái / phải)."""
+    ws = _ws(ws_id)
+    ids = body.get("sheet_ids") or []
+    if len(ids) != 1:
+        raise HTTPException(400, "Tách áp dụng cho mặt sổ đang xem")
+    try:
+        workspace.split_at(ws, _sheet(ws, ids[0]), float(body.get("x", 0.5)))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e)) from e
+    ws.save()
+    return workspace.to_json(ws)
+
+
 # ── Quét ─────────────────────────────────────────────────────────────
 
 @app.post("/api/ws/{ws_id}/scan")
@@ -310,22 +386,25 @@ def _split_by_sheet(accounts: list[dict], names: dict[str, str]) -> list[dict]:
     return [groups[s] for s in order]
 
 
-@app.post("/api/jobs/{job_id}/export")
-def export(job_id: str, body: dict = Body(...)):
+@app.post("/api/ws/{ws_id}/export")
+def export(ws_id: str, body: dict = Body(...)):
     """Xuất theo tuỳ chọn người dùng.
 
-    Nhận `accounts` do frontend gửi lên để xuất ĐÚNG cái người dùng đang thấy —
-    kể cả các ô họ vừa sửa tay trong bảng review.
+    Ở mức WORKSPACE chứ không phải một lần quét: kết quả được tích luỹ theo từng
+    mặt sổ, nên xuất phải lấy toàn bộ những gì đã quét, kể cả quét ở nhiều lượt.
+    `accounts` do frontend gửi lên để xuất ĐÚNG cái người dùng đang thấy — kể cả
+    các ô họ vừa sửa tay trong bảng review.
     """
-    job = jobs.get(job_id)
-    if not job or not job._result_obj:
-        raise HTTPException(404, "Chưa có kết quả để tải")
+    ws = _ws(ws_id)
 
     fmt = body.get("format", "xlsx")
     if fmt not in ("xlsx", "csv"):
         raise HTTPException(400, "format chỉ nhận xlsx hoặc csv")
 
-    accounts = body.get("accounts") or job._result_obj.accounts
+    accounts = body.get("accounts")
+    if not accounts:
+        accounts = results.to_accounts(ws, results.load_all(ws_id))
+
     keep = body.get("sheet_ids")          # None = lấy hết
     if keep:
         keep_set = set(keep)
@@ -337,12 +416,11 @@ def export(job_id: str, body: dict = Body(...)):
     if not accounts:
         raise HTTPException(400, "Phạm vi đã chọn không có dòng nào để xuất")
 
-    book = _safe_name(body.get("name") or job._result_obj.source_name or "tsucho")
+    book = _safe_name(body.get("name") or ws.book_name or "tsucho")
     add_total = bool(body.get("add_total"))
 
     if body.get("structure") == "per_sheet":
-        ws = workspace.load(job.ws_id)
-        names = {s.id: s.name for s in (ws.sheets if ws else [])}
+        names = {s.id: s.name for s in ws.sheets}
         accounts = _split_by_sheet(accounts, names)
 
     if fmt == "csv":
@@ -353,7 +431,7 @@ def export(job_id: str, body: dict = Body(...)):
             headers={"Content-Disposition": _disposition(f"{book}.csv")},
         )
 
-    out = Path(workspace.WS_DIR) / job.ws_id / f"{book}.xlsx"
+    out = Path(workspace.WS_DIR) / ws_id / f"{book}.xlsx"
     export_accounts(accounts, str(out), source_name=book, add_total=add_total)
     return FileResponse(
         out,

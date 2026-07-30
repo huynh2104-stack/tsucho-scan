@@ -154,6 +154,22 @@ def _regen_current(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     thumb.save(d / "thumb.png")
 
 
+def _unique_name(ws: Workspace, base: str, page: int | None) -> str:
+    """Tên hiển thị không trùng: thêm (1), (2)... khi đã có tên y hệt.
+
+    Khoá so trùng là CẶP (tên, số trang) — nhờ vậy thêm lại đúng file PDF cũ thì
+    cả 24 trang đều thành "ten(1)" chứ không lẫn với trang khác. Tên file gốc
+    (`origin`) không bao giờ bị đổi.
+    """
+    taken = {(s.name, s.page) for s in ws.sheets}
+    if (base, page) not in taken:
+        return base
+    n = 1
+    while (f"{base}({n})", page) in taken:
+        n += 1
+    return f"{base}({n})"
+
+
 def add_upload(ws: Workspace, filename: str, data: bytes) -> list[Sheet]:
     """Thêm 1 file tải lên. PDF nhiều trang → tách thành nhiều mặt sổ."""
     suffix = Path(filename).suffix.lower()
@@ -178,7 +194,9 @@ def add_upload(ws: Workspace, filename: str, data: bytes) -> list[Sheet]:
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
                 sheet = Sheet(
                     id=uuid.uuid4().hex[:10],
-                    name=f"{stem} — tr.{i + 1}",
+                    # Không nhét "tr.N" vào tên: chữ đó phải dịch theo ngôn ngữ
+                    # giao diện, nên để frontend ghép từ `page`.
+                    name=_unique_name(ws, stem, i + 1),
                     origin=filename,
                     page=i + 1,
                     source_ext=".pdf",
@@ -187,21 +205,25 @@ def add_upload(ws: Workspace, filename: str, data: bytes) -> list[Sheet]:
                 if i < len(pages):
                     (sheet.dir(ws.id) / "source.pdf").write_bytes(pages[i])
                 made.append(sheet)
+                ws.sheets.append(sheet)   # để _unique_name thấy ngay
         finally:
             doc.close()
     else:
         img = Image.open(io.BytesIO(data))
         img.load()
         sheet = Sheet(
-            id=uuid.uuid4().hex[:10], name=stem, origin=filename, source_ext=suffix
+            id=uuid.uuid4().hex[:10],
+            name=_unique_name(ws, stem, None),
+            origin=filename,
+            source_ext=suffix,
         )
         _write_sheet_images(ws, sheet, img)
         (sheet.dir(ws.id) / f"source{suffix}").write_bytes(data)
         made.append(sheet)
+        ws.sheets.append(sheet)
 
     for s in made:
         s.sha256 = _hash_current(ws, s)
-    ws.sheets.extend(made)
     mark_duplicates(ws)
     ws.save()
     return made
@@ -268,10 +290,11 @@ def undo(ws: Workspace, sheet: Sheet) -> None:
     prev.unlink(missing_ok=True)
 
 
-def rotate(ws: Workspace, sheet: Sheet, degrees_cw: int) -> None:
+def rotate(ws: Workspace, sheet: Sheet, degrees_cw: int, snapshot: bool = True) -> None:
     """Xoay THẬT trên ảnh — người dùng thấy ngay, model cũng nhận ảnh đã xoay."""
     d = sheet.dir(ws.id)
-    _snapshot(ws, sheet)
+    if snapshot:
+        _snapshot(ws, sheet)
     img = Image.open(d / "current.png")
     img.load()
     # PIL xoay ngược chiều kim đồng hồ nên đổi dấu
@@ -288,6 +311,7 @@ def adjust(
     fine_deg: float = 0.0,
     brightness: float = 1.0,
     contrast: float = 1.0,
+    snapshot: bool = True,
 ) -> None:
     """Chỉnh nghiêng vài độ + độ sáng + độ tương phản.
 
@@ -295,7 +319,8 @@ def adjust(
     vài độ, bản scan cũ hay bị mờ hoặc bạc màu. Áp lên bản ĐANG hiển thị.
     """
     d = sheet.dir(ws.id)
-    _snapshot(ws, sheet)
+    if snapshot:
+        _snapshot(ws, sheet)
     img = Image.open(d / "current.png")
     img.load()
 
@@ -316,10 +341,12 @@ def adjust(
     sheet.scanned = False
 
 
-def crop(ws: Workspace, sheet: Sheet, box: tuple[float, float, float, float]) -> None:
+def crop(ws: Workspace, sheet: Sheet, box: tuple[float, float, float, float],
+         snapshot: bool = True) -> None:
     """Cắt theo tỉ lệ 0..1 (trái, trên, phải, dưới) so với ảnh hiện tại."""
     d = sheet.dir(ws.id)
-    _snapshot(ws, sheet)
+    if snapshot:
+        _snapshot(ws, sheet)
     img = Image.open(d / "current.png")
     img.load()
     w, h = img.size
@@ -338,40 +365,6 @@ def crop(ws: Workspace, sheet: Sheet, box: tuple[float, float, float, float]) ->
     sheet.scanned = False
 
 
-def adjust(
-    ws: Workspace,
-    sheet: Sheet,
-    fine_deg: float = 0.0,
-    brightness: float = 1.0,
-    contrast: float = 1.0,
-) -> None:
-    """Xoay tinh vài độ + kéo sáng/tương phản.
-
-    Ảnh chụp tay hay nghiêng 1-3 độ làm model đọc lệch dòng; bản scan mờ thì
-    tăng tương phản đọc rõ hơn hẳn. Ghi thẳng vào ảnh hiện tại để model nhận
-    đúng thứ người dùng đang nhìn.
-    """
-    from PIL import ImageEnhance
-
-    d = sheet.dir(ws.id)
-    img = Image.open(d / "current.png")
-    img.load()
-
-    if abs(fine_deg) > 0.01:
-        # fillcolor trắng: nền giấy, không phải viền đen làm model tưởng là mép sổ
-        img = img.rotate(-fine_deg, expand=True, resample=Image.BICUBIC, fillcolor="white")
-        sheet.rotation = round((sheet.rotation + fine_deg) % 360, 1)
-    if abs(brightness - 1.0) > 0.01:
-        img = ImageEnhance.Brightness(img.convert("RGB")).enhance(brightness)
-    if abs(contrast - 1.0) > 0.01:
-        img = ImageEnhance.Contrast(img.convert("RGB")).enhance(contrast)
-
-    _regen_current(ws, sheet, img)
-    sheet.adjusted = True
-    sheet.sha256 = _hash_current(ws, sheet)
-    sheet.scanned = False
-
-
 def reset_sheet(ws: Workspace, sheet: Sheet) -> None:
     """Trả về ảnh gốc — hoàn tác mọi lần xoay/cắt."""
     d = sheet.dir(ws.id)
@@ -384,6 +377,52 @@ def reset_sheet(ws: Workspace, sheet: Sheet) -> None:
     sheet.adjusted = False
     sheet.sha256 = _hash_current(ws, sheet)
     sheet.scanned = False
+
+
+def split_at(ws: Workspace, sheet: Sheet, x_ratio: float) -> Sheet:
+    """Cắt một mặt sổ thành HAI theo đường dọc tại `x_ratio` (0..1).
+
+    Ảnh chụp 2 sổ cạnh nhau đọc rất tệ (model hay trộn hai sổ vào một). Tách ra
+    trước khi quét là đòn hiệu quả nhất cho phần tên katakana.
+    Mặt bên trái ghi đè mặt hiện tại; mặt bên phải thành mặt sổ MỚI ngay sau nó.
+    """
+    if not 0.1 <= x_ratio <= 0.9:
+        raise ValueError("Đường cắt phải nằm trong khoảng 10%–90% bề rộng")
+
+    d = sheet.dir(ws.id)
+    img = Image.open(d / "current.png")
+    img.load()
+    w, h = img.size
+    x = int(w * x_ratio)
+    if x < 20 or w - x < 20:
+        raise ValueError("Một bên sau khi tách quá nhỏ")
+
+    left, right = img.crop((0, 0, x, h)), img.crop((x, 0, w, h))
+
+    # Mặt phải: mặt sổ mới, chèn ngay sau mặt hiện tại
+    new = Sheet(
+        id=uuid.uuid4().hex[:10],
+        name=_unique_name(ws, f"{sheet.name} R", sheet.page),
+        origin=sheet.origin,
+        page=sheet.page,
+        source_ext=".png",
+        rotation=sheet.rotation,
+        cropped=True,
+    )
+    _write_sheet_images(ws, new, right)
+    new.sha256 = _hash_current(ws, new)
+    ws.sheets.insert(ws.sheets.index(sheet) + 1, new)
+
+    # Mặt trái: ghi đè mặt đang xem (vẫn hoàn tác được một bước)
+    _snapshot(ws, sheet)
+    _regen_current(ws, sheet, left)
+    sheet.name = _unique_name(ws, f"{sheet.name} L", sheet.page)
+    sheet.cropped = True
+    sheet.sha256 = _hash_current(ws, sheet)
+    sheet.scanned = False
+
+    mark_duplicates(ws)
+    return new
 
 
 def remove(ws: Workspace, sheet_id: str) -> None:

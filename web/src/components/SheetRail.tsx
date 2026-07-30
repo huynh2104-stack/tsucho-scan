@@ -13,6 +13,8 @@
  * tay thì cái nhìn thấy và cái trong state luôn là một.
  */
 
+import { useState } from "react";
+
 import { useT } from "@/lib/i18n";
 import { sheetImage, type PerSheet, type Sheet } from "@/lib/api";
 
@@ -62,6 +64,7 @@ export default function SheetRail({
   onToggle,
   onToggleRange,
   onActivate,
+  onRename,
 }: {
   wsId: string;
   sheets: Sheet[];
@@ -72,8 +75,11 @@ export default function SheetRail({
   onToggle: (id: string) => void;
   onToggleRange: (id: string) => void;
   onActivate: (id: string) => void;
+  onRename: (id: string, name: string) => void;
 }) {
   const { t } = useT();
+  // Click ĐÚP mới vào chế độ sửa tên; click đơn vẫn là "xem mặt sổ này"
+  const [editing, setEditing] = useState<string | null>(null);
 
   if (sheets.length === 0) {
     return (
@@ -129,9 +135,17 @@ export default function SheetRail({
                 />
               </div>
 
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => onActivate(s.id)}
-                className="flex min-w-0 flex-1 gap-2 text-left"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onActivate(s.id);
+                  }
+                }}
+                className="flex min-w-0 flex-1 cursor-pointer gap-2 text-left"
                 title={t.clickToView}
               >
                 <div className="relative h-[52px] w-10 flex-none overflow-hidden rounded-md border border-rule2 bg-card2">
@@ -152,13 +166,43 @@ export default function SheetRail({
                 </div>
 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  {/* Tên hiện ĐỦ, xuống dòng chứ không cắt cụt */}
-                  <span className="break-words text-[12.5px] font-semibold leading-snug">
-                    {s.name}
-                  </span>
+                  {/* Tên hiện ĐỦ, xuống dòng chứ không cắt cụt.
+                      Click ĐÚP để sửa — click đơn vẫn là xem mặt sổ. */}
+                  {editing === s.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={s.name}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v && v !== s.name) onRename(s.id, v);
+                        setEditing(null);
+                      }}
+                      onKeyDown={(e) => {
+                        const el = e.target as HTMLInputElement;
+                        if (e.key === "Enter") el.blur();
+                        if (e.key === "Escape") {
+                          el.value = s.name;
+                          el.blur();
+                        }
+                      }}
+                      className="w-full rounded border border-accent bg-card px-1 py-0.5 text-[12.5px] font-semibold focus:outline-none"
+                    />
+                  ) : (
+                    <span
+                      className="break-words text-[12.5px] font-semibold leading-snug"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setEditing(s.id);
+                      }}
+                      title={t.dblClickRename}
+                    >
+                      {s.name}
+                    </span>
+                  )}
                   <span className="break-all text-[10.5px] leading-tight text-ink3">
                     {s.origin}
-                    {s.page ? ` · tr.${s.page}` : ""}
+                    {s.page ? ` · ${t.pageLabel(s.page)}` : ""}
                   </span>
 
                   <span className="flex flex-wrap items-center gap-1 text-[10px]">
@@ -190,7 +234,7 @@ export default function SheetRail({
                     )}
                   </span>
                 </div>
-              </button>
+              </div>
             </div>
           </li>
         );

@@ -24,10 +24,36 @@ export type Sheet = {
   undo: Record<string, unknown> | null;
 };
 
+/** Metadata một sổ (ngân hàng) trong kết quả. */
+export type AccountMeta = {
+  bank_name: string | null;
+  store_no: string | null;
+  account_no: string | null;
+  holder: string | null;
+};
+
+/** Một khối dòng cùng một sổ, trong phạm vi một mặt sổ. */
+export type SheetBlock = { meta: AccountMeta; rows: Tx[] };
+
+/** Kết quả đã lưu của MỘT mặt sổ — tích luỹ qua nhiều lần quét. */
+export type SheetResult = {
+  sheet_id: string;
+  job_id: string;
+  scanned_at: number;
+  model: string | null;
+  cached: boolean | null;
+  cost_usd: number | null;
+  blocks: SheetBlock[];
+};
+
+export type ResultStore = Record<string, SheetResult>;
+
 export type Workspace = {
   id: string;
   book_name: string;
   sheets: Sheet[];
+  /** Có ở GET /api/ws/:id — mọi kết quả đã quét, sống qua F5. */
+  results?: ResultStore;
 };
 
 export type Tx = {
@@ -202,6 +228,28 @@ export const adjustSheets = (
 export const undoSheet = (wsId: string, sheet_ids: string[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/undo`, { sheet_ids });
 
+export type AutofixStep =
+  | { kind: "rotate"; degrees: number }
+  | { kind: "tilt"; degrees: number }
+  | { kind: "crop"; box: { left: number; top: number; right: number; bottom: number } };
+
+export type AutofixPlan = {
+  steps: AutofixStep[];
+  gutter: number | null;
+  note_180: boolean;
+};
+
+export const autofixPlan = async (wsId: string, sheetId: string) =>
+  asJson<AutofixPlan>(
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/autofix`),
+  );
+
+export const autofixApply = (wsId: string, sheetId: string, steps: AutofixStep[]) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/autofix`, { sheet_ids: [sheetId], steps });
+
+export const splitSheet = (wsId: string, sheetId: string, x: number) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });
+
 export const resetSheets = (wsId: string, sheet_ids: string[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/reset`, { sheet_ids });
 
@@ -213,9 +261,34 @@ export const startScan = (wsId: string, sheet_ids: string[], no_cache = false) =
 export const getJob = async (id: string) =>
   asJson<Job>(await fetch(`${API}/api/jobs/${id}`));
 
+/** Dựng danh sách sổ để xuất file, theo đúng thứ tự mặt sổ đang hiện.
+ *
+ * Gộp hai khối liền nhau cùng ngân hàng + cùng số tài khoản — nhờ vậy quét 2
+ * trang của cùng một sổ ở hai lượt khác nhau vẫn ra một sheet Excel liền mạch.
+ * Phải khớp logic `results.to_accounts` ở backend.
+ */
+export function buildAccounts(sheets: Sheet[], store: ResultStore): Account[] {
+  const out: Account[] = [];
+  for (const sheet of sheets) {
+    const data = store[sheet.id];
+    if (!data) continue;
+    for (const block of data.blocks) {
+      const last = out.at(-1);
+      const same =
+        last &&
+        last.bank_name === block.meta.bank_name &&
+        last.account_no === block.meta.account_no &&
+        block.meta.account_no != null;
+      if (same) last.transactions.push(...block.rows);
+      else out.push({ ...block.meta, transactions: [...block.rows] });
+    }
+  }
+  return out;
+}
+
 /** Xuất file: POST vì phải gửi kèm các ô người dùng vừa sửa tay. */
 export async function exportFile(
-  jobId: string,
+  wsId: string,
   body: {
     format: "xlsx" | "csv";
     structure: "per_sheet" | "merged";
@@ -225,7 +298,7 @@ export async function exportFile(
     accounts: Account[];
   },
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${API}/api/jobs/${jobId}/export`, {
+  const res = await fetch(`${API}/api/ws/${wsId}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

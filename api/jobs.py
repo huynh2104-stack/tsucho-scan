@@ -18,6 +18,8 @@ from typing import Any
 
 from core import ExtractError, scan
 
+from . import results
+
 _SENTINEL = object()
 
 
@@ -88,6 +90,9 @@ def _run(job: Job, use_cache: bool) -> None:
 
         job._result_obj = result
         job.result = _payload(job, result)
+        # Lưu ra đĩa theo TỪNG mặt sổ: quét mặt mới không xoá kết quả mặt cũ,
+        # và F5 / khởi động lại server vẫn còn (đây cũng là lịch sử quét).
+        results.save_job(job.ws_id, job.sheet_ids, job.result, job.id)
         job.status = "done"
         job.emit({
             "stage": "finished",
