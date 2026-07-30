@@ -48,11 +48,12 @@ mất tiền. Chỉ khi người dùng đã xoay/cắt mới buộc gửi bản 
 - **`web/AGENTS.md`** yêu cầu đọc tài liệu Next trong `node_modules` trước khi
   sửa code Next — bản này có breaking change so với kiến thức sẵn có.
 - **Dữ liệu tài chính thật không nằm trong repo**: `.gitignore` chặn `input/`,
-  `output/`, `.cache/`, `.data/`, `.env`.
-  ⚠️ Nhưng **fixture test vẫn còn số tài khoản thật của khách** (`615001`,
-  `0323401` trong `tests/test_core.py`, `tests/test_validate.py`) và vài comment
-  nhắc tên công ty khách. Sổ mẫu đã được đổi sang số bịa ở commit cuối. Nếu repo
-  có khả năng thành public thì nên thay nốt các fixture này trước.
+  `output/`, `.cache/`, `.data/`, `.env`. Hai commit cuối đã thay hết số tài
+  khoản và tên công ty thật của khách trong sổ mẫu và fixture test bằng dữ liệu
+  bịa — các fixture đó chỉ kiểm tra HÀNH VI (gộp sổ theo `account_no`, lan
+  metadata từ trang bìa) nên đổi giá trị không mất ý nghĩa hồi quy.
+  ⚠️ Lưu ý: **lịch sử git của các commit trước đó vẫn còn giá trị cũ**. Nếu repo
+  có khả năng thành public thì cân nhắc squash nhánh này khi merge.
 - **Chưa làm**: đăng nhập/phân quyền, hàng đợi Celery, bounding box do model trả
   (đối chiếu ảnh↔dòng hiện dùng thuật toán ước lượng vì đổi prompt sẽ mất toàn
   bộ cache). Xem `docs/WEB_PLAN.md` §6.
