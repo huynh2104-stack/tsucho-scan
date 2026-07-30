@@ -398,7 +398,7 @@ def _safe_name(name: str) -> str:
 def _disposition(filename: str) -> str:
     """Header tải file chịu được tên tiếng Việt/Nhật.
 
-    Header HTTP chỉ mã hoá được latin-1, nên `filename="Sổ 見本.csv"` làm server
+    Header HTTP chỉ mã hoá được latin-1, nên `filename="Sổ 通帳.csv"` làm server
     đổ 500. Chuẩn RFC 5987 giải quyết: gửi kèm `filename*=UTF-8''<percent-encode>`
     và để `filename=` là bản ASCII cho trình duyệt cũ.
     """

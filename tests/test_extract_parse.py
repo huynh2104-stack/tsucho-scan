@@ -195,7 +195,7 @@ def test_pdf_mot_trang_giu_nguyen_bytes():
 
 
 def test_pdf_xoay_180_cho_ban_scan_lon_nguoc(tmp_path):
-    # Bản scan PDF lộn ngược (通帳：見本) — trước đây --rotate bị cấm với PDF
+    # Bản scan PDF lộn ngược (PDF scan mẫu) — trước đây --rotate bị cấm với PDF
     from pypdf import PdfReader
 
     path = tmp_path / "so.pdf"
