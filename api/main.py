@@ -469,11 +469,35 @@ def export(ws_id: str, body: dict = Body(...)):
     if structure == "per_sheet":
         names = {s.id: s.name for s in ws.sheets}
         accounts = _split_by_sheet(accounts, names)
-    elif structure == "merged" and len(accounts) > 1:
+    elif structure == "merged":
+        # KHÔNG đặt điều kiện len(accounts) > 1: các khối cùng ngân hàng và cùng
+        # số tài khoản đã được gộp từ trước, nên nhiều mặt sổ vẫn có thể ra đúng
+        # một account — mà vẫn cần dòng phân cách để biết dòng nào của file nào.
         # "Gộp chung một bảng" phải ra ĐÚNG MỘT bảng. Trước đây chỉ dựa vào việc
         # các khối tự gộp theo bank+account_no — mà sổ không có trang bìa thì
         # account_no là null nên không khối nào gộp được, kết quả ra y hệt bản
         # tách. Ở đây ép thành một sổ duy nhất, đúng như tên tuỳ chọn.
+        names = {sh.id: sh.name for sh in ws.sheets}
+        merged_rows: list[dict] = []
+        seen_sheet: str | None = None
+        for acc in accounts:
+            for tx in acc["transactions"]:
+                sid = tx.get("sheet_id")
+                # Đổi sang mặt sổ khác → chèn một dòng phân cách mảnh ghi tên
+                # file. Gộp mà không có mốc nào thì không biết dòng nào của file
+                # nào; một dòng ghi chú là đủ, không cần kẻ ô rườm rà.
+                if sid != seen_sheet:
+                    seen_sheet = sid
+                    merged_rows.append({
+                        "date": None, "date_raw": None, "kind": None,
+                        "description": f"── {names.get(sid or '', sid or '?')}",
+                        "extra_text": None, "store_code": None,
+                        "amount_out": None, "amount_in": None, "balance": None,
+                        "status": "note", "reason": "", "is_note": True,
+                        "sheet_id": sid,
+                    })
+                merged_rows.append(tx)
+
         first = accounts[0]
         accounts = [{
             "bank_name": first.get("bank_name"),
@@ -481,7 +505,7 @@ def export(ws_id: str, body: dict = Body(...)):
             "account_no": first.get("account_no"),
             "holder": first.get("holder"),
             "sheet_title": book,
-            "transactions": [t for a in accounts for t in a["transactions"]],
+            "transactions": merged_rows,
         }]
 
     if fmt == "csv":

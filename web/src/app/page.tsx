@@ -16,8 +16,6 @@ import {
   addSample,
   addSheets,
   adjustSheets,
-  autofixApply,
-  autofixPlan,
   buildAccounts,
   createWorkspace,
   cropSheet,
@@ -33,10 +31,8 @@ import {
   rotateSheets,
   rowMap,
   saveBlob,
-  splitSheet,
   startScan,
   undoSheet,
-  type AutofixPlan,
   type PerSheet,
   type ResultStore,
   type RowBands,
@@ -83,15 +79,18 @@ export default function Workbench() {
 
   // KHO kết quả theo TỪNG mặt sổ. Trước đây giữ một ScanPayload duy nhất nên
   // quét mặt mới là ghi đè, làm mất kết quả các mặt đã quét — chính là bug cũ.
-  const [store, setStore] = useState<ResultStore>({});
+  /* past / present / future nằm TRONG MỘT state.
+     Tách ra ba state riêng thì mỗi hàm phải đọc state kia qua closure — và
+     closure đó là bản CŨ, nên bấm Ctrl+Y liên tiếp bị thiếu mất một bước.
+     Gộp lại thì mỗi lần cập nhật nhìn thấy toàn bộ lịch sử đúng tại thời điểm đó. */
+  const [hist, setHist] = useState<{
+    past: ResultStore[];
+    present: ResultStore;
+    future: ResultStore[];
+  }>({ past: [], present: {}, future: [] });
+  const store = hist.present;
   const [states, setStates] = useState<Record<string, ScanState>>({});
-  const [autofix, setAutofix] = useState<AutofixPlan | null>(null);
 
-  /* Lịch sử cho Ctrl+Z. Giữ ẢNH CHỤP cả kho: kho là JSON thuần và một mặt sổ
-     chỉ vài chục dòng, nên chụp cả cây đơn giản và không thể sai lệch — an toàn
-     hơn hẳn lưu từng thao tác nghịch đảo. */
-  const [past, setPast] = useState<ResultStore[]>([]);
-  const [future, setFuture] = useState<ResultStore[]>([]);
 
   /** Dòng đang chọn ở bảng kết quả — khung ảnh khoanh đúng dải của dòng này. */
   const [selRow, setSelRow] = useState<TxRef | null>(null);
@@ -129,7 +128,7 @@ export default function Workbench() {
         try {
           const w = await getWorkspace(saved);
           setWs(w);
-          setStore(w.results ?? {});      // kết quả đã quét sống qua F5
+          syncStore(w.results ?? {});     // kết quả đã quét sống qua F5
           return;
         } catch {
           localStorage.removeItem(WS_KEY);
@@ -190,68 +189,24 @@ export default function Workbench() {
     return out;
   }, [store]);
 
-  // Xem ảnh nào thì hỏi backend luôn "có cần chỉnh gì không". Chạy bằng thuật
-  // toán nên không tốn phí; sha256 vào deps để ảnh đổi là tính lại.
+  /* Lưới an toàn cho lớp phủ kéo-thả: mọi nhánh con đều có thể gọi
+     stopPropagation (thẻ mặt sổ làm vậy để trang không xử lý lại), nên onDrop
+     của trang không chắc chạy. Nghe ở mức CỬA SỔ thì luôn tắt được lớp phủ. */
   useEffect(() => {
-    if (!ws || !activeSheet) {
-      setAutofix(null);
-      return;
-    }
-    let alive = true;
-    autofixPlan(ws.id, activeSheet.id)
-      .then((p) => alive && setAutofix(p))
-      .catch(() => alive && setAutofix(null));
+    const clear = () => setDragging(false);
+    window.addEventListener("drop", clear);
+    window.addEventListener("dragend", clear);
+    // Chuột rời hẳn cửa sổ khi đang kéo cũng phải tắt
+    const leave = (e: DragEvent) => {
+      if (!e.relatedTarget) clear();
+    };
+    window.addEventListener("dragleave", leave);
     return () => {
-      alive = false;
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("dragleave", leave);
     };
-  }, [ws?.id, activeSheet?.id, activeSheet?.sha256]);
-
-
-  // Phím tắt: Ctrl+Z / Ctrl+Shift+Z cho bảng, n/p nhảy dòng cần soát.
-  // n/p bị bỏ qua khi đang gõ trong ô, nếu không sẽ không đánh được chữ "n".
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const typing =
-        el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable;
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redoEdit();
-        else undoEdit();
-        return;
-      }
-      // Ctrl+Y = làm lại (thói quen Windows, song song với Ctrl+Shift+Z)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        redoEdit();
-        return;
-      }
-      if (typing) return;
-
-      // Ctrl+A: chọn tất cả MẶT SỔ thay vì bôi đen cả trang
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        setTicked(new Set(sheets.map((s) => s.id)));
-        return;
-      }
-      // Bỏ chọn: dùng Escape đơn thuần. KHÔNG dùng Ctrl+Esc — trên Windows đó
-      // là phím mở Start menu, trình duyệt không nhận được.
-      if (e.key === "Escape") {
-        setTicked(new Set());
-        return;
-      }
-      if (e.key === "n" || e.key === "N") {
-        e.preventDefault();
-        jumpBad(1);
-      } else if (e.key === "p" || e.key === "P") {
-        e.preventDefault();
-        jumpBad(-1);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   /** Chạy một thao tác đổi workspace. Trả về true nếu thành công. */
   const guard = async (fn: () => Promise<Workspace>): Promise<boolean> => {
@@ -260,7 +215,8 @@ export default function Workbench() {
     try {
       const w = await fn();
       setWs(w);
-      if (w.results) setStore(w.results);
+      // GỘP: giữ nguyên các ô người dùng đã sửa ở những mặt sổ khác
+      if (w.results) syncStore(w.results);
       return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -270,19 +226,37 @@ export default function Workbench() {
     }
   };
 
+  /** Tải file lên. `beforeId` = chèn NGAY TRƯỚC mặt sổ đó (thả vào giữa danh sách). */
   const upload = useCallback(
-    async (files: File[]) => {
+    async (files: File[], beforeId?: string) => {
       if (!ws) return;
       const ok = files.filter((f) => /\.(jpe?g|png|webp|pdf)$/i.test(f.name));
       if (ok.length === 0) return;
       setBusy(true);
       setErr(null);
       try {
-        const next = await addSheets(ws.id, ok);
+        const created = await addSheets(ws.id, ok);
+        const added = created.added;
+        let next: Workspace = created;
+
+        // File mới luôn được thêm vào CUỐI; nếu người dùng thả vào giữa danh
+        // sách thì sắp lại cho đúng chỗ họ nhắm tới.
+        if (beforeId && added.length) {
+          const rest = created.sheets
+            .map((sh) => sh.id)
+            .filter((id) => !added.includes(id));
+          const at = rest.indexOf(beforeId);
+          if (at >= 0) {
+            rest.splice(at, 0, ...added);
+            next = await reorderSheets(ws.id, rest);
+          }
+        }
+
         setWs(next);
-        if (next.added.length) {
-          setActive(next.added[0]);
-          setTicked((prev) => new Set([...prev, ...next.added]));
+        if (next.results) syncStore(next.results);
+        if (added.length) {
+          setActive(added[0]);
+          setTicked((prev) => new Set([...prev, ...added]));
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -467,7 +441,9 @@ export default function Workbench() {
             // các mặt quét trước vẫn còn nguyên.
             const w = await getWorkspace(ws.id);
             setWs(w);
-            setStore(w.results ?? {});
+            // Chỉ những mặt VỪA QUÉT mới lấy bản mới; các mặt khác giữ nguyên
+            // bản người dùng đang sửa dở.
+            syncStore(w.results ?? {}, ids);
             // Quét xong mà khung phải trống thì người dùng tưởng thất bại →
             // tự mở mặt sổ đầu tiên vừa quét mà CÓ giao dịch
             const first = ids.find((id) => w.results?.[id]?.blocks?.length);
@@ -490,34 +466,63 @@ export default function Workbench() {
     blockIndex: number,
     fn: (rows: Tx[]) => Tx[],
   ) => {
-    const data = store[sheetId];
-    if (!data) return;
-    // Chụp trạng thái TRƯỚC khi đổi, NGOÀI hàm cập nhật: React gọi updater
-    // hai lần ở chế độ phát triển, đặt setPast bên trong sẽ đẩy lịch sử gấp đôi
-    // và một lần Ctrl+Z chỉ lùi được nửa bước.
-    setPast((p) => [...p.slice(-49), store]);
-    setFuture([]);
-    const blocks = data.blocks.map((b, bi) =>
-      bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
-    );
-    setStore({ ...store, [sheetId]: { ...data, blocks } });
+    commitStore((prev) => {
+      const data = prev[sheetId];
+      if (!data) return prev;
+      const blocks = data.blocks.map((b, bi) =>
+        bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
+      );
+      return { ...prev, [sheetId]: { ...data, blocks } };
+    });
   };
 
   const undoEdit = () =>
-    setPast((p) => {
-      if (p.length === 0) return p;
-      const prev = p[p.length - 1];
-      setFuture((f) => [store, ...f.slice(0, 49)]);
-      setStore(prev);
-      return p.slice(0, -1);
-    });
+    setHist((h) =>
+      h.past.length === 0
+        ? h
+        : {
+            past: h.past.slice(0, -1),
+            present: h.past[h.past.length - 1],
+            future: [h.present, ...h.future.slice(0, 49)],
+          },
+    );
 
   const redoEdit = () =>
-    setFuture((f) => {
-      if (f.length === 0) return f;
-      setPast((p) => [...p.slice(-49), store]);
-      setStore(f[0]);
-      return f.slice(1);
+    setHist((h) =>
+      h.future.length === 0
+        ? h
+        : {
+            past: [...h.past.slice(-49), h.present],
+            present: h.future[0],
+            future: h.future.slice(1),
+          },
+    );
+
+  /** Thay kho do NGƯỜI DÙNG sửa → có vào lịch sử Ctrl+Z. */
+  const commitStore = (next: (prev: ResultStore) => ResultStore) =>
+    setHist((h) => ({
+      past: [...h.past.slice(-49), h.present],
+      present: next(h.present),
+      future: [],
+    }));
+
+  /** Đồng bộ kết quả từ server. GỘP chứ không ghi đè, và KHÔNG vào lịch sử.
+   *
+   * Ghi đè cả kho là nguyên nhân làm mất các ô người dùng đã sửa ở mặt sổ khác
+   * mỗi khi quét thêm file, xoá file hay đổi thứ tự. Chỉ những mặt vừa được
+   * quét lại (`replace`) mới lấy bản mới từ server.
+   */
+  const syncStore = (fromServer: ResultStore, replace: string[] = []) =>
+    setHist((h) => {
+      const merged: ResultStore = { ...fromServer };
+      for (const [sid, local] of Object.entries(h.present)) {
+        if (!replace.includes(sid) && fromServer[sid]) merged[sid] = local;
+      }
+      // Mặt sổ đã bị xoá ở server thì cũng bỏ khỏi kho
+      for (const sid of Object.keys(merged)) {
+        if (!fromServer[sid]) delete merged[sid];
+      }
+      return { ...h, present: merged };
     });
 
   /** Sửa một ô — giữ tại client, xuất file lấy đúng bản đang thấy. */
@@ -572,6 +577,54 @@ export default function Workbench() {
       });
     });
 
+  /* Phím tắt toàn cục.
+     Ctrl+Z hoàn tác bảng, Ctrl+Shift+Z / Ctrl+Y làm lại, n/p nhảy dòng cần
+     soát, Ctrl+A chọn tất cả mặt sổ, Escape bỏ chọn.
+     n/p bị bỏ qua khi đang gõ trong ô, nếu không sẽ không đánh được chữ "n". */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redoEdit();
+        else undoEdit();
+        return;
+      }
+      // Ctrl+Y = làm lại (thói quen Windows, song song với Ctrl+Shift+Z)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redoEdit();
+        return;
+      }
+      if (typing) return;
+
+      // Ctrl+A: chọn tất cả MẶT SỔ thay vì bôi đen cả trang
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setTicked(new Set(sheets.map((sh) => sh.id)));
+        return;
+      }
+      // Bỏ chọn: Escape đơn. KHÔNG dùng Ctrl+Esc — trên Windows đó là phím mở
+      // Start menu, trình duyệt không nhận được.
+      if (e.key === "Escape") {
+        setTicked(new Set());
+        return;
+      }
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        jumpBad(1);
+      } else if (e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        jumpBad(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   const doExport = async (o: ExportOpts) => {
     if (!ws || Object.keys(store).length === 0) return;
     setExporting(true);
@@ -607,6 +660,11 @@ export default function Workbench() {
     <div
       className="flex min-h-0 flex-1 flex-col"
       onDragOver={(e) => {
+        // CHỈ nhận khi đang kéo FILE từ máy. Kéo thẻ mặt sổ trong danh sách
+        // cũng bắn dragover lên đây; trước kia nó bật lớp phủ "Thả ra để thêm",
+        // rồi onDrop của thẻ gọi stopPropagation nên lớp phủ không bao giờ tắt
+        // — màn hình kẹt luôn.
+        if (!e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -614,10 +672,16 @@ export default function Workbench() {
         if (e.currentTarget === e.target) setDragging(false);
       }}
       onDrop={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) {
+          setDragging(false);
+          return;
+        }
         e.preventDefault();
         setDragging(false);
         void upload(Array.from(e.dataTransfer.files));
       }}
+      // Lưới an toàn: kéo xong dù thả ở đâu cũng phải tắt lớp phủ
+      onDragEnd={() => setDragging(false)}
     >
       {err && (
         <p className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger">
@@ -649,7 +713,7 @@ export default function Workbench() {
                     try {
                       const w = await addSample(ws.id);
                       setWs(w);
-                      setStore(w.results ?? {});
+                      syncStore(w.results ?? {}, w.added);
                       if (w.added[0]) setActive(w.added[0]);
                     } catch (e) {
                       setErr(e instanceof Error ? e.message : String(e));
@@ -745,7 +809,16 @@ export default function Workbench() {
               onRename={(id, name) =>
                 ws && void guard(() => renameSheet(ws.id, id, name))
               }
-              onReorder={(ids) => ws && void guard(() => reorderSheets(ws.id, ids))}
+              onReorder={(ids) => {
+                setDragging(false);
+                if (ws) void guard(() => reorderSheets(ws.id, ids));
+              }}
+              onDropFiles={(files, beforeId) => {
+                // Thẻ mặt sổ gọi stopPropagation nên sự kiện KHÔNG lên tới
+                // window — phải tự tắt lớp phủ ở đây, nếu không nó kẹt lại.
+                setDragging(false);
+                void upload(files, beforeId);
+              }}
             />
           </div>
 
@@ -805,23 +878,9 @@ export default function Workbench() {
                 },
               });
             }}
-            autofix={autofix}
             highlight={highlight}
             highlightExact={!!bands?.exact}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
-            onAutofix={() => {
-              if (!ws || !active || !autofix?.steps.length) return;
-              void guard(() => autofixApply(ws.id, active, autofix.steps));
-            }}
-            onSplit={(x) => {
-              if (!ws || !active) return;
-              setConfirm({
-                title: t.confirmSplitTitle,
-                message: t.confirmSplitMsg,
-                label: t.splitTwo,
-                run: () => void guard(() => splitSheet(ws.id, active, x)),
-              });
-            }}
           />
         </section>
 
@@ -831,16 +890,18 @@ export default function Workbench() {
             <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-1.5">
               <button
                 onClick={undoEdit}
-                disabled={past.length === 0}
+                disabled={hist.past.length === 0}
                 title={`${t.undoEditLabel} (Ctrl+Z)`}
                 className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
                 ↶ {t.undoEditLabel}
-                {past.length > 0 && <span className="tnum ml-1 text-ink3">{past.length}</span>}
+                {hist.past.length > 0 && (
+                  <span className="tnum ml-1 text-ink3">{hist.past.length}</span>
+                )}
               </button>
               <button
                 onClick={redoEdit}
-                disabled={future.length === 0}
+                disabled={hist.future.length === 0}
                 title={`${t.redoEditLabel} (Ctrl+Y)`}
                 className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >

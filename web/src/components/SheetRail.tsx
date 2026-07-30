@@ -66,6 +66,7 @@ export default function SheetRail({
   onActivate,
   onRename,
   onReorder,
+  onDropFiles,
 }: {
   wsId: string;
   sheets: Sheet[];
@@ -78,6 +79,8 @@ export default function SheetRail({
   onActivate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onReorder: (ids: string[]) => void;
+  /** Thả FILE từ máy vào giữa danh sách → tải lên và chèn trước mặt sổ này. */
+  onDropFiles: (files: File[], beforeId: string) => void;
 }) {
   const { t } = useT();
   // Click ĐÚP mới vào chế độ sửa tên; click đơn vẫn là "xem mặt sổ này"
@@ -140,14 +143,18 @@ export default function SheetRail({
                 e.dataTransfer.setData("text/plain", s.id);
               }}
               onDragOver={(e) => {
+                // Nhận cả hai loại: đổi thứ tự (kéo thẻ) và chèn file mới
                 e.preventDefault();
                 setOver(s.id);
               }}
               onDragLeave={() => setOver((o) => (o === s.id ? null : o))}
               onDrop={(e) => {
                 e.preventDefault();
-                e.stopPropagation();   // đừng để lọt ra vùng thả file của trang
-                drop(s.id);
+                e.stopPropagation();   // trang không xử lý lại lần nữa
+                const files = Array.from(e.dataTransfer.files ?? []);
+                if (files.length > 0) onDropFiles(files, s.id);  // chèn vào đây
+                else if (dragId.current) drop(s.id);              // đổi thứ tự
+                else onDropFiles([], s.id);                       // chỉ để tắt lớp phủ
                 dragId.current = null;
                 setDragging(null);
                 setOver(null);

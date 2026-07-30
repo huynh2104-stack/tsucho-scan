@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { sheetImage, type AutofixPlan, type Sheet } from "@/lib/api";
+import { sheetImage, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -113,9 +113,6 @@ export default function SheetViewer({
   onUndo,
   onScanThis,
   onDelete,
-  onAutofix,
-  onSplit,
-  autofix,
   highlight,
   highlightExact,
   stale,
@@ -135,9 +132,6 @@ export default function SheetViewer({
   onUndo: () => void;
   onScanThis: () => void;
   onDelete: () => void;
-  onAutofix: () => void;
-  onSplit: (x: number) => void;
-  autofix: AutofixPlan | null;
   /** Dải ảnh của dòng đang chọn ở bảng kết quả — để khoanh đúng chỗ. */
   highlight: { y0: number; y1: number } | null;
   highlightExact: boolean;
@@ -155,8 +149,11 @@ export default function SheetViewer({
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const imgBox = useRef<HTMLDivElement>(null);
   const scrollBox = useRef<HTMLDivElement>(null);
-  /** Đang kéo để DI CHUYỂN ảnh (chỉ khi không ở chế độ cắt). */
-  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  /* Di ảnh bằng transform translate, KHÔNG bằng scrollLeft/scrollTop: ảnh nhỏ
+     hơn khung thì không có gì để cuộn, kéo sẽ chẳng nhúc nhích — đúng lỗi
+     người dùng gặp. translate thì di được mọi lúc, kể cả ra ngoài khung. */
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const pan = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const [panning, setPanning] = useState(false);
 
   const dirty = fine !== 0 || bright !== 100 || contrast !== 100;
@@ -171,6 +168,7 @@ export default function SheetViewer({
     setCropping(false);
     setBox(null);
     setZoom(1);
+    setOffset({ x: 0, y: 0 });
     clearPreview();
   }, [sheet?.id]);
 
@@ -325,35 +323,29 @@ export default function SheetViewer({
           const box = scrollBox.current;
           if (!box) return;
           const r = box.getBoundingClientRect();
-          // Giữ điểm dưới con trỏ đứng yên khi phóng to
-          const cx = e.clientX - r.left + box.scrollLeft;
-          const cy = e.clientY - r.top + box.scrollTop;
-          const next = Math.max(0.4, Math.min(4, zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-          const k = next / zoom;
-          setZoom(next);
-          requestAnimationFrame(() => {
-            box.scrollLeft = cx * k - (e.clientX - r.left);
-            box.scrollTop = cy * k - (e.clientY - r.top);
+          // Vị trí con trỏ so với TÂM khung — dùng để giữ điểm đang trỏ đứng yên
+          const mx = e.clientX - r.left - r.width / 2;
+          const my = e.clientY - r.top - r.height / 2;
+          setZoom((z) => {
+            const next = Math.max(0.3, Math.min(6, z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+            const k = next / z;
+            setOffset((o) => ({
+              x: mx - (mx - o.x) * k,
+              y: my - (my - o.y) * k,
+            }));
+            return next;
           });
         }}
         onMouseDown={(e) => {
           if (cropping || e.button !== 0) return;
-          const box = scrollBox.current;
-          if (!box) return;
-          pan.current = {
-            x: e.clientX,
-            y: e.clientY,
-            left: box.scrollLeft,
-            top: box.scrollTop,
-          };
+          e.preventDefault();
+          pan.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
           setPanning(true);
         }}
         onMouseMove={(e) => {
           const p = pan.current;
-          const box = scrollBox.current;
-          if (!p || !box) return;
-          box.scrollLeft = p.left - (e.clientX - p.x);
-          box.scrollTop = p.top - (e.clientY - p.y);
+          if (!p) return;
+          setOffset({ x: p.ox + (e.clientX - p.x), y: p.oy + (e.clientY - p.y) });
         }}
         onMouseUp={() => {
           pan.current = null;
@@ -363,14 +355,22 @@ export default function SheetViewer({
           pan.current = null;
           setPanning(false);
         }}
-        className={`canvas-bg thin-scroll flex min-h-0 flex-1 items-start justify-center overflow-auto p-5 ${
+        onDoubleClick={() => {
+          setZoom(1);
+          setOffset({ x: 0, y: 0 });
+        }}
+        className={`canvas-bg relative flex min-h-0 flex-1 items-center justify-center overflow-hidden ${
           cropping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
         }`}
       >
         <div
           ref={imgBox}
           className="relative select-none"
-          style={{ width: `${Math.min(BASE_WIDTH * zoom, 1) * 100}%` }}
+          style={{
+            width: `${BASE_WIDTH * 100}%`,
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+            transformOrigin: "center center",
+          }}
           onMouseDown={(e) => {
             if (!cropping) return;
             const p = rel(e);
@@ -465,42 +465,6 @@ export default function SheetViewer({
           <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
             {scanning ? t.scanning : t.rescanNow}
           </Tool>
-        </div>
-      )}
-
-      {/* ── Cắt nhanh thông minh — chạy bằng thuật toán nên $0 ── */}
-      {autofix && (autofix.steps.length > 0 || autofix.gutter !== null) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-accentpale/50 px-3 py-1.5">
-          <span className="text-[11.5px] font-semibold text-accent">{t.autofixTitle}</span>
-          {autofix.steps.length > 0 && (
-            <>
-              <span className="text-[11.5px] text-ink2">
-                {autofix.steps
-                  .map((st) =>
-                    st.kind === "crop"
-                      ? t.afCrop
-                      : st.kind === "rotate"
-                        ? t.afRotate(st.degrees)
-                        : t.afTilt(st.degrees),
-                  )
-                  .join(" · ")}
-              </span>
-              <Tool tone="accent" onClick={onAutofix} disabled={busy} title={t.autofixApply}>
-                {t.autofixApply}
-              </Tool>
-            </>
-          )}
-          {autofix.gutter !== null && (
-            <Tool
-              onClick={() => onSplit(autofix.gutter!)}
-              disabled={busy}
-              title={t.splitHint}
-            >
-              ⇥ {t.splitTwo}
-            </Tool>
-          )}
-          <span className="flex-1" />
-          <span className="text-[10.5px] text-ink3">{t.autofixNo180}</span>
         </div>
       )}
 
