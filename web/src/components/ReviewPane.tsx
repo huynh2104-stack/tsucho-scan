@@ -117,9 +117,11 @@ function Row({
   chk,
   ref_,
   dim,
+  sel,
   t,
   onEdit,
   onDelete,
+  onSelect,
 }: {
   tx: Tx;
   n: number;
@@ -128,9 +130,11 @@ function Row({
   ref_: TxRef;
   /** Đang lọc và dòng này không khớp → làm mờ thay vì ẩn, để không mất mạch sổ. */
   dim: boolean;
+  sel: boolean;
   t: Dict;
   onEdit: EditFn;
   onDelete: RowActionFn;
+  onSelect: RowActionFn;
 }) {
   const flag = tx.status === "check" || chk === "NG";
   const fixed = tx.status === "fixed";
@@ -138,9 +142,13 @@ function Row({
 
   return (
     <tr
-      className={`group border-b border-rule2 ${note ? "italic text-ink3" : ""} ${
-        n % 2 === 0 ? "bg-band" : ""
-      } ${dim ? "opacity-25" : ""} hover:bg-accentpale/30`}
+      data-row={`${ref_.sheet}:${ref_.block}:${ref_.row}`}
+      onClick={() => onSelect(ref_)}
+      className={`group cursor-default border-b border-rule2 ${
+        note ? "italic text-ink3" : ""
+      } ${n % 2 === 0 ? "bg-band" : ""} ${dim ? "opacity-25" : ""} ${
+        sel ? "outline outline-2 -outline-offset-2 outline-danger" : ""
+      } hover:bg-accentpale/30`}
     >
       <td className="tnum w-8 border-r border-rule2 bg-card2 px-1 text-center text-[10.5px] text-ink3">
         {tx.row_no || String(n).padStart(2, "0")}
@@ -255,6 +263,8 @@ function AccountCard({
   onDeleteRow,
   onAddRow,
   onAutoBalance,
+  selected,
+  onSelectRow,
 }: {
   meta: AccountMeta;
   rows: Tx[];
@@ -269,6 +279,8 @@ function AccountCard({
   onDeleteRow: RowActionFn;
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
+  selected: TxRef | null;
+  onSelectRow: (ref: TxRef) => void;
 }) {
   const chk = checkColumn(rows);
   const real = rows.filter((r) => !r.is_note);
@@ -325,9 +337,16 @@ function AccountCard({
                 chk={chk[i]}
                 ref_={refs[i]}
                 dim={!!q && !matches(tx)}
+                sel={
+                  !!selected &&
+                  selected.sheet === refs[i].sheet &&
+                  selected.block === refs[i].block &&
+                  selected.row === refs[i].row
+                }
                 t={t}
                 onEdit={onEdit}
                 onDelete={onDeleteRow}
+                onSelect={onSelectRow}
               />
             ))}
           </tbody>
@@ -378,6 +397,8 @@ export default function ReviewPane({
   onDeleteRow,
   onAddRow,
   onAutoBalance,
+  selected,
+  onSelectRow,
 }: {
   store: ResultStore;
   sheets: Sheet[];
@@ -390,6 +411,9 @@ export default function ReviewPane({
   onDeleteRow: RowActionFn;
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
+  /** Dòng đang chọn — khung giữa khoanh đúng dải ảnh của dòng này. */
+  selected: TxRef | null;
+  onSelectRow: (ref: TxRef) => void;
 }) {
   const { t } = useT();
   const g = t.colGloss;
@@ -468,6 +492,8 @@ export default function ReviewPane({
         onDeleteRow={onDeleteRow}
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
+        selected={selected}
+        onSelectRow={onSelectRow}
       />
     ));
   };

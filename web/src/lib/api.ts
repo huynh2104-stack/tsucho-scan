@@ -250,6 +250,18 @@ export const autofixApply = (wsId: string, sheetId: string, steps: AutofixStep[]
 export const splitSheet = (wsId: string, sheetId: string, x: number) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });
 
+/** Dải ảnh của từng dòng — ước lượng từ ảnh, MIỄN PHÍ (xem api/rowmap.py). */
+export type RowBands = { bands: { y0: number; y1: number }[]; exact: boolean };
+
+export const rowMap = async (wsId: string, sheetId: string, rows: number) =>
+  asJson<RowBands>(
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap?rows=${rows}`),
+  );
+
+/** Thêm sổ MẪU (dữ liệu giả lập) — chạy hết luồng mà không gọi model. */
+export const addSample = (wsId: string) =>
+  jsonPost<Workspace & { added: string[] }>(`/api/ws/${wsId}/sample`, {});
+
 export const resetSheets = (wsId: string, sheet_ids: string[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/reset`, { sheet_ids });
 

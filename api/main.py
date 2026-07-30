@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from export import export_accounts
 
-from . import autofix, export_csv, jobs, results, workspace
+from . import autofix, export_csv, jobs, results, rowmap, sample, workspace
 
 app = FastAPI(title="tsucho-scan API", version="0.2.0")
 
@@ -216,6 +216,36 @@ def reset_sheets(ws_id: str, body: dict = Body(...)) -> dict:
     ws.save()
     return workspace.to_json(ws)
 
+
+
+@app.get("/api/ws/{ws_id}/sheets/{sheet_id}/rowmap")
+def sheet_rowmap(ws_id: str, sheet_id: str, rows: int = 0) -> dict:
+    """Ước lượng dải ảnh của từng dòng — để click dòng là khoanh đúng chỗ.
+
+    Chạy bằng thuật toán trên ảnh có sẵn nên $0 và dùng được cho cả những mặt sổ
+    đã quét từ trước. Xem `api/rowmap.py` để biết giới hạn.
+    """
+    from PIL import Image
+
+    ws = _ws(ws_id)
+    sheet = _sheet(ws, sheet_id)
+    if rows <= 0:
+        return {"bands": [], "exact": False}
+    img = Image.open(sheet.dir(ws.id) / "current.png")
+    img.load()
+    return rowmap.bands_for(img, rows)
+
+
+@app.post("/api/ws/{ws_id}/sample")
+def add_sample(ws_id: str) -> dict:
+    """Thêm sổ MẪU (dữ liệu giả lập) + kết quả dựng sẵn. Không gọi model."""
+    ws = _ws(ws_id)
+    added = sample.add_to(ws)
+    return {
+        "added": added,
+        **workspace.to_json(ws),
+        "results": results.load_all(ws_id),
+    }
 
 
 # ── Cắt nhanh thông minh (thuật toán, KHÔNG gọi model nên $0) ────────

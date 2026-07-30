@@ -116,6 +116,9 @@ export default function SheetViewer({
   onAutofix,
   onSplit,
   autofix,
+  highlight,
+  highlightExact,
+  stale,
 }: {
   wsId: string;
   sheet: Sheet | null;
@@ -135,6 +138,11 @@ export default function SheetViewer({
   onAutofix: () => void;
   onSplit: (x: number) => void;
   autofix: AutofixPlan | null;
+  /** Dải ảnh của dòng đang chọn ở bảng kết quả — để khoanh đúng chỗ. */
+  highlight: { y0: number; y1: number } | null;
+  highlightExact: boolean;
+  /** Có kết quả cũ nhưng ảnh đã bị chỉnh sau đó → kết quả không còn khớp. */
+  stale: boolean;
 }) {
   const { t } = useT();
 
@@ -340,6 +348,23 @@ export default function SheetViewer({
             }}
           />
 
+          {/* Khoanh dòng đang chọn ở bảng kết quả — đối chiếu ảnh ↔ dòng */}
+          {highlight && !cropping && (
+            <div
+              className="pointer-events-none absolute inset-x-0 border-y-2 transition-all duration-200"
+              style={{
+                top: `${highlight.y0 * 100}%`,
+                height: `${Math.max(0.006, highlight.y1 - highlight.y0) * 100}%`,
+                borderColor: "var(--danger)",
+                background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+              }}
+            >
+              <span className="absolute -top-[18px] left-1 rounded-t bg-danger px-1.5 text-[10px] font-bold text-white">
+                {highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
+              </span>
+            </div>
+          )}
+
           {cropping && box && (
             <>
               <div
@@ -359,6 +384,19 @@ export default function SheetViewer({
           )}
         </div>
       </div>
+
+      {/* Kết quả cũ không còn khớp ảnh — phải nói ra, nếu không người dùng xuất
+          file từ kết quả của một tấm ảnh khác mà không biết. */}
+      {stale && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
+          <span className="text-[12px] font-semibold text-warnink">⚠ {t.staleTitle}</span>
+          <span className="text-[11.5px] text-warnink/90">{t.staleMsg}</span>
+          <span className="flex-1" />
+          <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
+            {scanning ? t.scanning : t.rescanNow}
+          </Tool>
+        </div>
+      )}
 
       {/* ── Cắt nhanh thông minh — chạy bằng thuật toán nên $0 ── */}
       {autofix && (autofix.steps.length > 0 || autofix.gutter !== null) && (

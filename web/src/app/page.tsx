@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addSample,
   addSheets,
   adjustSheets,
   autofixApply,
@@ -29,6 +30,7 @@ import {
   renameSheet,
   resetSheets,
   rotateSheets,
+  rowMap,
   saveBlob,
   splitSheet,
   startScan,
@@ -36,6 +38,7 @@ import {
   type AutofixPlan,
   type PerSheet,
   type ResultStore,
+  type RowBands,
   type ScanEvent,
   type Tx,
   type Workspace,
@@ -56,6 +59,19 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 
 const WS_KEY = "tsucho.ws";
 
+/** Số thứ tự phẳng của một dòng trong mặt sổ — khớp với thứ tự dải ảnh. */
+function flatRowIndex(store: ResultStore, sheetId: string | null, ref: TxRef): number {
+  if (!sheetId) return -1;
+  const data = store[sheetId];
+  if (!data) return -1;
+  let i = 0;
+  for (let b = 0; b < data.blocks.length; b++) {
+    if (b === ref.block) return i + ref.row;
+    i += data.blocks[b].rows.length;
+  }
+  return -1;
+}
+
 export default function Workbench() {
   const { t } = useT();
 
@@ -69,6 +85,20 @@ export default function Workbench() {
   const [store, setStore] = useState<ResultStore>({});
   const [states, setStates] = useState<Record<string, ScanState>>({});
   const [autofix, setAutofix] = useState<AutofixPlan | null>(null);
+
+  /* Lịch sử cho Ctrl+Z. Giữ ẢNH CHỤP cả kho: kho là JSON thuần và một mặt sổ
+     chỉ vài chục dòng, nên chụp cả cây đơn giản và không thể sai lệch — an toàn
+     hơn hẳn lưu từng thao tác nghịch đảo. */
+  const [past, setPast] = useState<ResultStore[]>([]);
+  const [future, setFuture] = useState<ResultStore[]>([]);
+
+  /** Dòng đang chọn ở bảng kết quả — khung ảnh khoanh đúng dải của dòng này. */
+  const [selRow, setSelRow] = useState<TxRef | null>(null);
+  const [bands, setBands] = useState<RowBands | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<{
+    ref: TxRef;
+    field: "balance" | "description";
+  } | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -118,6 +148,14 @@ export default function Workbench() {
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
 
+  /** Vị trí dải ảnh của dòng đang chọn (chỉ khi dòng đó thuộc mặt đang xem). */
+  const highlight = useMemo(() => {
+    if (!selRow || !bands || selRow.sheet !== active) return null;
+    const i = flatRowIndex(store, active, selRow);
+    return i >= 0 && i < bands.bands.length ? bands.bands[i] : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selRow, bands, active, store]);
+
   /** Thống kê từng mặt sổ, tính lại từ kho — kể cả các ô người dùng vừa sửa. */
   const perSheet: Record<string, PerSheet> = useMemo(() => {
     const out: Record<string, PerSheet> = {};
@@ -166,6 +204,34 @@ export default function Workbench() {
       alive = false;
     };
   }, [ws?.id, activeSheet?.id, activeSheet?.sha256]);
+
+
+  // Phím tắt: Ctrl+Z / Ctrl+Shift+Z cho bảng, n/p nhảy dòng cần soát.
+  // n/p bị bỏ qua khi đang gõ trong ô, nếu không sẽ không đánh được chữ "n".
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redoEdit();
+        else undoEdit();
+        return;
+      }
+      if (typing) return;
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        jumpBad(1);
+      } else if (e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        jumpBad(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   /** Chạy một thao tác đổi workspace. Trả về true nếu thành công. */
   const guard = async (fn: () => Promise<Workspace>): Promise<boolean> => {
@@ -230,6 +296,103 @@ export default function Workbench() {
 
   const allTicked = sheets.length > 0 && ticked.size === sheets.length;
   const tickedIds = () => sheets.filter((s) => ticked.has(s.id)).map((s) => s.id);
+
+
+  /** Các dòng của mặt đang xem, kèm trạng thái NG tính lại tại chỗ.
+   *
+   * Dùng cho phím n/p. Tính NG ở đây (không dùng `status` đã đóng băng) để sau
+   * khi người dùng sửa một ô thì phím n không còn dẫn về dòng đã xong.
+   */
+  const flatRows = useMemo(() => {
+    if (!active) return [];
+    const data = store[active];
+    if (!data) return [];
+    const out: { ref: TxRef; bad: boolean; field: "balance" | "description" }[] = [];
+    data.blocks.forEach((b, bi) => {
+      let prev: number | null = null;
+      b.rows.forEach((tx, ri) => {
+        let bad = false;
+        let field: "balance" | "description" = "balance";
+        if (tx.balance != null) {
+          if (prev != null) {
+            const want = prev - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
+            bad = want !== tx.balance;
+          }
+          prev = tx.balance;
+        } else if (tx.status === "check") {
+          bad = true;
+          field = "description";
+        }
+        out.push({ ref: { sheet: active, block: bi, row: ri }, bad, field });
+      });
+    });
+    return out;
+  }, [active, store]);
+
+  const badCount = flatRows.filter((r) => r.bad).length;
+
+  /* Đặt con trỏ vào ô gây lệch — SAU khi React đã vẽ dòng mới.
+     Không dùng requestAnimationFrame trong hàm xử lý: nó có thể chạy trước khi
+     React commit, lúc đó chưa tìm được ô. */
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const { ref, field } = pendingFocus;
+    const tr = document.querySelector<HTMLElement>(
+      `[data-row="${ref.sheet}:${ref.block}:${ref.row}"]`,
+    );
+    tr?.scrollIntoView({ block: "nearest" });
+    const inputs = tr?.querySelectorAll<HTMLInputElement>("input");
+    // thứ tự ô trong hàng: ngày, [区分], 摘要, 出金, 入金, 残高, ...
+    const idx = field === "balance" ? (cols.kind ? 5 : 4) : cols.kind ? 2 : 1;
+    const el = inputs?.[idx];
+    el?.focus();
+    el?.select();
+    setPendingFocus(null);
+  }, [pendingFocus, cols.kind]);
+
+  // Dải ảnh của từng dòng, để khoanh dòng đang chọn lên ảnh. Chạy bằng thuật
+  // toán trên ảnh có sẵn nên $0.
+  useEffect(() => {
+    const rows = flatRows.length;
+    if (!ws || !activeSheet || rows === 0) {
+      setBands(null);
+      return;
+    }
+    let alive = true;
+    rowMap(ws.id, activeSheet.id, rows)
+      .then((b) => alive && setBands(b))
+      .catch(() => alive && setBands(null));
+    return () => {
+      alive = false;
+    };
+  }, [ws?.id, activeSheet?.id, activeSheet?.sha256, flatRows.length]);
+
+
+  /** Nhảy tới dòng cần soát kế tiếp và ĐẶT CON TRỎ vào chính ô gây lệch.
+   *
+   * Chỉ cuộn tới thì màu vàng đã làm được rồi; giá trị nằm ở chỗ gõ được ngay
+   * mà không phải với chuột tìm đúng ô.
+   */
+  const jumpBad = (dir: 1 | -1) => {
+    if (flatRows.length === 0) return;
+    const cur = selRow
+      ? flatRows.findIndex(
+          (r) =>
+            r.ref.sheet === selRow.sheet &&
+            r.ref.block === selRow.block &&
+            r.ref.row === selRow.row,
+        )
+      : -1;
+    for (let k = 1; k <= flatRows.length; k++) {
+      const i =
+        (cur + dir * k + flatRows.length * 2) % flatRows.length;
+      if (!flatRows[i].bad) continue;
+      const { ref, field } = flatRows[i];
+      setSelRow(ref);
+      setPendingFocus({ ref, field });   // effect bên dưới sẽ focus sau khi vẽ
+      return;
+    }
+  };
 
   /** Chỉnh ảnh CHỈ tác động mặt đang xem. */
   const editTarget = () => (active ? [active] : []);
@@ -301,21 +464,41 @@ export default function Workbench() {
     }
   };
 
-  /** Đổi một dòng trong kho. Mọi hàm sửa đều đi qua đây cho gọn. */
+  /** Đổi một dòng trong kho. Mọi hàm sửa đều đi qua đây nên Ctrl+Z bao hết. */
   const patchRows = (
     sheetId: string,
     blockIndex: number,
     fn: (rows: Tx[]) => Tx[],
   ) => {
-    setStore((prev) => {
-      const data = prev[sheetId];
-      if (!data) return prev;
-      const blocks = data.blocks.map((b, bi) =>
-        bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
-      );
-      return { ...prev, [sheetId]: { ...data, blocks } };
-    });
+    const data = store[sheetId];
+    if (!data) return;
+    // Chụp trạng thái TRƯỚC khi đổi, NGOÀI hàm cập nhật: React gọi updater
+    // hai lần ở chế độ phát triển, đặt setPast bên trong sẽ đẩy lịch sử gấp đôi
+    // và một lần Ctrl+Z chỉ lùi được nửa bước.
+    setPast((p) => [...p.slice(-49), store]);
+    setFuture([]);
+    const blocks = data.blocks.map((b, bi) =>
+      bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
+    );
+    setStore({ ...store, [sheetId]: { ...data, blocks } });
   };
+
+  const undoEdit = () =>
+    setPast((p) => {
+      if (p.length === 0) return p;
+      const prev = p[p.length - 1];
+      setFuture((f) => [store, ...f.slice(0, 49)]);
+      setStore(prev);
+      return p.slice(0, -1);
+    });
+
+  const redoEdit = () =>
+    setFuture((f) => {
+      if (f.length === 0) return f;
+      setPast((p) => [...p.slice(-49), store]);
+      setStore(f[0]);
+      return f.slice(1);
+    });
 
   /** Sửa một ô — giữ tại client, xuất file lấy đúng bản đang thấy. */
   const editCell: EditFn = (ref, field, value) =>
@@ -433,6 +616,38 @@ export default function Workbench() {
         {/* ── Cột trái: kéo thả + danh sách mặt sổ ───────────── */}
         <aside className="flex min-h-0 flex-col overflow-hidden border-b border-rule bg-card lg:border-b-0 lg:border-r">
           <DropZone busy={busy} onFiles={(f) => void upload(f)} />
+
+          {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
+              mà không tốn lượt gọi và không cần đưa sổ thật lên. */}
+          {sheets.length === 0 && (
+            <div className="px-3 pb-3">
+              <button
+                onClick={() => {
+                  if (!ws) return;
+                  void (async () => {
+                    setBusy(true);
+                    try {
+                      const w = await addSample(ws.id);
+                      setWs(w);
+                      setStore(w.results ?? {});
+                      if (w.added[0]) setActive(w.added[0]);
+                    } catch (e) {
+                      setErr(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                }}
+                disabled={busy}
+                className="w-full rounded-lg border border-dashed border-accent bg-accentpale/40 px-3 py-2 text-[12.5px] font-semibold text-accent hover:bg-accentpale disabled:opacity-50"
+              >
+                ✨ {t.trySample}
+                <span className="mt-0.5 block text-[10.5px] font-normal text-ink3">
+                  {t.trySampleHint}
+                </span>
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 border-y border-rule bg-card2 px-3 py-2">
             <Tick
@@ -570,6 +785,9 @@ export default function Workbench() {
               });
             }}
             autofix={autofix}
+            highlight={highlight}
+            highlightExact={!!bands?.exact}
+            stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
             onAutofix={() => {
               if (!ws || !active || !autofix?.steps.length) return;
               void guard(() => autofixApply(ws.id, active, autofix.steps));
@@ -588,6 +806,53 @@ export default function Workbench() {
 
         {/* ── Cột phải: kết quả ──────────────────────────────── */}
         <section className="flex min-h-0 flex-col bg-page">
+          {Object.keys(store).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-1.5">
+              <button
+                onClick={undoEdit}
+                disabled={past.length === 0}
+                title={`${t.undoEdit} (Ctrl+Z)`}
+                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+              >
+                ↶ {t.undoEdit}
+                {past.length > 0 && <span className="tnum ml-1 text-ink3">{past.length}</span>}
+              </button>
+              <button
+                onClick={redoEdit}
+                disabled={future.length === 0}
+                title={`${t.redoEdit} (Ctrl+Shift+Z)`}
+                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+              >
+                ↷ {t.redoEdit}
+              </button>
+
+              <span className="mx-1 h-4 w-px bg-rule" />
+
+              <button
+                onClick={() => jumpBad(1)}
+                disabled={badCount === 0}
+                title={t.nextBadHint}
+                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+              >
+                {t.nextBad} <kbd className="ml-0.5 rounded border border-rule px-1 text-[10px]">n</kbd>
+              </button>
+              <span
+                className={`tnum rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${
+                  badCount > 0
+                    ? "bg-warnbg text-warnink"
+                    : "bg-okbg text-okink"
+                }`}
+              >
+                {badCount > 0 ? t.badLeft(badCount) : t.allChecked}
+              </span>
+              <span className="flex-1" />
+              {highlight && (
+                <span className="text-[10.5px] text-ink3">
+                  {bands?.exact ? t.rowLinkExact : t.rowLinkEstimated}
+                </span>
+              )}
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             <ReviewPane
               store={store}
@@ -601,6 +866,8 @@ export default function Workbench() {
               onDeleteRow={deleteRow}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
+              selected={selRow}
+              onSelectRow={setSelRow}
             />
           </div>
 
