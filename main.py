@@ -1,39 +1,38 @@
-"""CLI: python main.py input/anh_so.jpg -o output/ket_qua.xlsx [--rotate 270]"""
+"""CLI: python main.py input/anh_so.jpg -o output/ket_qua.xlsx [--rotate 270]
+
+Chỉ lo đọc tham số và in kết quả. Toàn bộ xử lý nằm ở core.scan() để web dùng
+lại được y hệt.
+"""
 
 import argparse
 import sys
 from pathlib import Path
 
-from extract import ExtractError, extract_transactions
-from export import export_accounts
-from validate import (
-    apply_cover_metadata,
-    merge_accounts,
-    split_mixed_accounts,
-    validate_transactions,
-)
-
-# Giá USD / 1 triệu token (input, output) để ước tính chi phí mỗi lần chạy
-# (sonnet-5: giá khuyến mãi đến 31/08/2026, sau đó 3/15)
-PRICES = {
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (1.0, 5.0),
-    "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-3.1-flash-lite": (0.25, 1.50),
-}
+from core import ExtractError, scan
 
 
-def _cost_line(model: str, usage: dict) -> str:
+def _cost_line(result) -> str:
+    if result.cached:
+        return "kết quả lấy từ cache — miễn phí, không gọi API"
+    usage = result.usage
     tokens = f"token vào {usage['input_tokens']:,} / ra {usage['output_tokens']:,}"
-    price = PRICES.get(model)
-    if not price:
+    cost = result.cost_usd
+    if cost is None:
         return tokens
-    cost = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
     line = f"{tokens}  (~${cost:.4f})"
-    if model.startswith("gemini"):
+    if result.model.startswith("gemini"):
         line += " — $0 nếu dùng bậc miễn phí AI Studio"
     return line
+
+
+def _print_progress(event: dict) -> None:
+    stage = event["stage"]
+    if stage == "page" and event.get("total", 1) > 1:
+        print(f"  {event['message']} ...")
+    elif stage == "skip":
+        print(f"      → {event['message']}")
+    elif stage == "retry":
+        print(f"      {event['message']}")
 
 
 def main() -> int:
@@ -75,35 +74,20 @@ def main() -> int:
 
     try:
         print(f"Đang đọc và trích xuất: {', '.join(args.input)} ...")
-        result = extract_transactions(
-            args.input, rotate=args.rotate, use_cache=not args.no_cache
+        result = scan(
+            args.input,
+            rotate=args.rotate,
+            use_cache=not args.no_cache,
+            banks=args.banks,
+            on_progress=_print_progress,
         )
+        path = result.to_excel(output)
 
-        # Tách account mà model trộn nhầm 2 sổ → bìa sổ điền thông tin cho sổ
-        # sau nó → gộp các khối thực chất là 1 sổ (chuỗi 残高 nối tiếp khớp)
-        accounts_raw = split_mixed_accounts(result["accounts"])
-        merged = merge_accounts(apply_cover_metadata(accounts_raw))
-
-        # --banks ghi đè tên sổ theo thứ tự sheet (kể cả khi model tự đọc ra tên khác)
-        bank_names = [b.strip() for b in args.banks.split(",")] if args.banks else []
-        for i, acc in enumerate(merged):
-            if i < len(bank_names) and bank_names[i]:
-                acc["bank_name"] = bank_names[i]
-
-        accounts = []
-        for acc in merged:
-            acc["transactions"] = validate_transactions(acc["transactions"])
-            accounts.append(acc)
-
-        source_name = ", ".join(Path(p).name for p in args.input)
-        path = export_accounts(accounts, output, source_name=source_name)
-
-        if result.get("cached"):
-            cost = "kết quả lấy từ cache — miễn phí, không gọi API"
-        else:
-            cost = _cost_line(result["model"], result["usage"])
-        print(f"Xong! ({result['model']}, {cost})")
-        for acc in accounts:
+        print(f"Xong! ({result.model}, {_cost_line(result)})")
+        for acc in result.accounts:
+            # Đếm theo status thô để khớp đúng số ô được tô màu trong Excel;
+            # dòng 検証レベル trong file chỉ tính giao dịch thật nên có thể lệch
+            # vài dòng ghi chú (繰越...) — đó là khác biệt có chủ ý.
             txs = acc["transactions"]
             n_fixed = sum(1 for t in txs if t["status"] == "fixed")
             n_check = sum(1 for t in txs if t["status"] == "check")

@@ -97,7 +97,7 @@ def _set(ws, row: int, col: int, value, font=ARIAL, fill=None, fmt=None, border=
     return cell
 
 
-def _write_sheet(ws, acc: dict, source_name: str) -> None:
+def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> None:
     txs = acc.get("transactions", [])
     has_x = any(t.get("extra_text") for t in txs)
     has_t = any(t.get("store_code") for t in txs)
@@ -239,8 +239,29 @@ def _write_sheet(ws, acc: dict, source_name: str) -> None:
         HEADER_ROW + 1 + i for i, t in enumerate(txs) if t.get("balance") is not None
     ]
 
+    # ---- Dòng 合計 ngay dưới bảng (tuỳ chọn) — công thức sống như các ô khác
+    if add_total and last >= first:
+        r += 1
+        _set(ws, r, col["摘要"], "合計", font=ARIAL_BOLD, fill=REPORT_FILL, border=BORDER)
+        # KHÔNG đặt tên biến vòng lặp là `letter` — trùng dict `letter` dùng ở dưới
+        for key, col_letter in (("お支払金額 (円)", out_l), ("お預り金額 (円)", in_l)):
+            _set(ws, r, col[key], f"=SUM({col_letter}{first}:{col_letter}{last})",
+                 font=ARIAL_BOLD, fill=REPORT_FILL, fmt=MONEY_FMT, border=BORDER)
+        # 差引残高 không cộng được (là số dư, không phải số phát sinh) → ghi số dư cuối
+        _set(ws, r, col["差引残高 (円)"],
+             f"=LOOKUP(9.9E+307,{bal_l}{first}:{bal_l}{last})" if bal_rows else None,
+             font=ARIAL_BOLD, fill=REPORT_FILL, fmt=MONEY_FMT, border=BORDER)
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(row=r, column=c)
+            if cell.fill is None or cell.fill.fill_type is None:
+                cell.fill = REPORT_FILL
+            cell.border = BORDER
+        last_written = r
+    else:
+        last_written = last
+
     # ---- 集計レポート (công thức sống)
-    r = last + 2
+    r = last_written + 2
     _set(ws, r, 2, f"■ 集計レポート（{acc.get('bank_name') or 'この口座'}）", font=ARIAL_BOLD)
     report_rows = {}
     items = []
@@ -322,19 +343,28 @@ def _write_sheet(ws, acc: dict, source_name: str) -> None:
         ws.column_dimensions[get_column_letter(c)].width = widths.get(name, 12)
 
 
-def export_accounts(accounts: list[dict], output_path: str, source_name: str = "") -> str:
-    """Ghi file .xlsx, mỗi tài khoản (sổ) một sheet riêng theo form đã duyệt."""
+def export_accounts(
+    accounts: list[dict],
+    output_path: str,
+    source_name: str = "",
+    add_total: bool = False,
+) -> str:
+    """Ghi file .xlsx, mỗi tài khoản (sổ) một sheet riêng theo form đã duyệt.
+
+    `acc["sheet_title"]` (nếu có) ghi đè tên tab — web dùng để tách tab theo
+    MẶT SỔ thay vì theo tài khoản.
+    """
     wb = Workbook()
     used_titles = set()
     for i, acc in enumerate(accounts):
-        title = _sheet_title(acc.get("bank_name"), i)
+        title = _sheet_title(acc.get("sheet_title") or acc.get("bank_name"), i)
         if title in used_titles:
             title = f"{title[:25]}({i + 1})"
         used_titles.add(title)
 
         ws = wb.active if i == 0 else wb.create_sheet()
         ws.title = title
-        _write_sheet(ws, acc, source_name)
+        _write_sheet(ws, acc, source_name, add_total=add_total)
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)

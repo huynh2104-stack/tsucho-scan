@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+/* Chủ đề tối bật bằng data-theme trên <html> (do ThemeProvider đặt), không dùng
+   prefers-color-scheme trực tiếp — "theo hệ thống" được JS quy đổi thành
+   light/dark cụ thể để chỉ có MỘT nguồn sự thật. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ── Bảng màu.
+   Nền navy đậm + nhấn xanh ngọc cho nút hành động (theo bản thiết kế đã chốt).
+   Ba màu TRẠNG THÁI vẫn neo theo export.py để web và Excel cùng bộ mặt:
+   người dùng thấy ô vàng trên web, mở Excel ra thấy đúng ô vàng đó. */
+:root {
+  /* Giao diện sáng có SẮC CHỦ ĐẠO riêng: nền ngả xanh ngọc rất nhạt, không
+     phải trắng trơn — để bản sáng cũng có nhận diện, không chỉ là bản tối lộn
+     ngược. Chữ vẫn xanh đen nên độ tương phản không đổi. */
+  --page: #e6eeed;
+  --card: #fbfdfc;
+  --card-2: #f0f5f4;
+  --card-3: #e2eceb;
+  --ink: #12211f;
+  --ink-2: #4e6461;
+  --ink-3: #7d9290;
+  --rule: #cfdcda;
+  --rule-2: #e2eae9;
+
+  /* Nền vùng XEM ẢNH — tối hơn nền chung một bậc để tờ giấy trắng nổi lên */
+  --canvas: #cfdbd9;
+
+  /* Dòng chẵn của bảng — đủ đậm để dò ngang không lệch dòng.
+     Chênh ~25 điểm độ sáng so với nền thẻ: thấy rõ mà không ồn. */
+  --band: #dbe8e5;
+
+  /* Nhấn = hành động chính (quét, xuất file) */
+  --accent: #0f9d76;
+  --accent-mid: #14b88a;
+  --accent-pale: #dbf2ea;
+  --accent-ink: #ffffff;
+
+  /* Đầu bảng — ngả xanh đen cùng họ với màu nhấn, không dùng xanh dương lạc điệu.
+     (Header trong file Excel vẫn là #2F5B7C theo form đã duyệt — chỗ đó không đổi.) */
+  --head: #234b46;
+  --head-ink: #eaf5f2;
+
+  --warn-bg: #fff2cc;       /* = UNCERTAIN  — ô cần soát */
+  --warn-ink: #7a5400;
+  --warn-edge: #e0bc66;
+
+  --ok-bg: #c6efce;         /* = FIXED_FILL — máy đã tự sửa */
+  --ok-ink: #1b5e36;
+  --ok-edge: #8ccba0;
+
+  /* Hướng dòng tiền: đỏ = rút, xanh ngọc = gửi */
+  --out-ink: #c0392b;
+  --in-ink: #0f8f6c;
+
+  --danger: #c0392b;
+  --shadow: 0 1px 2px rgb(20 32 43 / 0.05), 0 10px 28px rgb(20 32 43 / 0.07);
+  --dots: rgb(20 32 43 / 0.05);
+}
+
+[data-theme="dark"] {
+  --page: #081019;
+  --card: #0e1c28;
+  --card-2: #132532;
+  --card-3: #1a2f3f;
+  --ink: #e4eef6;
+  --ink-2: #94aabd;
+  --ink-3: #63798d;
+  --rule: #1d3242;
+  --rule-2: #162835;
+
+  /* Bản tối: vùng xem ảnh tối hơn nữa để tờ giấy nổi hẳn lên */
+  --canvas: #050b12;
+  --band: #12222e;
+
+  --accent: #10b981;
+  --accent-mid: #34d3a0;
+  --accent-pale: #10382c;
+  --accent-ink: #04231a;
+
+  --head: #163831;
+  --head-ink: #d5eee6;
+
+  --warn-bg: #46380f;
+  --warn-ink: #f4d88f;
+  --warn-edge: #806720;
+
+  --ok-bg: #12402a;
+  --ok-ink: #9fdcb6;
+  --ok-edge: #2c6b46;
+
+  --out-ink: #f4796a;
+  --in-ink: #3fd6a4;
+
+  --danger: #ef7365;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 34px rgb(0 0 0 / 0.5);
+  --dots: rgb(255 255 255 / 0.035);
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-card: var(--card);
+  --color-card2: var(--card-2);
+  --color-card3: var(--card-3);
+  --color-canvas: var(--canvas);
+  --color-band: var(--band);
+  --color-ink: var(--ink);
+  --color-ink2: var(--ink-2);
+  --color-ink3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule2: var(--rule-2);
+  --color-accent: var(--accent);
+  --color-accentmid: var(--accent-mid);
+  --color-accentpale: var(--accent-pale);
+  --color-accentink: var(--accent-ink);
+  --color-head: var(--head);
+  --color-headink: var(--head-ink);
+  --color-warnbg: var(--warn-bg);
+  --color-warnink: var(--warn-ink);
+  --color-warnedge: var(--warn-edge);
+  --color-okbg: var(--ok-bg);
+  --color-okink: var(--ok-ink);
+  --color-okedge: var(--ok-edge);
+  --color-inink: var(--in-ink);
+  --color-outink: var(--out-ink);
+  --color-danger: var(--danger);
+
+  --font-sans: "Segoe UI", "Yu Gothic UI", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, "MS Gothic", monospace;
+}
+
+html {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Nền vùng xem ảnh: tối hơn nền chung + chấm mờ — để mắt biết đâu là
+   "bàn làm việc", đâu là tờ giấy đang xem. */
+.canvas-bg {
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--dots) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* Số tiền phải thẳng cột — bắt buộc với bảng tiền */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-mid);
+  outline-offset: 2px;
+}
+
+/* Thanh cuộn mảnh, không chiếm chỗ của bảng */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+
+/* ── Hiệu ứng vạch quét trên trang đang xử lý ──────────────────────── */
+@keyframes scanSweep {
+  0% { transform: translateY(-14%); opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translateY(114%); opacity: 0; }
+}
+.scanline {
+  animation: scanSweep 1.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes pulseEdge {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-mid); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
+.pulse-edge {
+  animation: pulseEdge 1.9s ease-in-out infinite;
+}
+
+@keyframes rowIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: none; }
+}
+.row-in {
+  animation: rowIn 0.3s ease-out both;
+}
+
+@keyframes shimmer {
+  from { background-position: -180% 0; }
+  to { background-position: 180% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--rule-2) 25%, var(--rule) 50%, var(--rule-2) 75%);
+  background-size: 180% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanline, .pulse-edge, .row-in, .skeleton {
+    animation: none !important;
+  }
+}

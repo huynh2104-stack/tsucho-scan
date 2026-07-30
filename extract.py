@@ -40,6 +40,17 @@ class PageSkipped(ExtractError):
     """
 
 
+def _emit(on_progress, stage: str, message: str, **extra) -> None:
+    """Báo tiến độ cho phía gọi. CLI in ra màn hình, web đẩy vào thanh tiến độ.
+
+    Module này KHÔNG được print: nó phải chạy được cả trong tiến trình nền của
+    web, nơi stdout không ai đọc.
+    """
+    if on_progress is None:
+        return
+    on_progress({"stage": stage, "message": message, **extra})
+
+
 def _load_system_prompt() -> str:
     return PROMPT_PATH.read_text(encoding="utf-8")
 
@@ -246,7 +257,8 @@ def parse_model_output(text: str) -> dict:
     return {"accounts": accounts}
 
 
-def _call_claude(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tuple[str, dict]:
+def _call_claude(model: str, prompt: str, files: list[tuple[str, bytes]],
+                 on_progress=None) -> tuple[str, dict]:
     """Gọi Anthropic API → (text trả lời, usage). files = [(media_type, bytes), ...]"""
     blocks = []
     for media_type, data in files:
@@ -353,7 +365,8 @@ _GEMINI_SCHEMA = {
 }
 
 
-def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tuple[str, dict]:
+def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]],
+                 on_progress=None) -> tuple[str, dict]:
     """Gọi Google Gemini API → (text trả lời, usage). files = [(media_type, bytes), ...]"""
     try:
         from google import genai
@@ -411,7 +424,11 @@ def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tup
             # Lỗi tạm thời (quá tải/giới hạn tốc độ) → chờ rồi tự thử lại
             if code in (429, 500, 503) and attempt < len(backoff):
                 wait = backoff[attempt]
-                print(f"      Gemini bận ({code}), chờ {wait} giây rồi thử lại...")
+                _emit(
+                    on_progress, "retry",
+                    f"Gemini bận ({code}), chờ {wait} giây rồi thử lại...",
+                    wait=wait, code=code,
+                )
                 time.sleep(wait)
                 continue
             if code == 429:
@@ -440,15 +457,18 @@ def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]]) -> tup
     return text, usage
 
 
-def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True) -> dict:
+def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True,
+                         on_progress=None) -> dict:
     """Trích xuất giao dịch bằng model cấu hình trong .env, trả về:
 
-    {"accounts": [...], "usage": {...}, "model": ..., "cached": bool}
+    {"accounts": [...], "usage": {...}, "model": ..., "cached": bool,
+     "skipped": [...], "pages": int}
 
     file_paths: 1 đường dẫn hoặc danh sách nhiều trang của CÙNG các sổ —
     gửi chung 1 lần gọi để chuỗi 繰越 nối liền giữa các trang.
     rotate: xoay ảnh N độ theo chiều kim đồng hồ trước khi gửi (90/180/270).
     use_cache: True → cùng file + cùng thiết lập thì lấy kết quả cũ, không tốn phí.
+    on_progress: hàm nhận dict tiến độ từng trang (xem _emit); None = im lặng.
     Raise ExtractError với message thân thiện khi có vấn đề.
     """
     if isinstance(file_paths, (str, Path)):
@@ -486,15 +506,19 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True) ->
     all_cached = True
     skipped = []
     for i, unit in enumerate(units):
-        if len(units) > 1:
-            print(f"  [{i + 1}/{len(units)}] {unit[0]} ...")
+        _emit(
+            on_progress, "page", f"[{i + 1}/{len(units)}] {unit[0]}",
+            index=i + 1, total=len(units), label=unit[0],
+        )
         try:
-            single = _extract_single(unit, rotate, use_cache, model, prompt, caller)
+            single = _extract_single(
+                unit, rotate, use_cache, model, prompt, caller, on_progress
+            )
         except PageSkipped as e:
             if len(units) == 1:
                 raise
             skipped.append(unit[0])   # bìa sổ / trang trắng: bỏ qua, chạy tiếp
-            print(f"      → bỏ qua: {e}")
+            _emit(on_progress, "skip", f"bỏ qua: {e}", label=unit[0], reason=str(e))
             continue
         for acc in single["accounts"]:
             # Nhớ trang nguồn: thông tin trang bìa chỉ được lan sang TRANG KHÁC,
@@ -515,11 +539,13 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True) ->
         "model": model,
         "usage": usage_total,
         "cached": all_cached,
+        "skipped": skipped,
+        "pages": len(units),
     }
 
 
 def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
-                    model: str, prompt: str, caller) -> dict:
+                    model: str, prompt: str, caller, on_progress=None) -> dict:
     """Trích xuất 1 đơn vị = 1 ảnh hoặc 1 trang PDF (có cache riêng theo nội dung)."""
     label, media_type, data = unit
     key = hashlib.sha256(
@@ -538,7 +564,7 @@ def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
     # Model thỉnh thoảng trả JSON hỏng giữa chừng → tự thử lại 1 lần
     last_error = None
     for _ in range(2):
-        text, usage = caller(model, prompt, files)
+        text, usage = caller(model, prompt, files, on_progress)
         try:
             result = parse_model_output(text)
             break

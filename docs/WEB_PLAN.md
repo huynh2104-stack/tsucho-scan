@@ -82,16 +82,24 @@ Web (React/Next.js)  ──►  API (FastAPI)  ──►  core/ (code hiện có
                                 └──► Storage: ảnh gốc + file Excel
 ```
 
-**Việc đầu tiên phải làm ở backend** (chưa cần web):
-tách lõi thành hàm gọi được, hiện `main.py` đang trộn CLI với xử lý:
+**Việc đầu tiên phải làm ở backend** (chưa cần web): ✅ **XONG 30/07/2026** — `core.py`
 
 ```python
-# core.py  (đề xuất)
-def scan(files: list[Path], rotate: int = 0) -> ScanResult:
-    """Trả về accounts + thống kê + mức độ bảo đảm. Không in ra màn hình."""
+from core import scan
+
+result = scan(files, rotate=0, use_cache=True, banks=None, on_progress=None)
+result.accounts        # list[dict] — như cũ, export.py/eval.py dùng được ngay
+result.verification    # mức độ bảo đảm từng sổ (rows/verified/fixed/need_check/level)
+result.totals          # cộng dồn cả lần quét
+result.cost_usd        # 0.0 nếu lấy từ cache
+result.to_excel(path)  # ghi file
+result.to_dict()       # payload JSON cho API web
 ```
 
 `main.py` (CLI) và API cùng gọi `scan()`. Không viết lại logic lần hai.
+`extract.py` không còn `print()` — tiến độ đi qua `on_progress(event)` với
+`event["stage"]` ∈ `page` / `skip` / `retry` / `validate` / `done`; web nối
+thẳng cái này vào thanh tiến độ (WebSocket hoặc SSE).
 
 ### Xử lý bất đồng bộ
 PDF 24 trang mất ~4 phút. **Không để người dùng ngồi chờ trang trắng.**
@@ -127,7 +135,7 @@ Chi phí đo được: **~$0.003/trang** → 200 trang/tháng ≈ $0.60. Không 
 ## 6. Thứ tự làm (đề xuất)
 
 **Giai đoạn 1 — nền móng (chưa có giao diện)**
-1. Tách `core.scan()` khỏi CLI.
+1. ✅ Tách `core.scan()` khỏi CLI. *(xong 30/07/2026, 10 test mới, eval p5-6 không đổi)*
 2. Thêm bounding box mỗi dòng vào schema trích xuất.
 3. Chống trùng file.
 
@@ -138,28 +146,274 @@ Chi phí đo được: **~$0.003/trang** → 200 trang/tháng ≈ $0.60. Không 
 
 **Giai đoạn 3 — cho người thật dùng**
 7. Phân quyền, nhật ký.
-8. Toàn bộ giao diện **tiếng Nhật** (giám đốc Nhật là người dùng, không phải người Việt).
+8. Hoàn thiện bản dịch **tiếng Nhật** (xem §9 — khung i18n phải dựng từ ngày đầu).
 9. Bật trả phí / Vertex AI.
 
 ---
 
-## 7. Về giao diện
+## 7. Thiết kế giao diện
 
 Tham khảo được: bố cục "ảnh trái – bảng phải" của các tool 仕訳変換 Nhật.
 **Không sao chép** màu sắc, bố cục chi tiết, icon hay câu chữ của họ.
 
-Định hướng riêng nên theo:
-- **Sạch và ít màu.** Chỉ dùng màu để chỉ trạng thái: vàng = cần soát, xanh = đã sửa,
-  xám = ghi chú. Màu dùng bừa sẽ làm mất ý nghĩa cảnh báo.
-- **Chữ to, tương phản cao.** Người dùng cuối là người Nhật lớn tuổi.
-- **Tiếng Nhật là ngôn ngữ chính.** Thuật ngữ dùng đúng chuẩn sổ: 摘要 / 差引残高 /
-  お預り金額 / お支払金額 — đừng tự dịch sang từ khác.
-- **Luôn hiện mức độ bảo đảm** ở đầu mỗi kết quả, kèm câu nhắc rằng máy không tự phát
-  hiện được dòng bị sót.
+### 7.1 Nguyên tắc
+
+- **Sạch và ít màu.** Chỉ dùng màu để chỉ trạng thái. Màu dùng bừa sẽ làm mất ý
+  nghĩa cảnh báo — nếu mọi thứ đều nổi bật thì không gì nổi bật.
+- **Chữ to, tương phản cao.** Người dùng cuối là người Nhật lớn tuổi. Nền chữ tối
+  thiểu 16px, bảng 15px, không dùng chữ xám nhạt cho nội dung thật.
+- **Bàn phím là công cụ chính.** Người soát dữ liệu dùng bàn phím nhanh hơn chuột
+  nhiều lần. Chuột chỉ để zoom ảnh.
+- **Luôn hiện mức độ bảo đảm** ở đầu mỗi kết quả, kèm câu nhắc rằng máy không tự
+  phát hiện được dòng bị sót.
+
+### 7.2 Bảng màu (kế thừa từ file Excel để cùng một bộ mặt sản phẩm)
+
+| Vai trò | Mã | Dùng ở đâu |
+|---|---|---|
+| Nền trang | `#F7F8FA` | nền ngoài các thẻ |
+| Thẻ / bảng | `#FFFFFF` | vùng nội dung |
+| Chữ chính | `#1B2733` | |
+| Chữ phụ | `#5B6B7C` | nhãn, đơn vị |
+| Viền | `#DFE4EA` | |
+| **Nhấn (thương hiệu)** | `#2F5B7C` | thanh tiêu đề, nút chính — **đúng màu header Excel** |
+| ⚠ Cần soát | `#FFF2CC` nền / `#8A6100` chữ | **đúng màu ô vàng Excel** |
+| ✅ Đã tự sửa | `#C6EFCE` nền / `#1E6B3A` chữ | **đúng màu ô xanh Excel** |
+| Ghi chú (繰越…) | `#8A94A0` chữ nghiêng | |
+
+Chỉ ba màu trạng thái đó. Không thêm màu nào khác cho tới khi có lý do đo được.
+Người dùng thấy ô vàng trên web rồi mở Excel ra vẫn thấy đúng ô vàng đó — không
+phải học lại lần hai.
+
+### 7.3 Chữ
+
+```css
+font-family: "Inter", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+font-variant-numeric: tabular-nums;  /* cột tiền phải thẳng hàng, bắt buộc */
+```
+Cột tiền căn phải, `tabular-nums`, cỡ 15–16px. Cột 摘要 (katakana) cỡ 15px,
+`letter-spacing: .01em` — kana nửa chiều rộng dính nhau rất khó đọc.
+
+### 7.4 Màn hình đối chiếu — chi tiết
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ 通帳スキャン   so-ngan-hang.pdf   ⚠ 一部未検証(3行)      [VI|EN|日] [Excel]│  ← thanh dính
+├────────────────────────────────┬─────────────────────────────────────────┤
+│  ┌──────────────────────────┐  │  #   日付      摘要        出金  入金 残高│
+│  │                          │  │  1  04-25  ウツカ ノボル      – 50,000 …│
+│  │      ẢNH SỔ GỐC          │  │▶ 2  04-25  料金 ⚠          440      – …│ ←chọn
+│  │   ▭ khung đỏ bám dòng    │  │  3  05-01  ｾﾝｺｰ…      177,369      – …│
+│  │      đang chọn           │  │                                         │
+│  └──────────────────────────┘  │                                         │
+│  [− ⌕ +]  [↺ 90°]  trang 2/24  │  ◀ dòng lỗi trước   dòng lỗi sau ▶  (n) │
+└────────────────────────────────┴─────────────────────────────────────────┘
+```
+
+Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (localStorage).
+
+**Phím tắt** (hiện bằng dấu `?`):
+
+| Phím | Việc |
+|---|---|
+| `↑` `↓` | dòng trước / sau (ảnh tự cuộn theo) |
+| `n` / `p` | **dòng cần soát tiếp theo / trước đó** — phím quan trọng nhất |
+| `Enter` | sửa ô đang chọn · `Tab` sang ô kế · `Esc` huỷ |
+| `+` `−` `0` | phóng to / thu nhỏ / vừa khung |
+| `r` | xoay ảnh 90° |
+
+**Chi tiết quyết định sản phẩm dùng được hay không:**
+
+1. **Click dòng → ảnh cuộn + zoom tới đúng dòng.** Không có cái này thì tool mất
+   hết giá trị (xem §2). Cần bounding box ở §2.
+2. **Đếm ngược số dòng cần soát** ở thanh trên: `⚠ còn 3 dòng`. Soát xong một dòng
+   thì số giảm ngay — người dùng thấy mình đang tiến tới đích.
+3. **Ô 残高 sửa xong → cột kiểm tra tính lại tức thì**, dòng chuyển từ vàng sang
+   trắng. Phản hồi phải trong cùng một khung hình, không chờ server.
+4. **Máy tự sửa thì phải nói ra**: ô xanh, rê chuột hiện `đã sửa: 出金 ↔ 入金
+   (440 → 0 / 0 → 440)` và có nút **hoàn tác**. Không bao giờ giấu.
+5. Khi hết dòng vàng, **không** hiện "hoàn tất" trơn tru. Hiện:
+   *「残高チェーン検証済（全行一致）— ただし行の欠落や摘要の誤読は検出できません」*
+   Nói thật giới hạn của công cụ là điểm bán hàng, không phải điểm yếu.
+6. Lúc đang quét: hiện **thumbnail từng trang**, tick dần theo `on_progress`, kèm
+   trang đang chạy. PDF 24 trang mất ~4 phút — trang trắng im lặng là mất niềm tin.
 
 ---
 
-## 8. Điều dễ bị quên
+### 7.5 Nâng cấp trải nghiệm (30/07/2026 — bản mẫu đầu bị chấm 1/10, chuẩn mới cho bản thật)
+
+Bản mẫu `docs/mockup-doi-chieu.html` chỉ chứng minh HÀNH VI (click dòng → khung
+bám, sửa ô → tính lại). Bản thật phải đạt các mục dưới đây.
+
+#### Yêu cầu đã chốt
+
+**(1) Hiệu ứng quét ảnh/PDF** — biến 4 phút chờ thành thứ đáng nhìn:
+- Thả file vào → từng trang hiện thumbnail xám xếp hàng.
+- Trang đang xử lý: **vạch sáng quét dọc qua thumbnail** (như máy scan thật),
+  nhịp thở nhẹ quanh viền.
+- Trang xong: thumbnail sáng lên, tick ✓, **các dòng đọc được "gõ" dần vào bảng
+  bên phải** — người dùng thấy dữ liệu chảy về theo thời gian thực, không phải
+  ngồi nhìn spinner.
+- Nguồn dữ liệu: `on_progress` của `core.scan()` đẩy qua **SSE** — backend đã
+  sẵn sự kiện `page/skip/retry/validate/done`, chỉ cần nối ống.
+
+**(2) Bên trái: chỉnh ảnh trước khi quét** — cắt, xoay, kéo sáng:
+- Xoay tự do 90°/180°/270° + kéo thanh xoay tinh chỉnh vài độ (ảnh chụp nghiêng).
+- **Cắt (crop)** bằng kéo góc — dùng `react-easy-crop` hoặc canvas.
+- Kéo sáng / tương phản (canvas filter, chạy trong trình duyệt, miễn phí).
+- Làm xong mới bấm「スキャン」→ gửi bản ĐÃ chỉnh cho model.
+- 💰 Cắt không chỉ đẹp: **cắt riêng từng sổ trong ảnh 2 sổ là "đòn lớn cho kana"**
+  (TODO #4 trong memory) — người dùng tự cắt = đỡ hẳn lỗi trộn sổ.
+- ⚠ Ảnh đã chỉnh = bytes mới = **cache key mới = tốn lượt gọi mới**. Hiện rõ
+  điều này trên nút: 「スキャン（1ページ ≈ $0.003）」.
+
+**(3) Tô màu tiền vào / tiền ra** — thấy hướng dòng tiền không cần đọc số:
+- 入金 (tiền vào): số kèm dấu **▲ xanh lam**; 出金 (tiền ra): **▼ đỏ gạch**.
+  Tô ở CHỮ/dấu hiệu, không tô nền.
+- Nền vẫn chỉ dành cho trạng thái (vàng = chưa chắc, xanh lá = máy tự sửa) —
+  nếu tô nền cả 2 cột tiền thì màu cảnh báo chìm nghỉm. **Kiểm tra bằng cách
+  nheo mắt: thứ duy nhất nổi lên phải là ô vàng.**
+- Ô máy KHÔNG chắc chắn ở cột tiền (model đọc mờ, engine đổi cột) vẫn nền vàng
+  + tooltip lý do — đúng yêu cầu "dễ dàng biết chỗ nào không chắc chắn".
+
+**(4) Undo / Redo** — `Ctrl+Z` / `Ctrl+Shift+Z` + hai nút ↶ ↷ trên thanh công cụ:
+- Mọi thao tác vào một stack: sửa ô, hoàn tác auto-fix, xoá dòng, cắt ảnh.
+- Kèm **bảng lịch sử chỉnh sửa** (ô nào, từ gì → thành gì, lúc nào) — vừa là
+  undo, vừa là vết kiểm toán cho dữ liệu tài chính (nối thẳng vào nhật ký §3).
+
+**(5) Sáng / tối tuỳ chỉnh** — nút 3 trạng thái: Sáng ☀ / Tối ☾ / Theo hệ thống.
+- Toàn bộ màu đã là CSS token (§7.2 có sẵn bảng dark) → chỉ là gắn nút.
+- Lưu vào tài khoản, thiết bị nào đăng nhập cũng giữ nguyên.
+
+#### Bổ sung để "xịn" thật sự
+
+- **Tải lên kéo-thả** có xem trước, và **bắt ảnh trùng ngay lúc thả** (tính
+  SHA-256 ngay trong trình duyệt, chưa cần upload) — chặn lỗi cộng gấp đôi (§5a)
+  từ cửa, kèm hộp so sánh 2 ảnh cạnh nhau "giữ cái nào?".
+- **Mini-map dòng vàng** cạnh thanh cuộn bảng (như VS Code): liếc một cái biết
+  còn bao nhiêu chỗ phải soát và ở đâu.
+- **Cuộn đồng bộ 2 bên**: cuộn bảng thì ảnh trôi theo và ngược lại (tắt được).
+- **Autosave bản soát**: sửa tới đâu lưu tới đó; F5 hay rớt mạng không mất công.
+  Quay lại file cũ thấy đúng chỗ đang soát dở.
+- **Trang trống lần đầu** có nút「サンプルで試す / Thử với sổ mẫu」— chạy toàn bộ
+  luồng bằng dữ liệu giả, không tốn API, để giám đốc bấm chơi mà không sợ hỏng gì.
+- **Khoảnh khắc hoàn thành**: dòng vàng cuối được sửa xong → huy hiệu chuyển
+  xanh với hiệu ứng ✓ ngắn gọn, thanh tiến độ chạm 100%. Không confetti loè
+  loẹt — người dùng là kế toán lớn tuổi, "đầm" hơn "nhí nhố".
+- **Skeleton + toast** chuẩn: mọi vùng đang tải có khung xám nhấp nháy; mọi hành
+  động có phản hồi (「保存しました」) — không bao giờ màn hình trắng câm lặng.
+- Phím tắt đầy đủ (đã có ở §7.4) + nút `?` hiện bảng phím tắt.
+
+---
+
+## 8. Đa ngôn ngữ (tiếng Việt trước, Nhật/Anh sau)
+
+Khung i18n **dựng từ ngày đầu** (nhét chữ vào file dịch ngay từ dòng code đầu
+tiên), nhưng **chỉ dịch đủ tiếng Việt trước** — bản Nhật hoàn thiện ở giai đoạn 3.
+Thêm ngôn ngữ vào một app đã viết cứng chữ tốn gấp nhiều lần làm đúng từ đầu.
+
+```
+web/src/locales/vi.json   ← làm trước, đầy đủ
+web/src/locales/ja.json   ← giai đoạn 3, người dùng thật
+web/src/locales/en.json   ← dự phòng / demo cho khách nước ngoài
+```
+
+Thư viện: `react-i18next`. Chọn ngôn ngữ lưu vào `localStorage` + cột `lang`
+trong bảng user. Nút chuyển ở góc phải thanh trên, dạng `VI | EN | 日本語`.
+
+### ⚠ Luật quan trọng: **tên cột KHÔNG dịch**
+
+Người dùng đang đối chiếu với ảnh sổ — trên ảnh in chữ 摘要 thì trên bảng phải
+là 摘要. Dịch thành "Nội dung" là bắt họ tự tra nghĩa ngược lại.
+
+⇒ **Tên cột luôn giữ tiếng Nhật**, khi ngôn ngữ là VI/EN thì thêm chú thích nhỏ
+bên dưới:
+
+```
+  摘要            差引残高          お預り金額
+  Nội dung        Số dư            Tiền vào
+```
+
+Chỉ **chữ của giao diện** mới dịch: nút, thông báo, menu, lỗi.
+Cùng luật đó cho 検証レベル: giữ nguyên câu tiếng Nhật (nó cũng nằm trong file
+Excel), thêm dịch nghĩa bên dưới.
+
+Ba thứ hay quên khi làm i18n:
+- **Ngày tháng**: VI `25/04/2025`, JA `2025年4月25日`, EN `Apr 25, 2025`.
+- **Số tiền**: luôn `¥` và dấu phẩy nghìn ở mọi ngôn ngữ (đây là tiền Nhật).
+- **Chiều dài chữ**: nút tiếng Việt dài hơn tiếng Nhật ~1.7 lần. Đừng đặt chiều
+  rộng cứng cho nút.
+
+---
+
+## 9. Chọn công nghệ & lộ trình cho người chưa làm web bao giờ
+
+### 9.1 Chốt stack
+
+| Phần | Chọn | Vì sao |
+|---|---|---|
+| Backend | **FastAPI** | Python — đã biết sẵn. Tự sinh trang thử API tại `/docs`, không cần công cụ ngoài. |
+| CSDL | **SQLite** trước, PostgreSQL khi có người thật | SQLite là 1 file, không phải cài server. Dùng SQLModel/SQLAlchemy thì đổi sang Postgres chỉ là đổi chuỗi kết nối. |
+| Hàng đợi | **`BackgroundTasks` của FastAPI** trước, Celery sau | Celery kéo theo Redis + tiến trình worker — hai hệ thống nữa phải học. Một người dùng thì chưa cần. |
+| Frontend | **Next.js (App Router) + TypeScript** | Quyết định 30/07/2026. Deploy Vercel 1 nút, hệ sinh thái lớn nhất React, tài liệu nhiều. |
+| CSS | **Tailwind CSS** | Người mới ra giao diện đẹp và đều nhanh hơn CSS thuần rất nhiều. |
+| Thành phần UI | **shadcn/ui** | Copy code vào dự án chứ không phải thư viện — sửa được, không bị khoá. Sinh ra cho Next + Tailwind. |
+| Animation | **Framer Motion** | Hiệu ứng quét, chuyển trang, khung đỏ trượt — mượt mà không tự viết keyframe. |
+
+**Cách dùng Next.js không bị ngợp** (nó nhiều khái niệm — SSR, server component,
+routing kiểu file — nhưng mình không cần học hết mới bắt đầu):
+
+- **Màn hình đối chiếu = 1 file có `"use client"` ở dòng đầu** → bên trong viết
+  React bình thường (useState, sự kiện, canvas). 90% thời gian anh sống ở đây.
+- Routing kiểu file chỉ cần nhớ: `app/login/page.tsx` = trang `/login`. Hết.
+- Server component / SSR: kệ nó, mặc định của Next đủ tốt. Học sau khi app chạy.
+- **Auth và API vẫn ở FastAPI** (JWT) — Next chỉ là giao diện gọi API. KHÔNG dùng
+  NextAuth song song kẻo hai hệ thống đăng nhập đá nhau; một nguồn sự thật thôi.
+- KHÔNG viết logic trong API routes của Next — mọi xử lý đi qua FastAPI → `core.scan()`.
+
+### 9.2 Thứ tự học — mỗi bước phải chạy được mới sang bước sau
+
+Nguyên tắc: **luôn có một thứ chạy được**. Không viết 2 tuần rồi mới mở trình duyệt.
+
+1. **FastAPI trần**: một route `GET /health` trả `{"ok": true}`. Mở `/docs` bấm thử.
+2. **Nối `core.scan()`**: `POST /scan` nhận file → chạy → trả `result.to_dict()`.
+   Chưa cần đăng nhập, chưa cần CSDL. Đây là lúc thấy backend đã xong 90%.
+3. **Next trần**: `npx create-next-app@latest web` (chọn TypeScript + Tailwind +
+   App Router) → sửa `app/page.tsx` in "Xin chào".
+4. **Nối hai bên**: form chọn file → gọi `POST /scan` của FastAPI → in JSON ra
+   màn hình. Bước này hay vướng **CORS** — thêm `CORSMiddleware` ở FastAPI là xong.
+5. **Bảng thật**: đổ JSON vào bảng, tô vàng dòng `status === "check"`.
+6. **Ảnh bên trái** + đồng bộ với dòng đang chọn (§7.4). Phần đáng đầu tư nhất.
+7. **CSDL + đăng nhập** (`fastapi-users` hoặc tự làm JWT). Làm *sau cùng* trong
+   giai đoạn 2 — không có nó vẫn demo được, có nó mà không có màn đối chiếu thì vô nghĩa.
+
+### 9.3 Tên miền & hosting — CHƯA mua gì cả
+
+| Giai đoạn | Chạy ở đâu | Tốn |
+|---|---|---|
+| Đang code (bây giờ) | `localhost` | $0 |
+| Demo cho giám đốc | **Vercel free** (Next.js) + **Render/Railway free** (FastAPI); hoặc Cloudflare Tunnel chiếu từ máy mình | $0 |
+| Người thật dùng (giai đoạn 3) | Vercel + backend trả phí (~$5–7/tháng) hoặc 1 VPS; + tên miền | ~$70–100/năm |
+
+- **Tên miền (~$10–12/năm) chỉ mua khi có người thật dùng.** Demo dùng
+  `ten-app.vercel.app` miễn phí, giám đốc Nhật không quan tâm URL demo.
+- Thứ đáng trả tiền TRƯỚC tên miền: **billing Gemini** (gỡ quota 20 req/ngày — §5c).
+- ⚠ Bậc free của Render "ngủ" sau 15 phút không ai gọi — request đầu chờ ~1 phút.
+  Demo hẹn giờ thì tự vào đánh thức trước 5 phút.
+- ⚠ **Không đưa sổ thật lên demo public.** Demo bằng dữ liệu mẫu; môi trường
+  thật mới cần vùng Tokyo + mã hoá + hạn xoá (§5b).
+
+### 9.4 Nhớ ngay từ đầu
+
+- Chạy đồng thời **2 cửa sổ lệnh**: `uvicorn` (cổng 8000) và `npm run dev` (cổng 3000).
+- **Không đưa `GEMINI_API_KEY` vào frontend.** Key chỉ nằm ở backend. Frontend
+  gọi API của mình, API mới gọi Gemini.
+- Ảnh sổ là **dữ liệu tài chính thật** — thư mục lưu ảnh phải nằm ngoài git
+  (`.gitignore` đã chặn `input/`, `output/`; thêm thư mục mới của web vào đó).
+
+---
+
+## 10. Điều dễ bị quên
 
 - File Excel dùng **công thức sống**; đọc bằng thư viện (`data_only=True`) sẽ ra rỗng.
   Backend muốn lấy số tổng thì phải **tự tính**, đừng đọc ô công thức.

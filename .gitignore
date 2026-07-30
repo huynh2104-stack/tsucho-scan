@@ -27,8 +27,21 @@ thùng-rác/
 # Log chạy thật (chứa tên ngân hàng, tên file sổ của khách)
 data/
 
+# Web: ảnh sổ người dùng tải lên + Excel sinh ra (dữ liệu tài chính thật)
+.data/
+
+# Node / Next.js
+node_modules/
+web/.next/
+web/out/
+.next/
+npm-debug.log*
+
 # IDE / OS
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Next.js env cục bộ
+web/.env.local

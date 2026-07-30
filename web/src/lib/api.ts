@@ -1,0 +1,288 @@
+/**
+ * Gọi API FastAPI. Toàn bộ xử lý sổ nằm ở backend (core.scan()) — file này chỉ
+ * là ống dẫn. KHÔNG bao giờ đặt GEMINI_API_KEY ở đây: key chỉ nằm ở backend.
+ */
+
+export const API =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+
+/** Một MẶT SỔ — ảnh đơn hoặc một trang tách ra từ PDF. */
+export type Sheet = {
+  id: string;
+  name: string;
+  origin: string;
+  page: number | null;
+  sha256: string;
+  duplicate_of: string | null;
+  rotation: number;
+  cropped: boolean;
+  adjusted: boolean;
+  scanned: boolean;
+  width: number;
+  height: number;
+  source_ext: string;
+  undo: Record<string, unknown> | null;
+};
+
+export type Workspace = {
+  id: string;
+  book_name: string;
+  sheets: Sheet[];
+};
+
+export type Tx = {
+  date: string | null;
+  date_raw: string | null;
+  kind: string | null;
+  description: string | null;
+  extra_text: string | null;
+  store_code: string | null;
+  amount_out: number | null;
+  amount_in: number | null;
+  balance: number | null;
+  status: "ok" | "fixed" | "check" | "note";
+  reason?: string;
+  is_note?: boolean;
+  row_no?: string | null;
+  sheet_id: string | null;
+};
+
+export type Account = {
+  bank_name: string | null;
+  store_no: string | null;
+  account_no: string | null;
+  holder: string | null;
+  transactions: Tx[];
+};
+
+export type Verification = {
+  index: number;
+  bank_name: string | null;
+  account_no: string | null;
+  rows: number;
+  verified: number;
+  fixed: number;
+  need_check: number;
+  level: string;
+  chain_ok: boolean;
+};
+
+export type PerSheet = {
+  sheet_id: string;
+  rows: number;
+  need_check: number;
+  fixed: number;
+};
+
+export type ScanPayload = {
+  model: string;
+  cached: boolean;
+  cost_usd: number | null;
+  usage: { input_tokens: number; output_tokens: number };
+  source_name: string;
+  pages: number;
+  skipped: string[];
+  totals: {
+    accounts: number;
+    rows: number;
+    fixed: number;
+    need_check: number;
+    chain_ok: boolean;
+  };
+  verification: Verification[];
+  accounts: Account[];
+  per_sheet: PerSheet[];
+  sheet_ids: string[];
+};
+
+export type Job = {
+  id: string;
+  status: "pending" | "running" | "done" | "error";
+  error: string | null;
+  sheet_ids: string[];
+  result: ScanPayload | null;
+};
+
+export type ScanEvent = {
+  stage:
+    | "start"
+    | "page"
+    | "skip"
+    | "retry"
+    | "validate"
+    | "done"
+    | "finished"
+    | "error"
+    | "ping";
+  message: string;
+  index?: number;
+  total?: number;
+  label?: string;
+  totals?: ScanPayload["totals"];
+  cost_usd?: number | null;
+  cached?: boolean;
+};
+
+async function asJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* backend trả về không phải JSON — giữ nguyên mã lỗi */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+const jsonPost = <T,>(path: string, body: unknown) =>
+  fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(asJson<T>);
+
+// ── Không gian làm việc ────────────────────────────────────────────
+
+export const createWorkspace = () => jsonPost<Workspace>("/api/ws", {});
+
+export const getWorkspace = async (id: string) =>
+  asJson<Workspace>(await fetch(`${API}/api/ws/${id}`));
+
+export const renameBook = (id: string, book_name: string) =>
+  fetch(`${API}/api/ws/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ book_name }),
+  }).then(asJson<Workspace>);
+
+export async function addSheets(wsId: string, files: File[]) {
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  return asJson<Workspace & { added: string[] }>(
+    await fetch(`${API}/api/ws/${wsId}/sheets`, { method: "POST", body: fd }),
+  );
+}
+
+export const deleteSheet = async (wsId: string, sheetId: string) =>
+  asJson<Workspace>(
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE" }),
+  );
+
+export const renameSheet = (wsId: string, sheetId: string, name: string) =>
+  fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  }).then(asJson<Workspace>);
+
+/** `v` đổi theo sha256 để trình duyệt tải lại ảnh sau khi xoay/cắt. */
+export const sheetImage = (wsId: string, s: Sheet, thumb = false) =>
+  `${API}/api/ws/${wsId}/sheets/${s.id}/image?thumb=${thumb}&v=${s.sha256.slice(0, 12)}`;
+
+// ── Chỉnh ảnh ──────────────────────────────────────────────────────
+
+export const rotateSheets = (wsId: string, sheet_ids: string[], degrees: number) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/rotate`, { sheet_ids, degrees });
+
+export const cropSheet = (
+  wsId: string,
+  sheet_ids: string[],
+  box: { left: number; top: number; right: number; bottom: number },
+) => jsonPost<Workspace>(`/api/ws/${wsId}/crop`, { sheet_ids, box });
+
+export const adjustSheets = (
+  wsId: string,
+  sheet_ids: string[],
+  a: { fine_deg: number; brightness: number; contrast: number },
+) => jsonPost<Workspace>(`/api/ws/${wsId}/adjust`, { sheet_ids, ...a });
+
+export const undoSheet = (wsId: string, sheet_ids: string[]) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/undo`, { sheet_ids });
+
+export const resetSheets = (wsId: string, sheet_ids: string[]) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/reset`, { sheet_ids });
+
+// ── Quét & xuất ────────────────────────────────────────────────────
+
+export const startScan = (wsId: string, sheet_ids: string[], no_cache = false) =>
+  jsonPost<Job>(`/api/ws/${wsId}/scan`, { sheet_ids, no_cache });
+
+export const getJob = async (id: string) =>
+  asJson<Job>(await fetch(`${API}/api/jobs/${id}`));
+
+/** Xuất file: POST vì phải gửi kèm các ô người dùng vừa sửa tay. */
+export async function exportFile(
+  jobId: string,
+  body: {
+    format: "xlsx" | "csv";
+    structure: "per_sheet" | "merged";
+    add_total: boolean;
+    name: string;
+    sheet_ids?: string[];
+    accounts: Account[];
+  },
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${API}/api/jobs/${jobId}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      detail = (await res.json())?.detail ?? detail;
+    } catch {
+      /* không phải JSON */
+    }
+    throw new Error(detail);
+  }
+  // Tên file thật nằm ở filename*=UTF-8'' (RFC 5987) vì có chữ Việt/Nhật
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const plain = /filename="([^"]+)"/i.exec(cd);
+  const filename = star
+    ? decodeURIComponent(star[1])
+    : (plain?.[1] ?? `${body.name}.${body.format}`);
+  return { blob: await res.blob(), filename };
+}
+
+/** Đẩy blob ra ô tải file của trình duyệt. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Nối luồng tiến độ SSE. Trả về hàm đóng kết nối. */
+export function listenEvents(
+  id: string,
+  onEvent: (e: ScanEvent) => void,
+  onClose?: () => void,
+): () => void {
+  const es = new EventSource(`${API}/api/jobs/${id}/events`);
+  es.onmessage = (m) => {
+    try {
+      const data = JSON.parse(m.data) as ScanEvent;
+      if (data.stage !== "ping") onEvent(data);
+      if (data.stage === "finished" || data.stage === "error") {
+        es.close();
+        onClose?.();
+      }
+    } catch {
+      /* bỏ qua gói hỏng, luồng vẫn chạy tiếp */
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    onClose?.();
+  };
+  return () => es.close();
+}
