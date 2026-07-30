@@ -254,7 +254,9 @@ function AccountCard({
   rows,
   refs,
   index,
+  ofTotal,
   fallbackTitle,
+  sourceLabel,
   cols,
   head,
   t,
@@ -270,7 +272,11 @@ function AccountCard({
   rows: Tx[];
   refs: TxRef[];
   index: number;
+  /** Tổng số sổ trong mặt này — chỉ >1 mới cần đánh số cho khỏi lẫn. */
+  ofTotal: number;
   fallbackTitle: string;
+  /** Tên file gốc + số trang, để biết dòng này đến từ đâu. */
+  sourceLabel: string;
   cols: OptCols;
   head: React.ReactNode;
   t: Dict;
@@ -300,10 +306,15 @@ function AccountCard({
   return (
     <section className="m-2.5 overflow-hidden rounded-xl border border-rule bg-card shadow-[var(--shadow)]">
       <header className="flex flex-wrap items-center gap-2 border-b border-rule bg-card2 px-3 py-2">
-        <span className="tnum flex h-6 w-6 flex-none items-center justify-center rounded-md bg-accent text-[11.5px] font-bold text-accentink">
-          {index + 1}
-        </span>
-        <p className="min-w-0 truncate text-[13.5px] font-bold">
+        {/* Chỉ đánh số khi MỘT mặt sổ chứa nhiều sổ khác nhau — nếu không, con
+            số này nằm cạnh số thứ tự mặt sổ và gây nhầm hai thứ khác nhau. */}
+        {ofTotal > 1 && (
+          <span className="tnum flex flex-none items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[10.5px] font-bold text-accentink">
+            {t.accountNo(index + 1, ofTotal)}
+          </span>
+        )}
+        <div className="min-w-0">
+        <p className="truncate text-[13.5px] font-bold">
           {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt sổ
               thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang xem gì. */}
           {meta.bank_name || fallbackTitle}
@@ -311,6 +322,9 @@ function AccountCard({
             <span className="ml-1.5 font-normal text-ink3">· {meta.account_no}</span>
           )}
         </p>
+        {/* Tên file gốc + số trang — cho biết dòng này lấy từ đâu ra */}
+        <p className="truncate text-[10.5px] text-ink3">{sourceLabel}</p>
+        </div>
         <span className="flex-1" />
         {q && (
           <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[11px] font-semibold text-accent">
@@ -476,6 +490,10 @@ export default function ReviewPane({
   const cardsOf = (sheetId: string, startIndex = 0) => {
     const data = store[sheetId];
     if (!data) return null;
+    const sheet = sheets.find((s) => s.id === sheetId);
+    const source = sheet
+      ? sheet.origin + (sheet.page ? ` · ${t.pageLabel(sheet.page)}` : "")
+      : sheetId;
     return data.blocks.map((block, bi) => (
       <AccountCard
         key={`${sheetId}-${bi}`}
@@ -483,6 +501,8 @@ export default function ReviewPane({
         rows={block.rows}
         refs={block.rows.map((_, ri) => ({ sheet: sheetId, block: bi, row: ri }))}
         index={startIndex + bi}
+        ofTotal={data.blocks.length}
+        sourceLabel={source}
         fallbackTitle={sheetName[sheetId] ?? sheetId}
         cols={cols}
         head={head}

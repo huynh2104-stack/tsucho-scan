@@ -110,6 +110,22 @@ def rename_sheet(ws_id: str, sheet_id: str, body: dict = Body(...)) -> dict:
     return workspace.to_json(ws)
 
 
+@app.post("/api/ws/{ws_id}/reorder")
+def reorder_sheets(ws_id: str, body: dict = Body(...)) -> dict:
+    """Sắp lại thứ tự mặt sổ (kéo thả ở cột trái).
+
+    Cột kết quả tự đi theo vì nó luôn lặp theo `ws.sheets`.
+    """
+    ws = _ws(ws_id)
+    order = body.get("sheet_ids") or []
+    known = {s.id: s for s in ws.sheets}
+    if sorted(order) != sorted(known):
+        raise HTTPException(400, "Danh sách thứ tự không khớp với các mặt sổ hiện có")
+    ws.sheets = [known[i] for i in order]
+    ws.save()
+    return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
+
+
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/image")
 def sheet_image(ws_id: str, sheet_id: str, thumb: bool = False, v: str = ""):
     """Ảnh hiện tại của mặt sổ (đã áp dụng xoay/cắt). `v` để phá cache trình duyệt."""
@@ -449,9 +465,24 @@ def export(ws_id: str, body: dict = Body(...)):
     book = _safe_name(body.get("name") or ws.book_name or "tsucho")
     add_total = bool(body.get("add_total"))
 
-    if body.get("structure") == "per_sheet":
+    structure = body.get("structure")
+    if structure == "per_sheet":
         names = {s.id: s.name for s in ws.sheets}
         accounts = _split_by_sheet(accounts, names)
+    elif structure == "merged" and len(accounts) > 1:
+        # "Gộp chung một bảng" phải ra ĐÚNG MỘT bảng. Trước đây chỉ dựa vào việc
+        # các khối tự gộp theo bank+account_no — mà sổ không có trang bìa thì
+        # account_no là null nên không khối nào gộp được, kết quả ra y hệt bản
+        # tách. Ở đây ép thành một sổ duy nhất, đúng như tên tuỳ chọn.
+        first = accounts[0]
+        accounts = [{
+            "bank_name": first.get("bank_name"),
+            "store_no": first.get("store_no"),
+            "account_no": first.get("account_no"),
+            "holder": first.get("holder"),
+            "sheet_title": book,
+            "transactions": [t for a in accounts for t in a["transactions"]],
+        }]
 
     if fmt == "csv":
         data = export_csv.accounts_to_csv(accounts, book, add_total=add_total)

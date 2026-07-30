@@ -197,6 +197,9 @@ export const deleteSheet = async (wsId: string, sheetId: string) =>
     await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE" }),
   );
 
+export const reorderSheets = (wsId: string, sheet_ids: string[]) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/reorder`, { sheet_ids });
+
 export const renameSheet = (wsId: string, sheetId: string, name: string) =>
   fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, {
     method: "PATCH",

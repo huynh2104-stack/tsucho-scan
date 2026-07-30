@@ -154,6 +154,10 @@ export default function SheetViewer({
   const [box, setBox] = useState<Box | null>(null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const imgBox = useRef<HTMLDivElement>(null);
+  const scrollBox = useRef<HTMLDivElement>(null);
+  /** Đang kéo để DI CHUYỂN ảnh (chỉ khi không ở chế độ cắt). */
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const [panning, setPanning] = useState(false);
 
   const dirty = fine !== 0 || bright !== 100 || contrast !== 100;
 
@@ -308,8 +312,61 @@ export default function SheetViewer({
         </Tool>
       </div>
 
-      {/* ── Vùng ảnh: 70% chiều rộng khung ────────────────────── */}
-      <div className="canvas-bg thin-scroll flex min-h-0 flex-1 items-start justify-center overflow-auto p-5">
+      {/* ── Vùng ảnh: 70% chiều rộng khung ──────────────────────
+          Kéo chuột = di ảnh; Ctrl + cuộn = phóng to/thu nhỏ quanh con trỏ.
+          Không làm "bôi đen lấy chữ" được vì đây là ẢNH — muốn chọn chữ thì
+          phải có toạ độ từng ký tự, mà cái đó phải hỏi model (mất cache, tốn
+          tiền). Chữ đã đọc ra nằm ở cột kết quả bên phải và copy được. */}
+      <div
+        ref={scrollBox}
+        onWheel={(e) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          const box = scrollBox.current;
+          if (!box) return;
+          const r = box.getBoundingClientRect();
+          // Giữ điểm dưới con trỏ đứng yên khi phóng to
+          const cx = e.clientX - r.left + box.scrollLeft;
+          const cy = e.clientY - r.top + box.scrollTop;
+          const next = Math.max(0.4, Math.min(4, zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+          const k = next / zoom;
+          setZoom(next);
+          requestAnimationFrame(() => {
+            box.scrollLeft = cx * k - (e.clientX - r.left);
+            box.scrollTop = cy * k - (e.clientY - r.top);
+          });
+        }}
+        onMouseDown={(e) => {
+          if (cropping || e.button !== 0) return;
+          const box = scrollBox.current;
+          if (!box) return;
+          pan.current = {
+            x: e.clientX,
+            y: e.clientY,
+            left: box.scrollLeft,
+            top: box.scrollTop,
+          };
+          setPanning(true);
+        }}
+        onMouseMove={(e) => {
+          const p = pan.current;
+          const box = scrollBox.current;
+          if (!p || !box) return;
+          box.scrollLeft = p.left - (e.clientX - p.x);
+          box.scrollTop = p.top - (e.clientY - p.y);
+        }}
+        onMouseUp={() => {
+          pan.current = null;
+          setPanning(false);
+        }}
+        onMouseLeave={() => {
+          pan.current = null;
+          setPanning(false);
+        }}
+        className={`canvas-bg thin-scroll flex min-h-0 flex-1 items-start justify-center overflow-auto p-5 ${
+          cropping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
+        }`}
+      >
         <div
           ref={imgBox}
           className="relative select-none"
@@ -363,6 +420,19 @@ export default function SheetViewer({
                 {highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
               </span>
             </div>
+          )}
+
+          {/* Lưới canh thẳng — chỉ hiện khi đang chỉnh nghiêng, để lấy mốc so
+              với dòng kẻ của sổ. Hiện thường trực thì rối mắt. */}
+          {fine !== 0 && !cropping && (
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to bottom, color-mix(in srgb, var(--danger) 55%, transparent) 0 1px, transparent 1px 40px)," +
+                  "repeating-linear-gradient(to right, color-mix(in srgb, var(--danger) 30%, transparent) 0 1px, transparent 1px 40px)",
+              }}
+            />
           )}
 
           {cropping && box && (

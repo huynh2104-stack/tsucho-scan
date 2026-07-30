@@ -28,6 +28,7 @@ import {
   listenEvents,
   renameBook,
   renameSheet,
+  reorderSheets,
   resetSheets,
   rotateSheets,
   rowMap,
@@ -220,7 +221,26 @@ export default function Workbench() {
         else undoEdit();
         return;
       }
+      // Ctrl+Y = làm lại (thói quen Windows, song song với Ctrl+Shift+Z)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redoEdit();
+        return;
+      }
       if (typing) return;
+
+      // Ctrl+A: chọn tất cả MẶT SỔ thay vì bôi đen cả trang
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setTicked(new Set(sheets.map((s) => s.id)));
+        return;
+      }
+      // Bỏ chọn: dùng Escape đơn thuần. KHÔNG dùng Ctrl+Esc — trên Windows đó
+      // là phím mở Start menu, trình duyệt không nhận được.
+      if (e.key === "Escape") {
+        setTicked(new Set());
+        return;
+      }
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         jumpBad(1);
@@ -725,6 +745,7 @@ export default function Workbench() {
               onRename={(id, name) =>
                 ws && void guard(() => renameSheet(ws.id, id, name))
               }
+              onReorder={(ids) => ws && void guard(() => reorderSheets(ws.id, ids))}
             />
           </div>
 
@@ -811,19 +832,19 @@ export default function Workbench() {
               <button
                 onClick={undoEdit}
                 disabled={past.length === 0}
-                title={`${t.undoEdit} (Ctrl+Z)`}
+                title={`${t.undoEditLabel} (Ctrl+Z)`}
                 className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
-                ↶ {t.undoEdit}
+                ↶ {t.undoEditLabel}
                 {past.length > 0 && <span className="tnum ml-1 text-ink3">{past.length}</span>}
               </button>
               <button
                 onClick={redoEdit}
                 disabled={future.length === 0}
-                title={`${t.redoEdit} (Ctrl+Shift+Z)`}
+                title={`${t.redoEditLabel} (Ctrl+Y)`}
                 className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
-                ↷ {t.redoEdit}
+                ↷ {t.redoEditLabel}
               </button>
 
               <span className="mx-1 h-4 w-px bg-rule" />

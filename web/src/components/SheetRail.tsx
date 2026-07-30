@@ -13,7 +13,7 @@
  * tay thì cái nhìn thấy và cái trong state luôn là một.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useT } from "@/lib/i18n";
 import { sheetImage, type PerSheet, type Sheet } from "@/lib/api";
@@ -65,6 +65,7 @@ export default function SheetRail({
   onToggleRange,
   onActivate,
   onRename,
+  onReorder,
 }: {
   wsId: string;
   sheets: Sheet[];
@@ -76,10 +77,25 @@ export default function SheetRail({
   onToggleRange: (id: string) => void;
   onActivate: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onReorder: (ids: string[]) => void;
 }) {
   const { t } = useT();
   // Click ĐÚP mới vào chế độ sửa tên; click đơn vẫn là "xem mặt sổ này"
   const [editing, setEditing] = useState<string | null>(null);
+  // Kéo thả đổi thứ tự. `dragId` để trong REF chứ không phải state: handler
+  // `onDrop` phải đọc được ngay trong cùng chuỗi sự kiện, mà state thì React
+  // cập nhật bất đồng bộ nên lúc thả có thể vẫn còn null.
+  const dragId = useRef<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+
+  const drop = (targetId: string) => {
+    const from = dragId.current;
+    if (!from || from === targetId) return;
+    const ids = sheets.map((s) => s.id).filter((i) => i !== from);
+    ids.splice(ids.indexOf(targetId), 0, from);
+    onReorder(ids);
+  };
 
   if (sheets.length === 0) {
     return (
@@ -116,7 +132,34 @@ export default function SheetRail({
         return (
           <li key={s.id}>
             <div
+              draggable={editing !== s.id}
+              onDragStart={(e) => {
+                dragId.current = s.id;
+                setDragging(s.id);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", s.id);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOver(s.id);
+              }}
+              onDragLeave={() => setOver((o) => (o === s.id ? null : o))}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();   // đừng để lọt ra vùng thả file của trang
+                drop(s.id);
+                dragId.current = null;
+                setDragging(null);
+                setOver(null);
+              }}
+              onDragEnd={() => {
+                dragId.current = null;
+                setDragging(null);
+                setOver(null);
+              }}
               className={`flex items-start gap-2 rounded-xl border p-2 transition-colors ${
+                dragging === s.id ? "opacity-40" : ""
+              } ${over === s.id && dragging !== s.id ? "border-t-4 border-t-accent" : ""} ${
                 isActive
                   ? "border-accent bg-accentpale/50"
                   : isSel
@@ -140,6 +183,10 @@ export default function SheetRail({
                 tabIndex={0}
                 onClick={() => onActivate(s.id)}
                 onKeyDown={(e) => {
+                  // CHỈ nhận phím khi chính thẻ này đang focus. Không có điều
+                  // kiện này thì phím Space gõ trong ô đổi tên bị nuốt mất —
+                  // người dùng không đặt được tên có dấu cách.
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     onActivate(s.id);
