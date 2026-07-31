@@ -238,13 +238,17 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 
 1. **Click dòng → ảnh cuộn + zoom tới đúng dòng.** Không có cái này thì tool mất
    hết giá trị (xem §2). Cần bounding box ở §2.
-   - *Hiện trạng 31/07/2026:* đang dùng **ước lượng từ ảnh** (`api/rowmap.py`,
-     cộng lượng mực theo hàng ngang) chứ không phải toạ độ do model trả — nên
-     có file trúng, có file lệch. Đã đổi cách vẽ: **chỉ tô nền, bỏ viền
-     trên/dưới và bỏ nhãn nổi** vì chúng che mất chữ dòng bên cạnh; dò được
-     đúng dòng thì nền đậm (13%), phải chia đều thì nhạt hẳn (7%) — nhìn là
-     biết chỗ nào tin được. Muốn chính xác thật thì phải xin toạ độ từ model,
-     **đổi prompt = mất toàn bộ cache**, phải hỏi người dùng trước.
+   - *Hiện trạng 31/07/2026:* dùng **ước lượng từ ảnh** (`api/rowmap.py` bản 2)
+     chứ không phải toạ độ do model trả (đổi prompt = mất toàn bộ cache).
+     Bản 2 viết lại quanh hai đặc điểm của trang sổ in: **nhịp dòng cố định**
+     (tự tương quan + né bẫy bội số) và **nếp gấp trắng giữa trang**. Lọc chú
+     thích nép dưới viền đáy bảng; thừa đỉnh thì bỏ từ đầu trang (rác luôn là
+     tựa/tiêu đề); nhịp tán loạn (viết tay) thì tự nhận không dò được.
+     **Đo trên 9 mặt sổ thật: 9/9 khớp 1-1 từng dòng (soi mắt từng ảnh);**
+     bản 1 chỉ 4/9, dải trôi và đè nếp gấp. 7 test đơn vị tái hiện từng ca
+     hỏng trong `tests/test_rowmap.py`.
+   - Cách vẽ: **chỉ tô nền, bỏ viền trên/dưới và bỏ nhãn nổi** vì chúng che
+     chữ dòng bên cạnh; dò được thì nền đậm (13%), chia đều thì nhạt (7%).
 2. **Đếm ngược số dòng cần soát** ở thanh trên: `⚠ còn 3 dòng`. Soát xong một dòng
    thì số giảm ngay — người dùng thấy mình đang tiến tới đích.
 3. **Ô 残高 sửa xong → cột kiểm tra tính lại tức thì**, dòng chuyển từ vàng sang
