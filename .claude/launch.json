@@ -7,6 +7,19 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "web",
       "port": 3000
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "api.main:app",
+        "--reload",
+        "--port",
+        "8000"
+      ],
+      "port": 8000
     }
   ]
 }

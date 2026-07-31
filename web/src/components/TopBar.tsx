@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useAuth } from "@/lib/auth";
 import { LANGS, LANG_LABEL, useT, type Lang } from "@/lib/i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 
@@ -31,6 +32,7 @@ function AutoIcon() {
 export default function TopBar() {
   const { lang, t, setLang } = useT();
   const { mode, setMode } = useTheme();
+  const { user, logout } = useAuth();
 
   const themes: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
     { id: "light", label: t.themeLight, icon: <SunIcon /> },
@@ -105,6 +107,21 @@ export default function TopBar() {
           </button>
         ))}
       </div>
+
+      {/* Tài khoản — chỉ hiện khi đã đăng nhập, để trang /login không bị rối */}
+      {user && (
+        <div className="flex items-center gap-2.5">
+          <span className="max-w-[190px] truncate text-[13px] text-ink2" title={user.email}>
+            {user.email}
+          </span>
+          <button
+            onClick={logout}
+            className="rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 hover:bg-accentpale hover:text-ink"
+          >
+            {t.signOut}
+          </button>
+        </div>
+      )}
     </header>
   );
 }

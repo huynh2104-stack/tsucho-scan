@@ -187,6 +187,28 @@ const DICT = {
     expDownload: "Xuất file tải về",
     expWorking: "Đang tạo file...",
 
+    signIn: "Đăng nhập",
+    signUp: "Đăng ký",
+    signOut: "Đăng xuất",
+    authEmail: "Email",
+    authPassword: "Mật khẩu",
+    authPasswordHint: "Ít nhất 8 ký tự",
+    authHeadIn: "Đăng nhập để tiếp tục",
+    authHeadUp: "Tạo tài khoản mới",
+    authToUp: "Chưa có tài khoản? Đăng ký",
+    authToIn: "Đã có tài khoản? Đăng nhập",
+    authWorking: "Đang xử lý...",
+    authChecking: "Đang kiểm tra đăng nhập...",
+    authPrivacy:
+      "Ảnh sổ và kết quả chỉ hiện với tài khoản đã tải lên. Người khác đăng nhập vào máy này cũng không thấy dữ liệu của anh/chị.",
+    authClaimed: (n: number) =>
+      `Đã chuyển ${n} không gian làm việc có sẵn về tài khoản này.`,
+    authAccount: "Tài khoản",
+
+    saveSaving: "Đang lưu...",
+    saveSaved: "Đã lưu",
+    saveFailed: "Chưa lưu được",
+
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
 
@@ -358,6 +380,27 @@ const DICT = {
     expDownload: "Export and download",
     expWorking: "Building file...",
 
+    signIn: "Sign in",
+    signUp: "Sign up",
+    signOut: "Sign out",
+    authEmail: "Email",
+    authPassword: "Password",
+    authPasswordHint: "At least 8 characters",
+    authHeadIn: "Sign in to continue",
+    authHeadUp: "Create an account",
+    authToUp: "No account yet? Sign up",
+    authToIn: "Already have an account? Sign in",
+    authWorking: "Working...",
+    authChecking: "Checking your session...",
+    authPrivacy:
+      "Passbook images and results are visible only to the account that uploaded them. Another person signing in on this machine cannot see your data.",
+    authClaimed: (n: number) => `Moved ${n} existing workspace(s) to this account.`,
+    authAccount: "Account",
+
+    saveSaving: "Saving...",
+    saveSaved: "Saved",
+    saveFailed: "Not saved",
+
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
 
@@ -527,6 +570,27 @@ const DICT = {
     expFileName: "ファイル名",
     expDownload: "出力してダウンロード",
     expWorking: "作成中...",
+
+    signIn: "ログイン",
+    signUp: "新規登録",
+    signOut: "ログアウト",
+    authEmail: "メールアドレス",
+    authPassword: "パスワード",
+    authPasswordHint: "8文字以上",
+    authHeadIn: "ログインして続ける",
+    authHeadUp: "アカウントを作成",
+    authToUp: "アカウントがない方はこちら",
+    authToIn: "すでにアカウントをお持ちの方",
+    authWorking: "処理中...",
+    authChecking: "ログイン状態を確認しています...",
+    authPrivacy:
+      "通帳の画像と読み取り結果は、アップロードしたアカウントにのみ表示されます。同じ端末から別の方がログインしても閲覧できません。",
+    authClaimed: (n: number) => `既存のワークスペース${n}件をこのアカウントに移しました。`,
+    authAccount: "アカウント",
+
+    saveSaving: "保存中...",
+    saveSaved: "保存しました",
+    saveFailed: "保存できません",
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

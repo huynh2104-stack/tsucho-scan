@@ -75,6 +75,7 @@ class Workspace:
     sheets: list[Sheet] = field(default_factory=list)
     book_name: str = ""          # tên sổ người dùng đặt, dùng khi xuất file
     created_at: float = field(default_factory=time.time)
+    owner: str = ""              # user.id — chỉ chủ sở hữu mới mở được
 
     def dir(self) -> Path:
         return WS_DIR / self.id
@@ -90,6 +91,7 @@ class Workspace:
                     "id": self.id,
                     "book_name": self.book_name,
                     "created_at": self.created_at,
+                    "owner": self.owner,
                     "sheets": [asdict(s) for s in self.sheets],
                 },
                 ensure_ascii=False,
@@ -101,8 +103,8 @@ class Workspace:
 _cache: dict[str, Workspace] = {}
 
 
-def create() -> Workspace:
-    ws = Workspace(id=uuid.uuid4().hex[:12])
+def create(owner: str = "") -> Workspace:
+    ws = Workspace(id=uuid.uuid4().hex[:12], owner=owner)
     ws.save()
     _cache[ws.id] = ws
     return ws
@@ -119,10 +121,40 @@ def load(ws_id: str) -> Workspace | None:
         id=raw["id"],
         book_name=raw.get("book_name", ""),
         created_at=raw.get("created_at", time.time()),
+        owner=raw.get("owner", ""),
         sheets=[Sheet(**s) for s in raw.get("sheets", [])],
     )
     _cache[ws.id] = ws
     return ws
+
+
+def all_ids() -> list[str]:
+    if not WS_DIR.is_dir():
+        return []
+    return [d.name for d in WS_DIR.iterdir() if (d / "meta.json").is_file()]
+
+
+def list_for(owner: str) -> list[Workspace]:
+    """Các không gian làm việc của một người, mới nhất trước."""
+    found = [ws for i in all_ids() if (ws := load(i)) and ws.owner == owner]
+    return sorted(found, key=lambda w: w.created_at, reverse=True)
+
+
+def claim_ownerless(owner: str) -> int:
+    """Gán những workspace chưa có chủ cho `owner`. Trả về số lượng đã gán.
+
+    Chỉ chạy cho NGƯỜI ĐẦU TIÊN đăng ký: dữ liệu tạo ra hồi app chưa có đăng
+    nhập vẫn còn trên đĩa, không nhận thì không ai mở được nữa. Máy mới cài thì
+    không có gì để nhận nên vô hại.
+    """
+    n = 0
+    for i in all_ids():
+        ws = load(i)
+        if ws and not ws.owner:
+            ws.owner = owner
+            ws.save()
+            n += 1
+    return n
 
 
 # ── Thêm file ────────────────────────────────────────────────────────

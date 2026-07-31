@@ -393,6 +393,8 @@ export default function SheetViewer({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={sheetImage(wsId, sheet)}
+            /* Xem chú thích ở SheetRail: không có cái này thì ảnh 401. */
+            crossOrigin="use-credentials"
             alt={sheet.name}
             draggable={false}
             className="block w-full rounded-lg border border-rule bg-white shadow-[var(--shadow)]"
@@ -405,20 +407,30 @@ export default function SheetViewer({
             }}
           />
 
-          {/* Khoanh dòng đang chọn ở bảng kết quả — đối chiếu ảnh ↔ dòng */}
+          {/* Dòng đang chọn ở bảng kết quả — đối chiếu ảnh ↔ dòng.
+              CHỈ TÔ NỀN, không kẻ viền trên/dưới và không gắn nhãn nổi: dải này
+              là ƯỚC LƯỢNG từ ảnh (xem api/rowmap.py), lệch một chút là chuyện
+              thường, mà viền đậm + nhãn thì che mất chữ của dòng bên cạnh —
+              đúng thứ người dùng đang cần đọc.
+              Dò được đúng dòng thì đậm hơn, phải chia đều thì nhạt hẳn: nhìn là
+              biết chỗ nào tin được, không phải đoán. */}
           {highlight && !cropping && (
             <div
-              className="pointer-events-none absolute inset-x-0 border-y-2 transition-all duration-200"
+              className="pointer-events-none absolute inset-x-0 transition-all duration-200"
               style={{
                 top: `${highlight.y0 * 100}%`,
                 height: `${Math.max(0.006, highlight.y1 - highlight.y0) * 100}%`,
-                borderColor: "var(--danger)",
-                background: "color-mix(in srgb, var(--danger) 12%, transparent)",
+                background: `color-mix(in srgb, var(--danger) ${
+                  highlightExact ? 13 : 7
+                }%, transparent)`,
               }}
+              title={highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
             >
-              <span className="absolute -top-[18px] left-1 rounded-t bg-danger px-1.5 text-[10px] font-bold text-white">
-                {highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
-              </span>
+              {/* Vạch mảnh ở mép trái để mắt bắt được vị trí mà không che chữ */}
+              <span
+                className="absolute inset-y-0 left-0 w-[3px] bg-danger"
+                style={{ opacity: highlightExact ? 0.85 : 0.4 }}
+              />
             </div>
           )}
 

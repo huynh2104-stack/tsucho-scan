@@ -206,6 +206,9 @@ export default function SheetRail({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={sheetImage(wsId, s, true)}
+                    /* Ảnh sổ nằm sau lớp đăng nhập: thẻ <img> thường KHÔNG gửi
+                       cookie sang cổng khác, phải khai báo use-credentials. */
+                    crossOrigin="use-credentials"
                     alt=""
                     className={`h-full w-full object-cover ${
                       st === "wait" ? "opacity-40 grayscale" : ""

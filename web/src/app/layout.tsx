@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/lib/auth";
 import { LangProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_KEY } from "@/lib/theme";
 import TopBar from "@/components/TopBar";
@@ -40,8 +41,10 @@ export default function RootLayout({
       <body className="flex h-dvh flex-col overflow-hidden">
         <ThemeProvider>
           <LangProvider>
-            <TopBar />
-            <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+            <AuthProvider>
+              <TopBar />
+              <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+            </AuthProvider>
           </LangProvider>
         </ThemeProvider>
       </body>

@@ -149,6 +149,9 @@ export type ScanEvent = {
   cached?: boolean;
 };
 
+/** Chưa đăng nhập / phiên hết hạn. Trang gọi bắt lỗi này để đá về /login. */
+export class Unauthorized extends Error {}
+
 async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
@@ -158,43 +161,80 @@ async function asJson<T>(res: Response): Promise<T> {
     } catch {
       /* backend trả về không phải JSON — giữ nguyên mã lỗi */
     }
+    if (res.status === 401) throw new Unauthorized(detail);
     throw new Error(detail);
   }
   return res.json() as Promise<T>;
 }
+
+/** BẮT BUỘC ở mọi lời gọi: API nằm ở cổng/tên miền khác nên trình duyệt không
+ *  tự gửi cookie phiên nếu không nói rõ. Thiếu chỗ này là 401 toàn tập. */
+const CRED = { credentials: "include" } as const;
 
 const jsonPost = <T,>(path: string, body: unknown) =>
   fetch(`${API}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    ...CRED,
   }).then(asJson<T>);
+
+// ── Tài khoản ──────────────────────────────────────────────────────
+
+export type Me = { id: string; email: string; role: "admin" | "user" };
+
+export const register = (email: string, password: string) =>
+  jsonPost<Me & { claimed_workspaces: number }>("/api/auth/register", {
+    email,
+    password,
+  });
+
+export const login = (email: string, password: string) =>
+  jsonPost<Me>("/api/auth/login", { email, password });
+
+export const logout = () => jsonPost<{ ok: true }>("/api/auth/logout", {});
+
+/** Ai đang đăng nhập — ném `Unauthorized` nếu chưa. */
+export const fetchMe = async () =>
+  asJson<Me>(await fetch(`${API}/api/auth/me`, CRED));
+
+export type WorkspaceBrief = {
+  id: string;
+  book_name: string;
+  created_at: number;
+  sheets: number;
+  scanned: number;
+};
+
+export const listWorkspaces = async () =>
+  asJson<{ workspaces: WorkspaceBrief[] }>(await fetch(`${API}/api/ws`, CRED));
 
 // ── Không gian làm việc ────────────────────────────────────────────
 
 export const createWorkspace = () => jsonPost<Workspace>("/api/ws", {});
 
 export const getWorkspace = async (id: string) =>
-  asJson<Workspace>(await fetch(`${API}/api/ws/${id}`));
+  asJson<Workspace>(await fetch(`${API}/api/ws/${id}`, CRED));
 
 export const renameBook = (id: string, book_name: string) =>
   fetch(`${API}/api/ws/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ book_name }),
+    ...CRED,
   }).then(asJson<Workspace>);
 
 export async function addSheets(wsId: string, files: File[]) {
   const fd = new FormData();
   files.forEach((f) => fd.append("files", f));
   return asJson<Workspace & { added: string[] }>(
-    await fetch(`${API}/api/ws/${wsId}/sheets`, { method: "POST", body: fd }),
+    await fetch(`${API}/api/ws/${wsId}/sheets`, { method: "POST", body: fd, ...CRED }),
   );
 }
 
 export const deleteSheet = async (wsId: string, sheetId: string) =>
   asJson<Workspace>(
-    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE" }),
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE", ...CRED }),
   );
 
 export const reorderSheets = (wsId: string, sheet_ids: string[]) =>
@@ -205,7 +245,21 @@ export const renameSheet = (wsId: string, sheetId: string, name: string) =>
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
+    ...CRED,
   }).then(asJson<Workspace>);
+
+/** Lưu bản ĐÃ SỬA TAY của một mặt sổ.
+ *
+ * Trước đây các ô sửa chỉ nằm trong bộ nhớ trình duyệt nên F5 hay đăng nhập lại
+ * là mất sạch công soát — dùng hàm này để autosave.
+ */
+export const saveSheetResult = (wsId: string, sheetId: string, blocks: SheetBlock[]) =>
+  fetch(`${API}/api/ws/${wsId}/results/${sheetId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ blocks }),
+    ...CRED,
+  }).then(asJson<SheetResult>);
 
 /** `v` đổi theo sha256 để trình duyệt tải lại ảnh sau khi xoay/cắt. */
 export const sheetImage = (wsId: string, s: Sheet, thumb = false) =>
@@ -244,7 +298,7 @@ export type AutofixPlan = {
 
 export const autofixPlan = async (wsId: string, sheetId: string) =>
   asJson<AutofixPlan>(
-    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/autofix`),
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/autofix`, CRED),
   );
 
 export const autofixApply = (wsId: string, sheetId: string, steps: AutofixStep[]) =>
@@ -258,7 +312,7 @@ export type RowBands = { bands: { y0: number; y1: number }[]; exact: boolean };
 
 export const rowMap = async (wsId: string, sheetId: string, rows: number) =>
   asJson<RowBands>(
-    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap?rows=${rows}`),
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap?rows=${rows}`, CRED),
   );
 
 /** Thêm sổ MẪU (dữ liệu giả lập) — chạy hết luồng mà không gọi model. */
@@ -274,7 +328,7 @@ export const startScan = (wsId: string, sheet_ids: string[], no_cache = false) =
   jsonPost<Job>(`/api/ws/${wsId}/scan`, { sheet_ids, no_cache });
 
 export const getJob = async (id: string) =>
-  asJson<Job>(await fetch(`${API}/api/jobs/${id}`));
+  asJson<Job>(await fetch(`${API}/api/jobs/${id}`, CRED));
 
 /** Dựng danh sách sổ để xuất file, theo đúng thứ tự mặt sổ đang hiện.
  *
@@ -317,6 +371,7 @@ export async function exportFile(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    ...CRED,
   });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
@@ -355,7 +410,10 @@ export function listenEvents(
   onEvent: (e: ScanEvent) => void,
   onClose?: () => void,
 ): () => void {
-  const es = new EventSource(`${API}/api/jobs/${id}/events`);
+  // withCredentials: SSE cũng phải mang cookie phiên, không thì 401.
+  const es = new EventSource(`${API}/api/jobs/${id}/events`, {
+    withCredentials: true,
+  });
   es.onmessage = (m) => {
     try {
       const data = JSON.parse(m.data) as ScanEvent;

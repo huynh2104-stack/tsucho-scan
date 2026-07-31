@@ -146,6 +146,18 @@ Chi phí đo được: **~$0.003/trang** → 200 trang/tháng ≈ $0.60. Không 
 
 **Giai đoạn 3 — cho người thật dùng**
 7. Phân quyền, nhật ký.
+   - ✅ **Đăng nhập + tách dữ liệu theo user** *(31/07/2026)* — SQLite `.data/app.db`,
+     mật khẩu băm scrypt (stdlib, không thêm thư viện), phiên là token ngẫu nhiên
+     trong cookie `HttpOnly` (thu hồi được, khác JWT). Mọi route đụng dữ liệu sổ
+     đều đòi đăng nhập; workspace của người khác trả **404** chứ không phải 403.
+     Người đăng ký đầu tiên thành `admin` và nhận các workspace tạo từ hồi chưa
+     có đăng nhập. 11 test mới, trong đó có một test **tự quét mọi route** nên
+     thêm route mà quên khoá là đỏ ngay.
+   - ⬜ Còn thiếu trước khi mở cho người ngoài: **giới hạn số lần đăng nhập sai**,
+     quên mật khẩu, trang quản lý user (khoá tài khoản), nhật ký ai quét file nào.
+   - ⚠ Triển khai lên Vercel + Render (khác tên miền) phải đặt
+     `TSUCHO_COOKIE_SAMESITE=none` và `TSUCHO_COOKIE_SECURE=1`, đồng thời sửa
+     `allow_origins` trong `api/main.py`. Chạy localhost thì để mặc định.
 8. Hoàn thiện bản dịch **tiếng Nhật** (xem §9 — khung i18n phải dựng từ ngày đầu).
 9. Bật trả phí / Vertex AI.
 
@@ -216,7 +228,7 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 
 | Phím | Việc |
 |---|---|
-| `↑` `↓` | dòng trước / sau (ảnh tự cuộn theo) |
+| `↑` `↓` `←` `→` | ✅ *(31/07/2026)* đi giữa các Ô trong bảng, vệt đỏ trên ảnh bám theo. `←` `→` chỉ nhảy ô khi con trỏ đã ở kịch đầu/kịch cuối chữ, đứng giữa chữ thì vẫn sửa bình thường |
 | `n` / `p` | **dòng cần soát tiếp theo / trước đó** — phím quan trọng nhất |
 | `Enter` | sửa ô đang chọn · `Tab` sang ô kế · `Esc` huỷ |
 | `+` `−` `0` | phóng to / thu nhỏ / vừa khung |
@@ -226,6 +238,13 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 
 1. **Click dòng → ảnh cuộn + zoom tới đúng dòng.** Không có cái này thì tool mất
    hết giá trị (xem §2). Cần bounding box ở §2.
+   - *Hiện trạng 31/07/2026:* đang dùng **ước lượng từ ảnh** (`api/rowmap.py`,
+     cộng lượng mực theo hàng ngang) chứ không phải toạ độ do model trả — nên
+     có file trúng, có file lệch. Đã đổi cách vẽ: **chỉ tô nền, bỏ viền
+     trên/dưới và bỏ nhãn nổi** vì chúng che mất chữ dòng bên cạnh; dò được
+     đúng dòng thì nền đậm (13%), phải chia đều thì nhạt hẳn (7%) — nhìn là
+     biết chỗ nào tin được. Muốn chính xác thật thì phải xin toạ độ từ model,
+     **đổi prompt = mất toàn bộ cache**, phải hỏi người dùng trước.
 2. **Đếm ngược số dòng cần soát** ở thanh trên: `⚠ còn 3 dòng`. Soát xong một dòng
    thì số giảm ngay — người dùng thấy mình đang tiến tới đích.
 3. **Ô 残高 sửa xong → cột kiểm tra tính lại tức thì**, dòng chuyển từ vàng sang
@@ -293,8 +312,11 @@ bám, sửa ô → tính lại). Bản thật phải đạt các mục dưới �
 - **Mini-map dòng vàng** cạnh thanh cuộn bảng (như VS Code): liếc một cái biết
   còn bao nhiêu chỗ phải soát và ở đâu.
 - **Cuộn đồng bộ 2 bên**: cuộn bảng thì ảnh trôi theo và ngược lại (tắt được).
-- **Autosave bản soát**: sửa tới đâu lưu tới đó; F5 hay rớt mạng không mất công.
-  Quay lại file cũ thấy đúng chỗ đang soát dở.
+- ✅ **Autosave bản soát** *(31/07/2026)*: sửa tới đâu lưu tới đó; F5 hay đăng
+  xuất không mất công. `PUT /api/ws/:ws/results/:sheet`, chờ 800ms sau nhịp gõ
+  cuối mới ghi, ghi nguyên tử (file tạm + `os.replace`). Trạng thái「Đã lưu」hiện
+  ở thanh trên cột kết quả. *Trước đó các ô sửa CHỈ nằm trong bộ nhớ trình
+  duyệt — người dùng soát xong cả file rồi mất trắng.*
 - **Trang trống lần đầu** có nút「サンプルで試す / Thử với sổ mẫu」— chạy toàn bộ
   luồng bằng dữ liệu giả, không tốn API, để giám đốc bấm chơi mà không sợ hỏng gì.
 - **Khoảnh khắc hoàn thành**: dòng vàng cuối được sửa xong → huy hiệu chuyển

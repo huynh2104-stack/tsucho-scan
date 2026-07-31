@@ -72,6 +72,70 @@ function Th({
   );
 }
 
+/* ── Đi lại giữa các ô bằng phím mũi tên ─────────────────────────────
+   Người soát dữ liệu dùng bàn phím nhanh hơn chuột nhiều lần (WEB_PLAN §7.1),
+   mà trước đây muốn sang ô kế phải bấm chuột từng ô một.
+
+   Luật quan trọng: mũi tên trái/phải CHỈ nhảy ô khi con trỏ đã ở kịch đầu hoặc
+   kịch cuối chữ — đứng giữa chữ thì nó vẫn là phím di chuyển con trỏ bình
+   thường, nếu không thì không sửa được chữ trong ô nữa. */
+
+const CELL_SEL = "input[data-cell]";
+
+function focusCell(el: HTMLInputElement, place: "start" | "end" | "all") {
+  el.focus();
+  const n = el.value.length;
+  if (place === "all") el.setSelectionRange(0, n);
+  else if (place === "start") el.setSelectionRange(0, 0);
+  else el.setSelectionRange(n, n);
+}
+
+/** Chuyển focus sang ô kề. Trả về true nếu đã chuyển (để chặn hành vi mặc định). */
+function moveCell(el: HTMLInputElement, key: string): boolean {
+  const root = el.closest<HTMLElement>("[data-grid]");
+  const tr = el.closest("tr");
+  if (!root || !tr) return false;
+
+  const cellsOf = (row: Element) =>
+    Array.from(row.querySelectorAll<HTMLInputElement>(CELL_SEL));
+
+  const here = cellsOf(tr);
+  const col = here.indexOf(el);
+  if (col < 0) return false;
+
+  // Lấy theo thứ tự trong DOM nên đi xuyên qua cả các thẻ sổ khác ở chế độ
+  // danh sách — không dừng lại ở cuối mỗi bảng.
+  const rows = Array.from(root.querySelectorAll("tr[data-row]"));
+  const r = rows.indexOf(tr);
+
+  if (key === "ArrowUp" || key === "ArrowDown") {
+    const next = rows[r + (key === "ArrowDown" ? 1 : -1)];
+    if (!next) return false;
+    const cells = cellsOf(next);
+    // Cột cuối của dòng kia có thể ít hơn (không có ô nào) → lùi về ô gần nhất
+    const target = cells[Math.min(col, cells.length - 1)];
+    if (!target) return false;
+    focusCell(target, "all");
+    return true;
+  }
+
+  const step = key === "ArrowRight" ? 1 : -1;
+  const sibling = here[col + step];
+  if (sibling) {
+    focusCell(sibling, step === 1 ? "start" : "end");
+    return true;
+  }
+
+  // Hết hàng → xuống dòng dưới (hoặc lên dòng trên) như khi đọc chữ
+  const nextRow = rows[r + step];
+  if (!nextRow) return false;
+  const cells = cellsOf(nextRow);
+  const edge = step === 1 ? cells[0] : cells[cells.length - 1];
+  if (!edge) return false;
+  focusCell(edge, step === 1 ? "start" : "end");
+  return true;
+}
+
 /** Ô sửa được — trông như chữ thường cho tới khi bấm vào. */
 function Cell({
   value,
@@ -91,16 +155,37 @@ function Cell({
   return (
     <input
       key={value}
+      data-cell
       defaultValue={value}
       placeholder={placeholder}
       onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
       onKeyDown={(e) => {
-        const el = e.target as HTMLInputElement;
-        if (e.key === "Enter") el.blur();
+        const el = e.currentTarget;
+        if (e.key === "Enter") {
+          el.blur();
+          return;
+        }
         if (e.key === "Escape") {
           el.value = value;
           el.blur();
+          return;
         }
+        // Ctrl+←/→ (nhảy theo từ) và Shift+←/→ (bôi đen) vẫn là việc của ô
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          const at = el.selectionStart ?? 0;
+          const to = el.selectionEnd ?? 0;
+          const whole = at === 0 && to === el.value.length && el.value.length > 0;
+          // Bôi đen một phần → để nguyên cho phím thu gọn vùng chọn.
+          // Bôi đen CẢ ô (vừa nhảy tới bằng ↑/↓) thì cho đi tiếp luôn.
+          if (at !== to && !whole) return;
+          if (!whole && (e.key === "ArrowLeft" ? at > 0 : at < el.value.length)) return;
+        } else if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+          return;
+        }
+
+        if (moveCell(el, e.key)) e.preventDefault();
       }}
       inputMode={money ? "numeric" : undefined}
       className={`w-full rounded border border-transparent bg-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none ${
@@ -144,6 +229,9 @@ function Row({
     <tr
       data-row={`${ref_.sheet}:${ref_.block}:${ref_.row}`}
       onClick={() => onSelect(ref_)}
+      /* Đi bằng bàn phím cũng phải kéo theo vệt đỏ trên ảnh, không thì gõ tới
+         dòng nào mà ảnh vẫn đứng ở dòng cũ. Sự kiện focus có nổi bọt lên tr. */
+      onFocus={() => onSelect(ref_)}
       className={`group cursor-default border-b border-rule2 ${
         note ? "italic text-ink3" : ""
       } ${n % 2 === 0 ? "bg-band" : ""} ${dim ? "opacity-25" : ""} ${
@@ -593,7 +681,8 @@ export default function ReviewPane({
       </div>
 
       {/* Thân cột — CHÍNH khung này cuộn */}
-      <div ref={scroller} className="thin-scroll min-h-0 flex-1 overflow-auto">
+      {/* data-grid: mốc để phím mũi tên tìm được mọi dòng, kể cả ở thẻ sổ khác */}
+      <div ref={scroller} data-grid className="thin-scroll min-h-0 flex-1 overflow-auto">
         {mode === "page" ? (
           !activeSheet ? (
             <p className="p-4 text-[12.5px] text-ink3">{t.pickSheetForPage}</p>

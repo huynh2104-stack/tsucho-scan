@@ -11,6 +11,7 @@
  * Trộn hai thứ này từng làm người dùng không hiểu vì sao xoay lại đổi cả ảnh khác.
  */
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addSample,
@@ -23,6 +24,7 @@ import {
   exportFile,
   getJob,
   getWorkspace,
+  listWorkspaces,
   listenEvents,
   renameBook,
   renameSheet,
@@ -31,6 +33,7 @@ import {
   rotateSheets,
   rowMap,
   saveBlob,
+  saveSheetResult,
   startScan,
   undoSheet,
   type PerSheet,
@@ -40,6 +43,7 @@ import {
   type Tx,
   type Workspace,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
 import DropZone from "@/components/DropZone";
 import SheetRail, { Tick, type ScanState } from "@/components/SheetRail";
@@ -71,6 +75,8 @@ function flatRowIndex(store: ResultStore, sheetId: string | null, ref: TxRef): n
 
 export default function Workbench() {
   const { t } = useT();
+  const { user, ready } = useAuth();
+  const router = useRouter();
 
   const [ws, setWs] = useState<Workspace | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
@@ -119,11 +125,36 @@ export default function Workbench() {
   const [cols, setCols] = useState<OptCols>({ store: true, extra: false, kind: true });
 
   const stopSse = useRef<(() => void) | null>(null);
+  const booted = useRef<string | null>(null);   // đã mở workspace cho user nào
+
+  /* ── Autosave công soát ──────────────────────────────────────────────
+     `savedRef` giữ ĐÚNG object của từng mặt sổ mà server đang có. Mọi hàm sửa
+     đều tạo object mới cho riêng mặt bị đụng tới, nên chỉ cần so sánh tham
+     chiếu (===) là biết mặt nào đã đổi — không phải so từng ô. */
+  const savedRef = useRef<ResultStore>({});
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle",
+  );
+
+  // Chưa đăng nhập thì không có gì để xem — đá về trang đăng nhập.
+  // Chờ `ready` mới xét, không thì mỗi lần F5 lại chớp qua /login một nhịp.
+  useEffect(() => {
+    if (ready && !user) router.replace("/login");
+  }, [ready, user, router]);
 
   // Mở lại không gian làm việc cũ — F5 không mất ảnh đã tải lên
   useEffect(() => {
+    if (!user) return;
+    // Effect này chạy hai lần ở chế độ phát triển (React StrictMode). Không
+    // chặn thì tài khoản mới toanh bị tạo hai không gian làm việc rỗng.
+    if (booted.current === user.id) return;
+    booted.current = user.id;
+
+    // Khoá theo user.id: hai tài khoản dùng chung một máy không giành nhau
+    const key = `${WS_KEY}.${user.id}`;
     (async () => {
-      const saved = localStorage.getItem(WS_KEY);
+      const saved = localStorage.getItem(key);
       if (saved) {
         try {
           const w = await getWorkspace(saved);
@@ -131,19 +162,26 @@ export default function Workbench() {
           syncStore(w.results ?? {});     // kết quả đã quét sống qua F5
           return;
         } catch {
-          localStorage.removeItem(WS_KEY);
+          localStorage.removeItem(key);
         }
       }
       try {
-        const fresh = await createWorkspace();
-        localStorage.setItem(WS_KEY, fresh.id);
-        setWs(fresh);
+        // Hỏi server trước khi tạo mới: xoá bộ nhớ trình duyệt hay đổi máy vẫn
+        // mở lại đúng việc đang làm dở, không đẻ ra một loạt workspace rỗng.
+        const { workspaces } = await listWorkspaces();
+        const w = workspaces.length
+          ? await getWorkspace(workspaces[0].id)
+          : await createWorkspace();
+        localStorage.setItem(key, w.id);
+        setWs(w);
+        syncStore(w.results ?? {});
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => stopSse.current?.();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
@@ -522,10 +560,71 @@ export default function Workbench() {
       for (const sid of Object.keys(merged)) {
         if (!fromServer[sid]) delete merged[sid];
       }
+
+      /* Mặt nào vừa lấy từ server thì coi như đã lưu, mặt nào giữ bản sửa tại
+         chỗ thì vẫn còn nợ. Thiếu bước này, autosave sẽ gửi lại toàn bộ kho
+         ngay sau mỗi lần quét. (Phép tính chỉ dựa trên dữ liệu đầu vào nên
+         chạy hai lần cũng ra cùng kết quả — an toàn với StrictMode.) */
+      const known: ResultStore = {};
+      for (const sid of Object.keys(merged)) {
+        const fromSrv = merged[sid] === fromServer[sid];
+        const prev = savedRef.current[sid];
+        if (fromSrv) known[sid] = merged[sid];
+        else if (prev) known[sid] = prev;
+      }
+      savedRef.current = known;
+
       return { ...h, present: merged };
     });
 
-  /** Sửa một ô — giữ tại client, xuất file lấy đúng bản đang thấy. */
+  /** Đẩy các mặt sổ đã sửa lên server. Gọi qua bộ đếm giờ ở effect bên dưới. */
+  const flushSave = useCallback(async (wsId: string, snapshot: ResultStore) => {
+    const dirty = Object.keys(snapshot).filter(
+      (sid) => snapshot[sid] !== savedRef.current[sid],
+    );
+    if (dirty.length === 0) return;
+    setSaveState("saving");
+    try {
+      for (const sid of dirty) {
+        await saveSheetResult(wsId, sid, snapshot[sid].blocks);
+        savedRef.current[sid] = snapshot[sid];
+      }
+      setSaveState("saved");
+    } catch (e) {
+      // Báo thẳng ra màn hình: im lặng nuốt lỗi ở đây chính là kiểu mất dữ
+      // liệu mà autosave sinh ra để chống.
+      setSaveState("error");
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  /* Chờ ~800ms sau nhịp gõ cuối mới ghi — gõ từng chữ mà mỗi chữ một request
+     thì vừa nặng server vừa dễ ghi chồng lên nhau. */
+  useEffect(() => {
+    if (!ws) return;
+    const dirty = Object.keys(store).some((sid) => store[sid] !== savedRef.current[sid]);
+    if (!dirty) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void flushSave(ws.id, store), 800);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [store, ws, flushSave]);
+
+  /* Đóng tab lúc còn đang nợ thì hỏi lại. Chỉ hỏi khi thật sự chưa lưu xong,
+     nên bình thường người dùng không bao giờ thấy hộp thoại này. */
+  useEffect(() => {
+    const onLeave = (e: BeforeUnloadEvent) => {
+      const dirty = Object.keys(store).some(
+        (sid) => store[sid] !== savedRef.current[sid],
+      );
+      if (dirty) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [store]);
+
+  /** Sửa một ô. Autosave ở trên sẽ đẩy lên server ngay sau đó. */
   const editCell: EditFn = (ref, field, value) =>
     patchRows(ref.sheet, ref.block, (rows) =>
       rows.map((tx, i) => (i === ref.row ? ({ ...tx, [field]: value } as Tx) : tx)),
@@ -655,6 +754,17 @@ export default function Workbench() {
       setExporting(false);
     }
   };
+
+  // Chưa biết ai đang đăng nhập thì chưa vẽ bàn làm việc — nếu vẽ, người dùng
+  // thấy giao diện rỗng loé lên một nhịp rồi mới bị đá sang /login.
+  // (Đặt SAU mọi hook: React cấm số lượng hook thay đổi giữa các lần render.)
+  if (!ready || !user) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-[14px] text-ink2">
+        {t.authChecking}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -928,6 +1038,21 @@ export default function Workbench() {
                 {badCount > 0 ? t.badLeft(badCount) : t.allChecked}
               </span>
               <span className="flex-1" />
+              {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng
+                  đã lưu, nên từ giờ nói rõ ra. */}
+              {saveState !== "idle" && (
+                <span
+                  className={`text-[10.5px] ${
+                    saveState === "error" ? "font-semibold text-danger" : "text-ink3"
+                  }`}
+                >
+                  {saveState === "saving"
+                    ? t.saveSaving
+                    : saveState === "saved"
+                      ? `✓ ${t.saveSaved}`
+                      : t.saveFailed}
+                </span>
+              )}
               {highlight && (
                 <span className="text-[10.5px] text-ink3">
                   {bands?.exact ? t.rowLinkExact : t.rowLinkEstimated}

@@ -9,6 +9,7 @@ khởi động lại server. Đó cũng chính là "lịch sử kết quả đã
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -21,6 +22,19 @@ def _dir(ws_id: str) -> Path:
 
 def _path(ws_id: str, sheet_id: str) -> Path:
     return _dir(ws_id) / f"{sheet_id}.json"
+
+
+def _write_atomic(path: Path, data: dict) -> None:
+    """Ghi ra file tạm rồi mới đổi tên.
+
+    Đây là công soát bằng tay của người dùng — mất điện đúng lúc đang ghi mà
+    file bị cắt cụt thì họ mất trắng. `os.replace` là thao tác nguyên tử: hoặc
+    còn bản cũ nguyên vẹn, hoặc đã là bản mới, không có ở giữa.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> None:
@@ -47,21 +61,46 @@ def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> No
                 blocks.append({"meta": meta, "rows": [tx]})
 
     for sid in sheet_ids:
-        _path(ws_id, sid).write_text(
-            json.dumps(
-                {
-                    "sheet_id": sid,
-                    "job_id": job_id,
-                    "scanned_at": time.time(),
-                    "model": payload.get("model"),
-                    "cached": payload.get("cached"),
-                    "cost_usd": payload.get("cost_usd"),
-                    "blocks": blocks_by_sheet[sid],
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
+        _write_atomic(
+            _path(ws_id, sid),
+            {
+                "sheet_id": sid,
+                "job_id": job_id,
+                "scanned_at": time.time(),
+                "model": payload.get("model"),
+                "cached": payload.get("cached"),
+                "cost_usd": payload.get("cost_usd"),
+                "blocks": blocks_by_sheet[sid],
+            },
         )
+
+
+def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
+    """Ghi đè các dòng của MỘT mặt sổ bằng bản người dùng đang thấy trên màn hình.
+
+    Giữ nguyên phần metadata của lần quét (model, chi phí, thời điểm quét) và
+    chỉ thay `blocks` — người dùng sửa chữ chứ không quét lại, nên nói rằng nó
+    vừa được quét lại là sai sự thật.
+
+    Không có hàm này thì công soát chỉ nằm trong bộ nhớ trình duyệt: F5, đăng
+    xuất, hay rớt mạng là mất sạch (bug người dùng báo 31/07/2026).
+    """
+    path = _path(ws_id, sheet_id)
+    base: dict = {}
+    if path.is_file():
+        try:
+            base = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            base = {}
+
+    data = {
+        **base,
+        "sheet_id": sheet_id,
+        "blocks": blocks,
+        "edited_at": time.time(),
+    }
+    _write_atomic(path, data)
+    return data
 
 
 def load_all(ws_id: str) -> dict[str, dict]:

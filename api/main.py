@@ -10,17 +10,20 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Body, FastAPI, HTTPException, UploadFile
+from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from export import export_accounts
 
-from . import autofix, export_csv, jobs, results, rowmap, sample, workspace
+from . import auth, autofix, export_csv, jobs, results, rowmap, sample, workspace
 
-app = FastAPI(title="tsucho-scan API", version="0.2.0")
+app = FastAPI(title="tsucho-scan API", version="0.3.0")
+
+auth.init_db()
 
 # Next.js chạy ở cổng 3000 lúc phát triển. Khi lên thật phải thay bằng tên miền
 # thật — để "*" là cho phép mọi trang web gọi API kèm cookie của người dùng.
@@ -35,9 +38,19 @@ app.add_middleware(
 )
 
 
-def _ws(ws_id: str) -> workspace.Workspace:
+# Mọi route đụng tới dữ liệu sổ đều nhận `user: CurrentUser` — chưa đăng nhập
+# thì FastAPI trả 401 trước khi vào thân hàm, không sót route nào.
+CurrentUser = Annotated[auth.User, Depends(auth.require_user)]
+
+
+def _ws(ws_id: str, user: auth.User) -> workspace.Workspace:
+    """Nạp workspace VÀ kiểm tra quyền sở hữu.
+
+    Trả 404 (không phải 403) khi workspace của người khác: nói "có tồn tại
+    nhưng anh không được xem" là đã tiết lộ thông tin rồi.
+    """
     ws = workspace.load(ws_id)
-    if not ws:
+    if not ws or ws.owner != user.id:
         raise HTTPException(404, "Không tìm thấy không gian làm việc")
     return ws
 
@@ -54,36 +67,100 @@ def health() -> dict:
     return {"ok": True}
 
 
+# ── Đăng nhập ────────────────────────────────────────────────────────
+
+@app.post("/api/auth/register")
+def register(response: Response, body: dict = Body(...)) -> dict:
+    """Tự đăng ký. Người ĐẦU TIÊN thành admin và nhận các workspace cũ."""
+    try:
+        user = auth.create_user(str(body.get("email", "")), str(body.get("password", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    claimed = workspace.claim_ownerless(user.id) if user.role == "admin" else 0
+    auth.set_cookie(response, auth.start_session(user))
+    return {**user.to_json(), "claimed_workspaces": claimed}
+
+
+@app.post("/api/auth/login")
+def login(response: Response, body: dict = Body(...)) -> dict:
+    found = auth.get_by_email(str(body.get("email", "")))
+    # Sai email và sai mật khẩu phải trả CÙNG một câu — nếu khác nhau thì người
+    # ngoài dò được email nào đã có tài khoản.
+    if not found or not auth.verify_password(str(body.get("password", "")), found[1]):
+        raise HTTPException(401, "Email hoặc mật khẩu không đúng")
+    user = found[0]
+    auth.set_cookie(response, auth.start_session(user))
+    return user.to_json()
+
+
+@app.post("/api/auth/logout")
+def logout(
+    response: Response,
+    session: str | None = Cookie(default=None, alias=auth.COOKIE),
+) -> dict:
+    if session:
+        auth.end_session(session)
+    auth.clear_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(user: CurrentUser) -> dict:
+    return user.to_json()
+
+
 # ── Không gian làm việc & mặt sổ ─────────────────────────────────────
 
 @app.post("/api/ws")
-def create_ws() -> dict:
-    return workspace.to_json(workspace.create())
+def create_ws(user: CurrentUser) -> dict:
+    return workspace.to_json(workspace.create(owner=user.id))
+
+
+@app.get("/api/ws")
+def list_ws(user: CurrentUser) -> dict:
+    """Workspace của CHÍNH người đang đăng nhập — mới nhất trước.
+
+    Có cái này thì xoá bộ nhớ trình duyệt hay đổi máy vẫn tìm lại được việc
+    đang làm dở, không bị mồ côi dữ liệu.
+    """
+    return {
+        "workspaces": [
+            {
+                "id": ws.id,
+                "book_name": ws.book_name,
+                "created_at": ws.created_at,
+                "sheets": len(ws.sheets),
+                "scanned": sum(1 for s in ws.sheets if s.scanned),
+            }
+            for ws in workspace.list_for(user.id)
+        ]
+    }
 
 
 @app.get("/api/ws/{ws_id}")
-def get_ws(ws_id: str) -> dict:
+def get_ws(ws_id: str, user: CurrentUser) -> dict:
     """Workspace + MỌI kết quả đã quét (khoá theo mặt sổ).
 
     Nhờ trả kèm kết quả mà F5 hay khởi động lại server vẫn thấy lại những gì đã
     quét — trước đây quét mặt mới là mất sạch kết quả các mặt cũ.
     """
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.patch("/api/ws/{ws_id}")
-def rename_book(ws_id: str, body: dict = Body(...)) -> dict:
-    ws = _ws(ws_id)
+def rename_book(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    ws = _ws(ws_id, user)
     ws.book_name = str(body.get("book_name", ""))[:80]
     ws.save()
     return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/sheets")
-async def add_sheets(ws_id: str, files: list[UploadFile]) -> dict:
+async def add_sheets(ws_id: str, files: list[UploadFile], user: CurrentUser) -> dict:
     """Tải file lên. PDF nhiều trang được TÁCH thành nhiều mặt sổ độc lập."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     added = []
     for f in files:
         data = await f.read()
@@ -95,28 +172,33 @@ async def add_sheets(ws_id: str, files: list[UploadFile]) -> dict:
 
 
 @app.delete("/api/ws/{ws_id}/sheets/{sheet_id}")
-def delete_sheet(ws_id: str, sheet_id: str) -> dict:
-    ws = _ws(ws_id)
+def delete_sheet(ws_id: str, sheet_id: str, user: CurrentUser) -> dict:
+    ws = _ws(ws_id, user)
     workspace.remove(ws, sheet_id)
     results.drop(ws_id, sheet_id)
     return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.patch("/api/ws/{ws_id}/sheets/{sheet_id}")
-def rename_sheet(ws_id: str, sheet_id: str, body: dict = Body(...)) -> dict:
-    ws = _ws(ws_id)
+def rename_sheet(
+    ws_id: str,
+    sheet_id: str,
+    user: CurrentUser,
+    body: dict = Body(...),
+) -> dict:
+    ws = _ws(ws_id, user)
     _sheet(ws, sheet_id).name = str(body.get("name", ""))[:80]
     ws.save()
     return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/reorder")
-def reorder_sheets(ws_id: str, body: dict = Body(...)) -> dict:
+def reorder_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Sắp lại thứ tự mặt sổ (kéo thả ở cột trái).
 
     Cột kết quả tự đi theo vì nó luôn lặp theo `ws.sheets`.
     """
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     order = body.get("sheet_ids") or []
     known = {s.id: s for s in ws.sheets}
     if sorted(order) != sorted(known):
@@ -127,9 +209,15 @@ def reorder_sheets(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/image")
-def sheet_image(ws_id: str, sheet_id: str, thumb: bool = False, v: str = ""):
+def sheet_image(
+    ws_id: str,
+    sheet_id: str,
+    user: CurrentUser,
+    thumb: bool = False,
+    v: str = "",
+):
     """Ảnh hiện tại của mặt sổ (đã áp dụng xoay/cắt). `v` để phá cache trình duyệt."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     sheet = _sheet(ws, sheet_id)
     path = sheet.dir(ws.id) / ("thumb.png" if thumb else "current.png")
     if not path.is_file():
@@ -140,9 +228,9 @@ def sheet_image(ws_id: str, sheet_id: str, thumb: bool = False, v: str = ""):
 # ── Chỉnh ảnh: xoay (nhiều mặt) / cắt (một mặt) ──────────────────────
 
 @app.post("/api/ws/{ws_id}/rotate")
-def rotate_sheets(ws_id: str, body: dict = Body(...)) -> dict:
+def rotate_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Xoay THẬT nhiều mặt sổ cùng lúc — dùng cho Ctrl/Shift chọn nhiều."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     degrees = int(body.get("degrees", 90))
     if degrees % 90 != 0:
         raise HTTPException(400, "Chỉ xoay theo bội số 90°")
@@ -156,9 +244,9 @@ def rotate_sheets(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/crop")
-def crop_sheet(ws_id: str, body: dict = Body(...)) -> dict:
+def crop_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Cắt — CHỈ nhận đúng một mặt sổ (vùng cắt của ảnh này không hợp ảnh khác)."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if len(ids) != 1:
         raise HTTPException(
@@ -181,9 +269,9 @@ def crop_sheet(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/adjust")
-def adjust_sheets(ws_id: str, body: dict = Body(...)) -> dict:
+def adjust_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Nghiêng tinh + độ sáng + độ tương phản. Áp cho mọi mặt đang chọn."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if not ids:
         raise HTTPException(400, "Chưa chọn mặt sổ nào")
@@ -209,9 +297,9 @@ def adjust_sheets(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/undo")
-def undo_sheet(ws_id: str, body: dict = Body(...)) -> dict:
+def undo_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Hoàn tác MỘT bước chỉnh ảnh — cứu cú bấm nhầm「Về ảnh gốc」."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if len(ids) != 1:
         raise HTTPException(400, "Hoàn tác áp dụng cho một mặt sổ đang xem")
@@ -224,9 +312,9 @@ def undo_sheet(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/reset")
-def reset_sheets(ws_id: str, body: dict = Body(...)) -> dict:
+def reset_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Trả ảnh về bản gốc — hoàn tác mọi lần xoay/cắt."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     for sid in body.get("sheet_ids") or []:
         workspace.reset_sheet(ws, _sheet(ws, sid))
     ws.save()
@@ -235,7 +323,7 @@ def reset_sheets(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/rowmap")
-def sheet_rowmap(ws_id: str, sheet_id: str, rows: int = 0) -> dict:
+def sheet_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, rows: int = 0) -> dict:
     """Ước lượng dải ảnh của từng dòng — để click dòng là khoanh đúng chỗ.
 
     Chạy bằng thuật toán trên ảnh có sẵn nên $0 và dùng được cho cả những mặt sổ
@@ -243,7 +331,7 @@ def sheet_rowmap(ws_id: str, sheet_id: str, rows: int = 0) -> dict:
     """
     from PIL import Image
 
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     sheet = _sheet(ws, sheet_id)
     if rows <= 0:
         return {"bands": [], "exact": False}
@@ -252,10 +340,35 @@ def sheet_rowmap(ws_id: str, sheet_id: str, rows: int = 0) -> dict:
     return rowmap.bands_for(img, rows)
 
 
+@app.put("/api/ws/{ws_id}/results/{sheet_id}")
+def save_result(
+    ws_id: str,
+    sheet_id: str,
+    user: CurrentUser,
+    body: dict = Body(...),
+) -> dict:
+    """Lưu bản ĐÃ SỬA TAY của một mặt sổ (autosave từ trình duyệt).
+
+    Trình duyệt gửi nguyên các khối đang hiện trên màn hình. Không cố gộp hay
+    hoà giải với bản cũ: cái người dùng đang nhìn thấy mới là bản đúng.
+    """
+    ws = _ws(ws_id, user)
+    _sheet(ws, sheet_id)                      # mặt sổ phải còn tồn tại
+
+    blocks = body.get("blocks")
+    if not isinstance(blocks, list):
+        raise HTTPException(400, "Thiếu danh sách khối dòng")
+    for b in blocks:
+        if not isinstance(b, dict) or not isinstance(b.get("rows"), list):
+            raise HTTPException(400, "Khối dòng không đúng định dạng")
+
+    return results.save_edits(ws_id, sheet_id, blocks)
+
+
 @app.post("/api/ws/{ws_id}/sample")
-def add_sample(ws_id: str) -> dict:
+def add_sample(ws_id: str, user: CurrentUser) -> dict:
     """Thêm sổ MẪU (dữ liệu giả lập) + kết quả dựng sẵn. Không gọi model."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     added = sample.add_to(ws)
     return {
         "added": added,
@@ -267,11 +380,11 @@ def add_sample(ws_id: str) -> dict:
 # ── Cắt nhanh thông minh (thuật toán, KHÔNG gọi model nên $0) ────────
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/autofix")
-def autofix_plan(ws_id: str, sheet_id: str) -> dict:
+def autofix_plan(ws_id: str, sheet_id: str, user: CurrentUser) -> dict:
     """Đề xuất các bước chỉnh, chưa áp dụng gì."""
     from PIL import Image
 
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     sheet = _sheet(ws, sheet_id)
     img = Image.open(sheet.dir(ws.id) / "current.png")
     img.load()
@@ -279,9 +392,9 @@ def autofix_plan(ws_id: str, sheet_id: str) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/autofix")
-def autofix_apply(ws_id: str, body: dict = Body(...)) -> dict:
+def autofix_apply(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Áp dụng kế hoạch cắt nhanh cho MẶT SỔ đang xem."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if len(ids) != 1:
         raise HTTPException(400, "Cắt nhanh áp dụng cho mặt sổ đang xem")
@@ -318,9 +431,9 @@ def autofix_apply(ws_id: str, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/split")
-def split_sheet(ws_id: str, body: dict = Body(...)) -> dict:
+def split_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Tách 1 ảnh chứa 2 sổ thành 2 mặt sổ riêng (trái / phải)."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if len(ids) != 1:
         raise HTTPException(400, "Tách áp dụng cho mặt sổ đang xem")
@@ -335,9 +448,9 @@ def split_sheet(ws_id: str, body: dict = Body(...)) -> dict:
 # ── Quét ─────────────────────────────────────────────────────────────
 
 @app.post("/api/ws/{ws_id}/scan")
-def start_scan(ws_id: str, body: dict = Body(...)) -> dict:
+def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Quét đúng những mặt sổ người dùng chọn, theo thứ tự họ đang thấy."""
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
     ids = body.get("sheet_ids") or []
     if not ids:
         raise HTTPException(400, "Chưa chọn mặt sổ nào để quét")
@@ -356,20 +469,27 @@ def start_scan(ws_id: str, body: dict = Body(...)) -> dict:
     return jobs.to_json(job)
 
 
-@app.get("/api/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
+def _job(job_id: str, user: auth.User):
+    """Job của workspace thuộc người đang đăng nhập, ngược lại coi như không có.
+
+    Tiến độ quét cũng là dữ liệu sổ (tên ngân hàng, số dòng) nên phải khoá y
+    như workspace.
+    """
     job = jobs.get(job_id)
-    if not job:
+    if not job or not (ws := workspace.load(job.ws_id)) or ws.owner != user.id:
         raise HTTPException(404, "Không tìm thấy lần quét")
-    return jobs.to_json(job)
+    return job
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str, user: CurrentUser) -> dict:
+    return jobs.to_json(_job(job_id, user))
 
 
 @app.get("/api/jobs/{job_id}/events")
-async def events(job_id: str):
+async def events(job_id: str, user: CurrentUser):
     """SSE: đẩy tiến độ từng mặt sổ về trình duyệt theo thời gian thực."""
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(404, "Không tìm thấy lần quét")
+    job = _job(job_id, user)
 
     async def gen():
         # jobs.stream là generator ĐỒNG BỘ (có timeout chặn) → chạy ở threadpool
@@ -433,7 +553,7 @@ def _split_by_sheet(accounts: list[dict], names: dict[str, str]) -> list[dict]:
 
 
 @app.post("/api/ws/{ws_id}/export")
-def export(ws_id: str, body: dict = Body(...)):
+def export(ws_id: str, user: CurrentUser, body: dict = Body(...)):
     """Xuất theo tuỳ chọn người dùng.
 
     Ở mức WORKSPACE chứ không phải một lần quét: kết quả được tích luỹ theo từng
@@ -441,7 +561,7 @@ def export(ws_id: str, body: dict = Body(...)):
     `accounts` do frontend gửi lên để xuất ĐÚNG cái người dùng đang thấy — kể cả
     các ô họ vừa sửa tay trong bảng review.
     """
-    ws = _ws(ws_id)
+    ws = _ws(ws_id, user)
 
     fmt = body.get("format", "xlsx")
     if fmt not in ("xlsx", "csv"):
