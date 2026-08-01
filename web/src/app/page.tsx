@@ -60,6 +60,13 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 
 const WS_KEY = "tsucho.ws";
 
+/** Lỗi đang hiện trên thanh đỏ — giữ MÃ chứ không giữ câu đã dịch. */
+type ErrInfo = { code?: string; sheet?: string; text: string } | null;
+
+/** Thanh đỏ tự tắt sau ngần này — đủ đọc một câu, không đọng lại cả buổi.
+ *  Thông tin không mất: thẻ mặt sổ vẫn giữ huy hiệu「Không quét được」. */
+const ERR_MS = 20000;
+
 /** Số thứ tự phẳng của một dòng trong mặt sổ — khớp với thứ tự dải ảnh. */
 function flatRowIndex(store: ResultStore, sheetId: string | null, ref: TxRef): number {
   if (!sheetId) return -1;
@@ -133,7 +140,11 @@ export default function Workbench() {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanEvent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  /* Lỗi giữ ở dạng CÓ CẤU TRÚC (mã + tên mặt sổ), không giữ câu đã dịch sẵn.
+     Giữ câu dịch sẵn thì đổi ngôn ngữ giữa chừng, dòng đỏ vẫn nằm nguyên tiếng
+     cũ — chính là lỗi người dùng báo. Câu chữ được dựng lúc VẼ, nên đổi ngôn
+     ngữ là nó đổi theo ngay. */
+  const [err, setErr] = useState<ErrInfo>(null);
   const [dragging, setDragging] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -153,6 +164,15 @@ export default function Workbench() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
+
+  /* Thanh đỏ tự tắt sau 20 giây. Người dùng phàn nàn nó nằm lì cả buổi.
+     Không sợ mất thông tin: thẻ mặt sổ bên trái vẫn giữ huy hiệu「Không quét
+     được」cho tới khi quét lại, nên quay lại sau vẫn biết mặt nào hỏng. */
+  useEffect(() => {
+    if (!err) return;
+    const id = setTimeout(() => setErr(null), ERR_MS);
+    return () => clearTimeout(id);
+  }, [err]);
 
   // Chưa đăng nhập thì không có gì để xem — đá về trang đăng nhập.
   // Chờ `ready` mới xét, không thì mỗi lần F5 lại chớp qua /login một nhịp.
@@ -193,7 +213,7 @@ export default function Workbench() {
         setWs(w);
         syncStore(w.results ?? {});
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr({ text: e instanceof Error ? e.message : String(e) });
       }
     })();
     return () => stopSse.current?.();
@@ -274,7 +294,7 @@ export default function Workbench() {
       if (w.results) syncStore(w.results);
       return true;
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr({ text: e instanceof Error ? e.message : String(e) });
       return false;
     } finally {
       setBusy(false);
@@ -314,7 +334,7 @@ export default function Workbench() {
           setTicked((prev) => new Set([...prev, ...added]));
         }
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr({ text: e instanceof Error ? e.message : String(e) });
       } finally {
         setBusy(false);
       }
@@ -487,7 +507,7 @@ export default function Workbench() {
             });
           }
           if (e.stage === "error") {
-            setErr(errText(e.code, e.sheet, e.message));
+            setErr({ code: e.code, sheet: e.sheet, text: e.message });
             // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
             // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
             setStates((prev) => {
@@ -503,7 +523,11 @@ export default function Workbench() {
           try {
             const done = await getJob(job.id);
             if (done.error) {
-              setErr(errText(done.error_code, done.error_sheet, done.error));
+              setErr({
+                code: done.error_code,
+                sheet: done.error_sheet,
+                text: done.error,
+              });
             }
             // Nạp lại từ backend: kho đã được lưu theo TỪNG mặt sổ nên kết quả
             // các mặt quét trước vẫn còn nguyên.
@@ -517,13 +541,13 @@ export default function Workbench() {
             const first = ids.find((id) => w.results?.[id]?.blocks?.length);
             if (first) setActive(first);
           } catch (e) {
-            setErr(e instanceof Error ? e.message : String(e));
+            setErr({ text: e instanceof Error ? e.message : String(e) });
           }
           setScanning(false);
         },
       );
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr({ text: e instanceof Error ? e.message : String(e) });
       setScanning(false);
     }
   };
@@ -624,7 +648,7 @@ export default function Workbench() {
       // Báo thẳng ra màn hình: im lặng nuốt lỗi ở đây chính là kiểu mất dữ
       // liệu mà autosave sinh ra để chống.
       setSaveState("error");
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr({ text: e instanceof Error ? e.message : String(e) });
     }
   }, []);
 
@@ -779,7 +803,7 @@ export default function Workbench() {
       saveBlob(blob, filename);
       setShowExport(false);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr({ text: e instanceof Error ? e.message : String(e) });
     } finally {
       setExporting(false);
     }
@@ -825,7 +849,8 @@ export default function Workbench() {
     >
       {err && (
         <p className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger">
-          <span>{err}</span>
+          {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
+          <span>{errText(err.code, err.sheet, err.text)}</span>
           <button
             onClick={() => setErr(null)}
             className="ml-auto flex-none text-[15px] leading-none hover:opacity-70"
@@ -856,7 +881,7 @@ export default function Workbench() {
                       syncStore(w.results ?? {}, w.added);
                       if (w.added[0]) setActive(w.added[0]);
                     } catch (e) {
-                      setErr(e instanceof Error ? e.message : String(e));
+                      setErr({ text: e instanceof Error ? e.message : String(e) });
                     } finally {
                       setBusy(false);
                     }
