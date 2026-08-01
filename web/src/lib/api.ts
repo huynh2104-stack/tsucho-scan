@@ -308,7 +308,12 @@ export const splitSheet = (wsId: string, sheetId: string, x: number) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });
 
 /** Dải ảnh của từng dòng — ước lượng từ ảnh, MIỄN PHÍ (xem api/rowmap.py). */
-export type RowBands = { bands: { y0: number; y1: number }[]; exact: boolean };
+export type RowBands = {
+  bands: { y0: number; y1: number }[];
+  exact: boolean;
+  /** Độ nghiêng đo được của trang — vệt đánh dấu nghiêng theo cho khớp chữ. */
+  skew_deg: number;
+};
 
 export const rowMap = async (wsId: string, sheetId: string, rows: number) =>
   asJson<RowBands>(

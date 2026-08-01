@@ -18,7 +18,7 @@ import { useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { sheetImage, type PerSheet, type Sheet } from "@/lib/api";
 
-export type ScanState = "idle" | "wait" | "scanning" | "done" | "skipped";
+export type ScanState = "idle" | "wait" | "scanning" | "done" | "skipped" | "failed";
 
 export function Tick({
   on,
@@ -122,15 +122,17 @@ export default function SheetRail({
             ? { label: t.stScanning, cls: "bg-accentpale text-accent" }
             : st === "wait"
               ? { label: t.stWaiting, cls: "bg-rule2 text-ink3" }
-              : st === "skipped"
-                ? { label: t.stSkipped, cls: "bg-warnbg text-warnink" }
-                : ps
-                  ? ps.need_check > 0
-                    ? { label: t.stNeedCheck(ps.need_check), cls: "bg-warnbg text-warnink" }
-                    : { label: t.stScanned(ps.rows), cls: "bg-okbg text-okink" }
-                  : st === "done"
-                    ? { label: t.stNoRows, cls: "bg-rule2 text-ink3" }
-                    : null;
+              : st === "failed"
+                ? { label: t.stFailed, cls: "bg-danger/15 text-danger" }
+                : st === "skipped"
+                  ? { label: t.stSkipped, cls: "bg-warnbg text-warnink" }
+                  : ps
+                    ? ps.need_check > 0
+                      ? { label: t.stNeedCheck(ps.need_check), cls: "bg-warnbg text-warnink" }
+                      : { label: t.stScanned(ps.rows), cls: "bg-okbg text-okink" }
+                    : st === "done"
+                      ? { label: t.stNoRows, cls: "bg-rule2 text-ink3" }
+                      : null;
 
         return (
           <li key={s.id}>

@@ -1,14 +1,22 @@
-"""Dải dòng ước lượng từ ảnh (api/rowmap.py, bản 2).
+"""Dải dòng ước lượng từ ảnh (api/rowmap.py).
 
-Mỗi test dựng một ảnh giả tái hiện MỘT ca hỏng đã gặp trên ảnh sổ thật
-(31/07/2026) — tái phát là đỏ ngay:
+Mỗi test dựng một ảnh giả tái hiện MỘT ca hỏng đã gặp trên ảnh sổ thật —
+tái phát là đỏ ngay.
 
+Ảnh SCAN (31/07/2026):
 - dòng cách đều + khoảng trắng giữa trang (nếp gấp)  → phải khớp 1-1
 - nhịp dòng bị bắt thành bội số (21px đọc thành 42px) → dò cách dòng
 - tựa + tiêu đề cột đậm mực ở đầu trang              → cửa sổ vơ tiêu đề
 - chú thích in nhỏ nép dưới viền đáy bảng            → chiếm chỗ dòng thật
+
+Ảnh CHỤP ĐIỆN THOẠI (01/08/2026) — người dùng báo sai gần 100%:
+- nền bàn tối quanh cuốn sổ                          → nền bị tính là mực
+- bóng tay làm nửa trang tối hơn                     → cắt mất nửa trang
+- sổ đặt nghiêng vài độ                              → nhoè hết đỉnh mực
+- mặt sổ nằm ngang                                   → thu mất độ phân giải dọc
 """
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 from api import rowmap
@@ -128,10 +136,87 @@ def test_thieu_dinh_thi_chia_deu_theo_khoi():
         assert not (0.40 < c < 0.60), f"dải {c:.3f} nằm giữa nếp gấp trắng"
 
 
+# ── Ảnh CHỤP bằng điện thoại (bản 3) ─────────────────────────────────
+
+def photo(rows, w=700, h=1000, bg=None, skew=0.0, shade=False, margin=60):
+    """Ảnh mô phỏng ảnh chụp: có nền quanh tờ giấy, có thể nghiêng / loang sáng."""
+    img = Image.new("RGB", (w, h), (18, 18, 22) if bg else (245, 245, 245))
+    page = Image.new("RGB", (w - 2 * margin, h - 2 * margin), (232, 230, 226))
+    dr = ImageDraw.Draw(page)
+    pw = page.width
+    for y in rows:
+        yy = y - margin
+        x = 30
+        while x < pw - 30:
+            # nghiêng: dòng chữ trôi dần theo bề ngang
+            dy = int(x * skew)
+            dr.rectangle([x, yy + dy, min(x + 26, pw - 30), yy + dy + 11], fill=(70, 60, 60))
+            x += 34
+    img.paste(page, (margin, margin))
+
+    if shade:                      # bóng tay đổ xuống nửa dưới
+        a = np.asarray(img, dtype=np.float32)
+        a[h // 2:] *= 0.55
+        img = Image.fromarray(a.astype(np.uint8))
+    return img
+
+
+def test_nen_toi_quanh_to_giay_khong_lam_hong():
+    """Ảnh chụp trên bàn tối: nền KHÔNG được tính là mực.
+
+    Đây là ca ゆうちょ — bản 2 dồn cả 21 dải vào nửa dưới trang.
+    """
+    rows = rows_even(140, 20, 34)
+    res = rowmap.bands_for(photo(rows, bg=True), 20)
+    assert res["exact"]
+    cs = [c * 1000 for c in centers(res)]
+    for c, y in zip(cs, rows):
+        assert abs(c - (y + 5)) < 20, f"dải {c:.0f} lệch khỏi dòng {y}"
+
+
+def test_bong_tay_lam_toi_nua_trang():
+    """Nửa trang bị bóng che vẫn phải nhận đủ dòng của CẢ HAI nửa.
+
+    Bản đầu của `_page_box` so sáng với mức giữa min–max nên cắt phăng nửa
+    sáng hơn, dồn hết dải vào nửa còn lại.
+    """
+    rows = rows_even(120, 24, 34)
+    res = rowmap.bands_for(photo(rows, shade=True), 24)
+    cs = [c for c in centers(res)]
+    assert min(cs) < 0.35, "không có dải nào ở nửa trên → đã cắt mất nửa trang"
+    assert max(cs) > 0.65, "không có dải nào ở nửa dưới"
+
+
+def test_so_dat_nghieng():
+    """Sổ chụp nghiêng ~2° vẫn dò được dòng (nhờ khử nghiêng)."""
+    rows = rows_even(140, 20, 34)
+    res = rowmap.bands_for(photo(rows, skew=0.035), 20)
+    assert res["exact"], "nghiêng nhẹ mà đã phải chia đều"
+    assert res["skew_deg"] > 0.5, f"không đo ra độ nghiêng: {res['skew_deg']}"
+
+
+def test_anh_nam_ngang_khong_bi_thu_mat_do_phan_giai():
+    """Mặt sổ nằm ngang (rộng gấp 2.5 lần cao) vẫn dò được.
+
+    Bản 2 ép bề ngang về 700px nên ảnh 2900×1160 chỉ còn cao 280px — 24 dòng
+    trong 280px thì không còn đỉnh mực nào.
+    """
+    rows = [140 + i * 34 for i in range(24)]
+    img = photo(rows, w=1000, h=1000).resize((2900, 1160))
+    res = rowmap.bands_for(img, 24)
+    assert res["exact"]
+
+
+def test_khong_bao_gio_tra_dai_ngoai_khung():
+    for n in (1, 5, 24):
+        res = rowmap.bands_for(photo(rows_even(140, n, 34), bg=True), n)
+        assert len(res["bands"]) == n
+        for b in res["bands"]:
+            assert 0.0 <= b["y0"] <= b["y1"] <= 1.0, b
+
+
 def test_bien_dang_va_anh_rong():
-    assert rowmap.bands_for(Image.new("L", (700, 1000), 245), 0) == {
-        "bands": [], "exact": False,
-    }
+    assert rowmap.bands_for(Image.new("L", (700, 1000), 245), 0)["bands"] == []
     tiny = rowmap.bands_for(Image.new("L", (50, 10), 245), 5)
     assert len(tiny["bands"]) == 5 and not tiny["exact"]
     blank = rowmap.bands_for(Image.new("L", (700, 1000), 245), 7)

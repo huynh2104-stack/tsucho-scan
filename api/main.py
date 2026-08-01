@@ -461,7 +461,7 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     sheets = [_sheet(ws, sid) for sid in ids]
     paths = [str(s.scan_path(ws.id)) for s in sheets]
 
-    job = jobs.create(ws.id, ids, paths)
+    job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
     jobs.start(job, use_cache=not bool(body.get("no_cache")))
     for s in sheets:
         s.scanned = True

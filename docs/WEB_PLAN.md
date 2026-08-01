@@ -238,7 +238,24 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 
 1. **Click dòng → ảnh cuộn + zoom tới đúng dòng.** Không có cái này thì tool mất
    hết giá trị (xem §2). Cần bounding box ở §2.
-   - *Hiện trạng 31/07/2026:* dùng **ước lượng từ ảnh** (`api/rowmap.py` bản 2)
+   - *Bản 3 (01/08/2026)* — sau khi người dùng báo ẢNH CHỤP ĐIỆN THOẠI sai gần
+     100% (ゆうちょ, Fukuoka để bao quát không cắt). Bốn lỗi thật đã sửa:
+     **(a)** nền bàn tối quanh cuốn sổ bị tính là mực → cắt về vùng giấy trước
+     (ngưỡng neo vào TRUNG VỊ, không phải mức giữa min–max — bản đầu cắt phăng
+     cả nửa trang khi có bóng tay); **(b)** ánh sáng loang + mực in hồng nhạt →
+     ngưỡng thích nghi theo nền mờ quanh từng điểm; **(c)** sổ đặt nghiêng →
+     khử nghiêng bằng biểu đồ chiếu; **(d)** mặt sổ nằm ngang bị co mất độ phân
+     giải dọc → bảo đảm ~26px mỗi dòng. Thêm bộ lọc **cột số dư**: dòng nào mép
+     phải trống thì không phải dòng giao dịch (gạt được rác nằm giữa hai nửa
+     trang, chỗ mà cắt đầu/đuôi không với tới).
+     Đo lại: 20/23 mặt sổ scan dò được (bằng bản 2) nhưng dải ĐỀU hơn (0.24 so
+     với 0.29) và bám mực sát hơn (0.99 so với 0.97); ảnh chụp ゆうちょ từ chỗ
+     dồn cả 21 dải vào nửa dưới trang thành bám đúng dòng.
+     ⚠ **Vẫn còn lệch ~1 dòng với ゆうちょ** và đây là giới hạn của phương pháp:
+     ゆうちょ in nhãn 「料　金」 ở dòng DƯỚI phần tiền của nó, nên số dòng mực
+     KHÁC số giao dịch. Không thuật toán đếm mực nào gỡ được — phải xin toạ độ
+     từ model (đổi prompt = mất toàn bộ cache, cần hỏi người dùng trước).
+   - *Hiện trạng 31/07/2026 (bản 2):* dùng **ước lượng từ ảnh** (`api/rowmap.py`)
      chứ không phải toạ độ do model trả (đổi prompt = mất toàn bộ cache).
      Bản 2 viết lại quanh hai đặc điểm của trang sổ in: **nhịp dòng cố định**
      (tự tương quan + né bẫy bội số) và **nếp gấp trắng giữa trang**. Lọc chú

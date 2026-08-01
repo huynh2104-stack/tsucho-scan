@@ -14,6 +14,7 @@ import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from core import ExtractError, scan
@@ -29,6 +30,7 @@ class Job:
     ws_id: str
     sheet_ids: list[str]                 # theo ĐÚNG thứ tự đem quét
     paths: list[str]
+    names: list[str] = field(default_factory=list)   # tên mặt sổ NGƯỜI DÙNG thấy
     status: str = "pending"              # pending | running | done | error
     error: str | None = None
     result: dict | None = None
@@ -51,8 +53,16 @@ _jobs: dict[str, Job] = {}
 _lock = threading.Lock()
 
 
-def create(ws_id: str, sheet_ids: list[str], paths: list[str]) -> Job:
-    job = Job(id=uuid.uuid4().hex[:12], ws_id=ws_id, sheet_ids=sheet_ids, paths=paths)
+def create(
+    ws_id: str,
+    sheet_ids: list[str],
+    paths: list[str],
+    names: list[str] | None = None,
+) -> Job:
+    job = Job(
+        id=uuid.uuid4().hex[:12], ws_id=ws_id, sheet_ids=sheet_ids,
+        paths=paths, names=names or [],
+    )
     with _lock:
         _jobs[job.id] = job
     return job
@@ -102,8 +112,8 @@ def _run(job: Job, use_cache: bool) -> None:
             "cached": result.cached,
         })
     except ExtractError as e:
-        job.status, job.error = "error", str(e)
-        job.emit({"stage": "error", "message": str(e)})
+        job.status, job.error = "error", _friendly(job, e)
+        job.emit({"stage": "error", "message": job.error})
     except Exception as e:                                   # lỗi ngoài dự tính
         job.status = "error"
         job.error = f"Lỗi không mong đợi: {e}"
@@ -111,6 +121,47 @@ def _run(job: Job, use_cache: bool) -> None:
         job.emit({"stage": "error", "message": job.error})
     finally:
         job.events.put(_SENTINEL)
+
+
+def _friendly(job: Job, e: ExtractError) -> str:
+    """Câu thông báo cho NGƯỜI DÙNG, không phải cho lập trình viên.
+
+    Hai thứ phải sửa so với `str(e)` thô:
+    - Tên file nội bộ ('source.jpg') → tên mặt sổ họ đang nhìn thấy ở cột trái.
+    - Bỏ lời model giải thích (thường là tiếng Anh, kiểu "The provided image is
+      a document about insurance...") — người dùng Nhật/Việt đọc không nổi, mà
+      biết thêm cũng không làm gì khác đi. Lời đó vẫn được in ra log server.
+    """
+    kind = getattr(e, "kind", "")
+    reason = getattr(e, "reason", "")
+    if reason:
+        print(f"[scan] {kind or 'error'}: {reason}")
+
+    ten = job.names[0] if len(job.names) == 1 else ""
+    if kind == "not_bankbook":
+        return (
+            (f"「{ten}」" if ten else "Ảnh này")
+            + " không phải sổ ngân hàng (通帳) nên không quét được."
+            " Hãy kiểm tra lại xem có chọn nhầm file không."
+        )
+    if kind == "unreadable":
+        return (
+            (f"「{ten}」" if ten else "Ảnh này")
+            + " quá mờ nên không đọc được."
+            " Hãy chụp/scan lại rõ hơn, hoặc thử cắt sát vào phần bảng giao dịch."
+        )
+    if kind == "no_rows":
+        return (
+            (f"「{ten}」" if ten else "Ảnh này")
+            + " không có dòng giao dịch nào (có thể là trang bìa hoặc trang trắng)."
+        )
+
+    # Lỗi khác (mạng, API key, file hỏng...) — message gốc vốn đã tiếng Việt,
+    # nhưng vẫn có thể lỡ nhắc tên file nội bộ ('source.png'). Đổi nốt.
+    msg = str(e)
+    if ten and job.paths:
+        msg = msg.replace(Path(job.paths[0]).name, ten)
+    return msg
 
 
 def _payload(job: Job, result) -> dict:
@@ -158,6 +209,12 @@ def stream(job: Job, replay: bool = True):
         try:
             event = job.events.get(timeout=25)
         except queue.Empty:
+            # Job đã xong mà không thấy dấu kết thúc → luồng chạy nền đã chết
+            # (thường là server vừa nạp lại code). Phải THOÁT, đừng ping tiếp:
+            # ping mãi thì uvicorn không đóng được tiến trình cũ và treo cả
+            # server — đã dính đúng lỗi này 01/08/2026.
+            if job.status in ("done", "error"):
+                return
             yield {"stage": "ping", "message": ""}   # giữ kết nối sống
             continue
         if event is _SENTINEL:

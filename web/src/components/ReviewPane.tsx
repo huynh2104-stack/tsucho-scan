@@ -15,7 +15,7 @@
  * Tên cột giữ tiếng Nhật + chú thích bản địa ngay cạnh (WEB_PLAN §8).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
 import type { AccountMeta, ResultStore, Sheet, Tx } from "@/lib/api";
 
@@ -136,6 +136,52 @@ function moveCell(el: HTMLInputElement, key: string): boolean {
   return true;
 }
 
+/* ── Bôi đen nhiều ô rồi copy sang Excel ─────────────────────────────
+   Vùng chọn là một HÌNH CHỮ NHẬT trong lưới ô, y như bảng tính. Toạ độ dòng
+   lấy theo thứ tự `tr` trong DOM nên chọn được xuyên qua nhiều thẻ sổ. */
+
+export type Rect = { r0: number; c0: number; r1: number; c1: number };
+
+const norm = (a: { r: number; c: number }, b: { r: number; c: number }): Rect => ({
+  r0: Math.min(a.r, b.r), r1: Math.max(a.r, b.r),
+  c0: Math.min(a.c, b.c), c1: Math.max(a.c, b.c),
+});
+
+/** Địa chỉ (dòng, cột) của ô dưới con trỏ. */
+function cellAddr(target: EventTarget | null, root: HTMLElement) {
+  const el = target instanceof Element ? target : null;
+  const input = el?.closest<HTMLInputElement>("input[data-cell]");
+  const tr = input?.closest("tr");
+  if (!input || !tr) return null;
+  const r = Array.from(root.querySelectorAll("tr[data-row]")).indexOf(tr);
+  const c = Array.from(tr.querySelectorAll("input[data-cell]")).indexOf(input);
+  return r < 0 || c < 0 ? null : { r, c };
+}
+
+/** Vùng chọn → văn bản TAB, dán vào Excel là nhảy đúng ô.
+ *
+ * Cột tiền bỏ dấu phẩy ngăn nghìn: để nguyên "1,100" thì Excel nhận thành
+ * CHỮ, cộng trừ không ra. Cột chữ giữ nguyên vì dấu phẩy là nội dung thật.
+ */
+function toTSV(root: HTMLElement, rect: Rect): string {
+  const rows = Array.from(root.querySelectorAll("tr[data-row]"));
+  const out: string[] = [];
+  for (let r = rect.r0; r <= rect.r1 && r < rows.length; r++) {
+    const cells = Array.from(
+      rows[r].querySelectorAll<HTMLInputElement>("input[data-cell]"),
+    );
+    const line: string[] = [];
+    for (let c = rect.c0; c <= rect.c1; c++) {
+      const el = cells[c];
+      const raw = el?.value ?? "";
+      const v = el?.dataset.money !== undefined ? raw.replace(/,/g, "") : raw;
+      line.push(v.replace(/[\t\r\n]/g, " "));
+    }
+    out.push(line.join("\t"));
+  }
+  return out.join("\r\n");
+}
+
 /** Ô sửa được — trông như chữ thường cho tới khi bấm vào. */
 function Cell({
   value,
@@ -143,6 +189,7 @@ function Cell({
   money = false,
   tone,
   placeholder,
+  picked,
   onCommit,
 }: {
   value: string;
@@ -150,12 +197,15 @@ function Cell({
   money?: boolean;
   tone?: string;
   placeholder?: string;
+  /** Nằm trong vùng bôi đen — tô nền để thấy đang chọn tới đâu. */
+  picked?: boolean;
   onCommit: (v: string) => void;
 }) {
   return (
     <input
       key={value}
       data-cell
+      data-money={money ? "" : undefined}
       defaultValue={value}
       placeholder={placeholder}
       onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
@@ -188,9 +238,9 @@ function Cell({
         if (moveCell(el, e.key)) e.preventDefault();
       }}
       inputMode={money ? "numeric" : undefined}
-      className={`w-full rounded border border-transparent bg-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none ${
-        align === "right" ? "text-right" : ""
-      } ${money ? "tnum" : ""} ${tone ?? ""}`}
+      className={`w-full rounded border border-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none ${
+        picked ? "bg-accent/25" : "bg-transparent"
+      } ${align === "right" ? "text-right" : ""} ${money ? "tnum" : ""} ${tone ?? ""}`}
     />
   );
 }
@@ -203,6 +253,8 @@ function Row({
   ref_,
   dim,
   sel,
+  rowIdx,
+  pick,
   t,
   onEdit,
   onDelete,
@@ -216,6 +268,10 @@ function Row({
   /** Đang lọc và dòng này không khớp → làm mờ thay vì ẩn, để không mất mạch sổ. */
   dim: boolean;
   sel: boolean;
+  /** Số thứ tự dòng trong TOÀN lưới — toạ độ hàng của vùng bôi đen. */
+  rowIdx: number;
+  /** Cột thứ `c` của dòng này có nằm trong vùng bôi đen không. */
+  pick: (row: number, col: number) => boolean;
   t: Dict;
   onEdit: EditFn;
   onDelete: RowActionFn;
@@ -224,6 +280,19 @@ function Row({
   const flag = tx.status === "check" || chk === "NG";
   const fixed = tx.status === "fixed";
   const note = tx.is_note;
+
+  // Thứ tự các ô SỬA ĐƯỢC trong một dòng = toạ độ cột của vùng bôi đen.
+  // Phải khớp đúng thứ tự <Cell> bên dưới, kể cả khi tắt/bật cột phụ.
+  let k = 0;
+  const cDate = k++;
+  const cKind = cols.kind ? k++ : -1;
+  const cDesc = k++;
+  const cOut = k++;
+  const cIn = k++;
+  const cBal = k++;
+  const cStore = cols.store ? k++ : -1;
+  const cExtra = cols.extra ? k++ : -1;
+  const on = (c: number) => pick(rowIdx, c);
 
   return (
     <tr
@@ -244,18 +313,24 @@ function Row({
       <td className="whitespace-nowrap px-1 py-0.5">
         <Cell
           value={tx.date ?? tx.date_raw ?? ""}
+          picked={on(cDate)}
           onCommit={(v) => onEdit(ref_, "date", v || null)}
         />
       </td>
       {cols.kind && (
         <td className="whitespace-nowrap px-1 py-0.5 text-[12.5px]">
-          <Cell value={tx.kind ?? ""} onCommit={(v) => onEdit(ref_, "kind", v || null)} />
+          <Cell
+            value={tx.kind ?? ""}
+            picked={on(cKind)}
+            onCommit={(v) => onEdit(ref_, "kind", v || null)}
+          />
         </td>
       )}
       <td className={`px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.description ?? ""}
           tone={flag ? "text-warnink" : ""}
+          picked={on(cDesc)}
           onCommit={(v) => onEdit(ref_, "description", v || null)}
         />
       </td>
@@ -267,6 +342,7 @@ function Row({
           money
           placeholder="–"
           tone={tx.amount_out != null ? "font-medium text-outink" : ""}
+          picked={on(cOut)}
           onCommit={(v) => onEdit(ref_, "amount_out", parseYen(v))}
         />
       </td>
@@ -277,6 +353,7 @@ function Row({
           money
           placeholder="–"
           tone={tx.amount_in != null ? "font-medium text-inink" : ""}
+          picked={on(cIn)}
           onCommit={(v) => onEdit(ref_, "amount_in", parseYen(v))}
         />
       </td>
@@ -287,6 +364,7 @@ function Row({
           money
           placeholder="–"
           tone={`font-semibold ${flag ? "text-warnink" : ""}`}
+          picked={on(cBal)}
           onCommit={(v) => onEdit(ref_, "balance", parseYen(v))}
         />
       </td>
@@ -294,6 +372,7 @@ function Row({
         <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.store_code ?? ""}
+            picked={on(cStore)}
             onCommit={(v) => onEdit(ref_, "store_code", v || null)}
           />
         </td>
@@ -302,6 +381,7 @@ function Row({
         <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.extra_text ?? ""}
+            picked={on(cExtra)}
             onCommit={(v) => onEdit(ref_, "extra_text", v || null)}
           />
         </td>
@@ -355,6 +435,8 @@ function AccountCard({
   onAutoBalance,
   selected,
   onSelectRow,
+  rowBase,
+  pick,
 }: {
   meta: AccountMeta;
   rows: Tx[];
@@ -375,6 +457,9 @@ function AccountCard({
   onAutoBalance: (sheet: string, block: number) => void;
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
+  /** Số thứ tự dòng đầu tiên của khối này trong TOÀN lưới. */
+  rowBase: number;
+  pick: (row: number, col: number) => boolean;
 }) {
   const chk = checkColumn(rows);
   const real = rows.filter((r) => !r.is_note);
@@ -445,6 +530,8 @@ function AccountCard({
                   selected.block === refs[i].block &&
                   selected.row === refs[i].row
                 }
+                rowIdx={rowBase + i}
+                pick={pick}
                 t={t}
                 onEdit={onEdit}
                 onDelete={onDeleteRow}
@@ -522,6 +609,86 @@ export default function ReviewPane({
   const scroller = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("");
 
+  /* ── Bôi đen nhiều ô để chép sang Excel ────────────────────────────
+     Kéo chuột từ ô này sang ô khác là chọn cả hình chữ nhật; Ctrl+C chép ra
+     dạng ngăn bằng TAB nên dán vào Excel rơi đúng từng ô. */
+  const [sel, setSel] = useState<Rect | null>(null);
+  const anchor = useRef<{ r: number; c: number } | null>(null);
+  const dragging = useRef(false);
+
+  const pick = useCallback(
+    (row: number, col: number) =>
+      !!sel && row >= sel.r0 && row <= sel.r1 && col >= sel.c0 && col <= sel.c1,
+    [sel],
+  );
+
+  const onDown = (e: React.MouseEvent) => {
+    const root = scroller.current;
+    if (!root) return;
+    const a = cellAddr(e.target, root);
+    if (!a) {
+      setSel(null);
+      anchor.current = null;
+      return;
+    }
+    // Shift+bấm: nối dài từ ô neo — quen tay như Excel
+    if (e.shiftKey && anchor.current) {
+      setSel(norm(anchor.current, a));
+      e.preventDefault();
+      return;
+    }
+    anchor.current = a;
+    dragging.current = true;
+    setSel(null);           // bấm một ô là để SỬA, không phải để chọn vùng
+  };
+
+  const onOver = (e: React.MouseEvent) => {
+    const root = scroller.current;
+    if (!dragging.current || !anchor.current || !root) return;
+    const a = cellAddr(e.target, root);
+    if (!a) return;
+    if (a.r === anchor.current.r && a.c === anchor.current.c) {
+      setSel(null);
+      return;
+    }
+    // Rời khỏi ô đầu = đang chọn vùng, không phải gõ chữ → bỏ con trỏ nhập
+    (document.activeElement as HTMLElement | null)?.blur();
+    window.getSelection()?.removeAllRanges();
+    setSel(norm(anchor.current, a));
+  };
+
+  useEffect(() => {
+    const stop = () => {
+      dragging.current = false;
+    };
+    window.addEventListener("mouseup", stop);
+    return () => window.removeEventListener("mouseup", stop);
+  }, []);
+
+  /* Chép: bắt sự kiện `copy` của trình duyệt thay vì tự gọi clipboard API —
+     không cần xin quyền, và Ctrl+C lẫn menu chuột phải đều chạy. */
+  useEffect(() => {
+    if (!sel) return;
+    const onCopy = (e: ClipboardEvent) => {
+      if (!scroller.current) return;
+      e.clipboardData?.setData("text/plain", toTSV(scroller.current, sel));
+      e.preventDefault();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSel(null);
+    };
+    document.addEventListener("copy", onCopy);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [sel]);
+
+  const pickedCount = sel
+    ? (sel.r1 - sel.r0 + 1) * (sel.c1 - sel.c0 + 1)
+    : 0;
+
   const sheetName = useMemo(
     () => Object.fromEntries(sheets.map((s) => [s.id, s.name])),
     [sheets],
@@ -575,6 +742,24 @@ export default function ReviewPane({
     </thead>
   );
 
+  /** Dòng đầu tiên của mỗi khối đứng thứ mấy trong TOÀN lưới.
+   *
+   * Phải khớp ĐÚNG thứ tự vẽ ra DOM, vì toạ độ hàng lúc chép lại đọc từ DOM.
+   */
+  const rowBase = useMemo(() => {
+    const m: Record<string, number> = {};
+    let n = 0;
+    const order =
+      mode === "page" ? (activeSheet ? [activeSheet] : []) : scanned.map((s) => s.id);
+    for (const sid of order) {
+      store[sid]?.blocks.forEach((b, bi) => {
+        m[`${sid}:${bi}`] = n;
+        n += b.rows.length;
+      });
+    }
+    return m;
+  }, [mode, activeSheet, scanned, store]);
+
   const cardsOf = (sheetId: string, startIndex = 0) => {
     const data = store[sheetId];
     if (!data) return null;
@@ -602,6 +787,8 @@ export default function ReviewPane({
         onAutoBalance={onAutoBalance}
         selected={selected}
         onSelectRow={onSelectRow}
+        rowBase={rowBase[`${sheetId}:${bi}`] ?? 0}
+        pick={pick}
       />
     ));
   };
@@ -682,7 +869,13 @@ export default function ReviewPane({
 
       {/* Thân cột — CHÍNH khung này cuộn */}
       {/* data-grid: mốc để phím mũi tên tìm được mọi dòng, kể cả ở thẻ sổ khác */}
-      <div ref={scroller} data-grid className="thin-scroll min-h-0 flex-1 overflow-auto">
+      <div
+        ref={scroller}
+        data-grid
+        onMouseDown={onDown}
+        onMouseOver={onOver}
+        className={`thin-scroll min-h-0 flex-1 overflow-auto ${sel ? "select-none" : ""}`}
+      >
         {mode === "page" ? (
           !activeSheet ? (
             <p className="p-4 text-[12.5px] text-ink3">{t.pickSheetForPage}</p>
@@ -745,6 +938,13 @@ export default function ReviewPane({
           </button>
         ))}
         <span className="flex-1" />
+        {pickedCount > 0 ? (
+          <span className="rounded-md bg-accentpale px-2 py-0.5 text-[11.5px] font-semibold text-accent">
+            {t.pickedCells(pickedCount)}
+          </span>
+        ) : (
+          <span className="text-[11px] text-ink3">{t.dragCopyHint}</span>
+        )}
         <span className="text-[11px] text-ink3">{t.editableHint}</span>
       </div>
     </div>

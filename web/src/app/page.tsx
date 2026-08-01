@@ -469,7 +469,18 @@ export default function Workbench() {
               return next;
             });
           }
-          if (e.stage === "error") setErr(e.message);
+          if (e.stage === "error") {
+            setErr(e.message);
+            // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
+            // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
+            setStates((prev) => {
+              const next = { ...prev };
+              for (const k of Object.keys(next)) {
+                if (next[k] === "scanning" || next[k] === "wait") next[k] = "failed";
+              }
+              return next;
+            });
+          }
         },
         async () => {
           try {
@@ -990,6 +1001,7 @@ export default function Workbench() {
             }}
             highlight={highlight}
             highlightExact={!!bands?.exact}
+            highlightSkew={bands?.skew_deg ?? 0}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
           />
         </section>

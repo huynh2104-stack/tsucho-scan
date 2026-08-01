@@ -127,6 +127,7 @@ const DICT = {
     stWaiting: "Đang chờ",
     stScanning: "Đang quét",
     stSkipped: "Bỏ qua",
+    stFailed: "Không quét được",
     stNeedCheck: (n: number) => `${n} dòng cần soát`,
     stNoRows: "Không có giao dịch",
 
@@ -208,6 +209,9 @@ const DICT = {
     saveSaving: "Đang lưu...",
     saveSaved: "Đã lưu",
     saveFailed: "Chưa lưu được",
+
+    dragCopyHint: "Kéo chuột để bôi đen nhiều ô · Ctrl+C chép sang Excel",
+    pickedCells: (n: number) => `Đã chọn ${n} ô — Ctrl+C để chép`,
 
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
@@ -323,6 +327,7 @@ const DICT = {
     stWaiting: "Waiting",
     stScanning: "Scanning",
     stSkipped: "Skipped",
+    stFailed: "Scan failed",
     stNeedCheck: (n: number) => `${n} to review`,
     stNoRows: "No transactions",
 
@@ -400,6 +405,9 @@ const DICT = {
     saveSaving: "Saving...",
     saveSaved: "Saved",
     saveFailed: "Not saved",
+
+    dragCopyHint: "Drag to select cells · Ctrl+C copies to Excel",
+    pickedCells: (n: number) => `${n} cells selected — Ctrl+C to copy`,
 
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
@@ -514,6 +522,7 @@ const DICT = {
     stWaiting: "待機中",
     stScanning: "読取り中",
     stSkipped: "スキップ",
+    stFailed: "読取不可",
     stNeedCheck: (n: number) => `要確認 ${n} 行`,
     stNoRows: "取引なし",
 
@@ -591,6 +600,9 @@ const DICT = {
     saveSaving: "保存中...",
     saveSaved: "保存しました",
     saveFailed: "保存できません",
+
+    dragCopyHint: "ドラッグで複数セル選択 · Ctrl+C でExcelへコピー",
+    pickedCells: (n: number) => `${n}セル選択中 — Ctrl+C でコピー`,
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

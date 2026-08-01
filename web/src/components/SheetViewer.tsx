@@ -115,6 +115,7 @@ export default function SheetViewer({
   onDelete,
   highlight,
   highlightExact,
+  highlightSkew,
   stale,
 }: {
   wsId: string;
@@ -135,6 +136,8 @@ export default function SheetViewer({
   /** Dải ảnh của dòng đang chọn ở bảng kết quả — để khoanh đúng chỗ. */
   highlight: { y0: number; y1: number } | null;
   highlightExact: boolean;
+  /** Trang chụp nghiêng bao nhiêu độ — vệt nghiêng theo cho khớp dòng chữ. */
+  highlightSkew: number;
   /** Có kết quả cũ nhưng ảnh đã bị chỉnh sau đó → kết quả không còn khớp. */
   stale: boolean;
 }) {
@@ -423,6 +426,9 @@ export default function SheetViewer({
                 background: `color-mix(in srgb, var(--danger) ${
                   highlightExact ? 13 : 7
                 }%, transparent)`,
+                // Sổ chụp nghiêng thì dòng chữ cũng nghiêng — vệt thẳng băng
+                // sẽ cắt ngang hai dòng khác nhau ở hai đầu trang.
+                transform: highlightSkew ? `skewY(${highlightSkew}deg)` : undefined,
               }}
               title={highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
             >
