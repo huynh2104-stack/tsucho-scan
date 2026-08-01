@@ -213,6 +213,13 @@ const DICT = {
     dragCopyHint: "Kéo chuột để bôi đen nhiều ô · Ctrl+C chép sang Excel",
     pickedCells: (n: number) => `Đã chọn ${n} ô — Ctrl+C để chép`,
 
+    errNotBankbook: (s: string) =>
+      `${s ? `「${s}」` : "Ảnh này"} không phải sổ ngân hàng (通帳) nên không quét được. Hãy kiểm tra lại xem có chọn nhầm file không.`,
+    errUnreadable: (s: string) =>
+      `${s ? `「${s}」` : "Ảnh này"} quá mờ nên không đọc được. Hãy chụp/scan lại rõ hơn, hoặc thử cắt sát vào phần bảng giao dịch.`,
+    errNoRows: (s: string) =>
+      `${s ? `「${s}」` : "Ảnh này"} không có dòng giao dịch nào (có thể là trang bìa hoặc trang trắng).`,
+
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
 
@@ -409,6 +416,13 @@ const DICT = {
     dragCopyHint: "Drag to select cells · Ctrl+C copies to Excel",
     pickedCells: (n: number) => `${n} cells selected — Ctrl+C to copy`,
 
+    errNotBankbook: (s: string) =>
+      `${s ? `"${s}"` : "This image"} is not a bank passbook (通帳), so it cannot be scanned. Please check whether you picked the wrong file.`,
+    errUnreadable: (s: string) =>
+      `${s ? `"${s}"` : "This image"} is too blurry to read. Please re-shoot or re-scan it more sharply, or crop closer to the transaction table.`,
+    errNoRows: (s: string) =>
+      `${s ? `"${s}"` : "This image"} has no transaction rows (it may be a cover page or a blank page).`,
+
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
 
@@ -603,6 +617,13 @@ const DICT = {
 
     dragCopyHint: "ドラッグで複数セル選択 · Ctrl+C でExcelへコピー",
     pickedCells: (n: number) => `${n}セル選択中 — Ctrl+C でコピー`,
+
+    errNotBankbook: (s: string) =>
+      `${s ? `「${s}」` : "この画像"}は通帳ではないため読み取れません。ファイルを間違えていないかご確認ください。`,
+    errUnreadable: (s: string) =>
+      `${s ? `「${s}」` : "この画像"}は不鮮明で読み取れません。もう一度鮮明に撮影・スキャンするか、取引明細の表に寄せてトリミングしてください。`,
+    errNoRows: (s: string) =>
+      `${s ? `「${s}」` : "この画像"}に取引明細の行がありません（表紙または白紙の可能性があります）。`,
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

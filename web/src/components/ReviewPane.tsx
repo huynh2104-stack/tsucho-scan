@@ -190,11 +190,14 @@ function Cell({
   tone,
   placeholder,
   picked,
+  readOnly,
   onCommit,
 }: {
   value: string;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   money?: boolean;
+  /** Ô chỉ để chép (cột 行) — không cho gõ, nhưng vẫn bôi đen được. */
+  readOnly?: boolean;
   tone?: string;
   placeholder?: string;
   /** Nằm trong vùng bôi đen — tô nền để thấy đang chọn tới đâu. */
@@ -206,6 +209,7 @@ function Cell({
       key={value}
       data-cell
       data-money={money ? "" : undefined}
+      readOnly={readOnly}
       defaultValue={value}
       placeholder={placeholder}
       onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
@@ -240,7 +244,9 @@ function Cell({
       inputMode={money ? "numeric" : undefined}
       className={`w-full rounded border border-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none ${
         picked ? "bg-accent/25" : "bg-transparent"
-      } ${align === "right" ? "text-right" : ""} ${money ? "tnum" : ""} ${tone ?? ""}`}
+      } ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""} ${
+        money ? "tnum" : ""
+      } ${readOnly ? "tnum cursor-default text-[10.5px] text-ink3" : ""} ${tone ?? ""}`}
     />
   );
 }
@@ -284,6 +290,7 @@ function Row({
   // Thứ tự các ô SỬA ĐƯỢC trong một dòng = toạ độ cột của vùng bôi đen.
   // Phải khớp đúng thứ tự <Cell> bên dưới, kể cả khi tắt/bật cột phụ.
   let k = 0;
+  const cRow = k++;                     // cột 行 — chép được, không sửa được
   const cDate = k++;
   const cKind = cols.kind ? k++ : -1;
   const cDesc = k++;
@@ -307,8 +314,17 @@ function Row({
         sel ? "outline outline-2 -outline-offset-2 outline-danger" : ""
       } hover:bg-accentpale/30`}
     >
-      <td className="tnum w-8 border-r border-rule2 bg-card2 px-1 text-center text-[10.5px] text-ink3">
-        {tx.row_no || String(n).padStart(2, "0")}
+      {/* Cột 行 KHÔNG sửa được nhưng vẫn phải bôi đen chép được: người dùng
+          muốn dán sang Excel kèm số dòng để đối chiếu với sổ giấy.
+          `readOnly` + con trỏ mặc định → nhìn và cư xử y như ô chữ thường. */}
+      <td className="w-8 border-r border-rule2 bg-card2 px-0.5">
+        <Cell
+          value={tx.row_no || String(n).padStart(2, "0")}
+          align="center"
+          readOnly
+          picked={on(cRow)}
+          onCommit={() => {}}
+        />
       </td>
       <td className="whitespace-nowrap px-1 py-0.5">
         <Cell

@@ -33,6 +33,8 @@ class Job:
     names: list[str] = field(default_factory=list)   # tên mặt sổ NGƯỜI DÙNG thấy
     status: str = "pending"              # pending | running | done | error
     error: str | None = None
+    error_code: str = ""              # mã lỗi để trình duyệt tự dịch
+    error_sheet: str = ""             # tên mặt sổ hỏng, để ghép vào câu dịch
     result: dict | None = None
     created_at: float = field(default_factory=time.time)
     events: queue.Queue = field(default_factory=queue.Queue)
@@ -112,8 +114,14 @@ def _run(job: Job, use_cache: bool) -> None:
             "cached": result.cached,
         })
     except ExtractError as e:
-        job.status, job.error = "error", _friendly(job, e)
-        job.emit({"stage": "error", "message": job.error})
+        job.status = "error"
+        job.error_code, job.error_sheet, job.error = _friendly(job, e)
+        job.emit({
+            "stage": "error",
+            "message": job.error,        # dự phòng khi trình duyệt chưa dịch mã
+            "code": job.error_code,
+            "sheet": job.error_sheet,
+        })
     except Exception as e:                                   # lỗi ngoài dự tính
         job.status = "error"
         job.error = f"Lỗi không mong đợi: {e}"
@@ -123,11 +131,17 @@ def _run(job: Job, use_cache: bool) -> None:
         job.events.put(_SENTINEL)
 
 
-def _friendly(job: Job, e: ExtractError) -> str:
-    """Câu thông báo cho NGƯỜI DÙNG, không phải cho lập trình viên.
+def _friendly(job: Job, e: ExtractError) -> tuple[str, str, str]:
+    """(mã lỗi, tên mặt sổ, câu tiếng Việt dự phòng).
 
-    Hai thứ phải sửa so với `str(e)` thô:
-    - Tên file nội bộ ('source.jpg') → tên mặt sổ họ đang nhìn thấy ở cột trái.
+    Trả về **mã** chứ không chỉ câu chữ: giao diện có 3 thứ tiếng, mà server thì
+    không biết người dùng đang xem tiếng nào. Server gửi mã, trình duyệt tự
+    dịch — đúng chỗ duy nhất biết ngôn ngữ hiện tại.
+
+    Câu tiếng Việt vẫn trả kèm để làm dự phòng (CLI, mã lạ chưa kịp dịch).
+
+    Hai thứ nữa phải sửa so với `str(e)` thô:
+    - Tên file nội bộ ('source.jpg') → tên mặt sổ họ nhìn thấy ở cột trái.
     - Bỏ lời model giải thích (thường là tiếng Anh, kiểu "The provided image is
       a document about insurance...") — người dùng Nhật/Việt đọc không nổi, mà
       biết thêm cũng không làm gì khác đi. Lời đó vẫn được in ra log server.
@@ -138,22 +152,21 @@ def _friendly(job: Job, e: ExtractError) -> str:
         print(f"[scan] {kind or 'error'}: {reason}")
 
     ten = job.names[0] if len(job.names) == 1 else ""
+    nhan = f"「{ten}」" if ten else "Ảnh này"
     if kind == "not_bankbook":
-        return (
-            (f"「{ten}」" if ten else "Ảnh này")
-            + " không phải sổ ngân hàng (通帳) nên không quét được."
+        return kind, ten, (
+            f"{nhan} không phải sổ ngân hàng (通帳) nên không quét được."
             " Hãy kiểm tra lại xem có chọn nhầm file không."
         )
     if kind == "unreadable":
-        return (
-            (f"「{ten}」" if ten else "Ảnh này")
-            + " quá mờ nên không đọc được."
+        return kind, ten, (
+            f"{nhan} quá mờ nên không đọc được."
             " Hãy chụp/scan lại rõ hơn, hoặc thử cắt sát vào phần bảng giao dịch."
         )
     if kind == "no_rows":
-        return (
-            (f"「{ten}」" if ten else "Ảnh này")
-            + " không có dòng giao dịch nào (có thể là trang bìa hoặc trang trắng)."
+        return kind, ten, (
+            f"{nhan} không có dòng giao dịch nào"
+            " (có thể là trang bìa hoặc trang trắng)."
         )
 
     # Lỗi khác (mạng, API key, file hỏng...) — message gốc vốn đã tiếng Việt,
@@ -161,7 +174,7 @@ def _friendly(job: Job, e: ExtractError) -> str:
     msg = str(e)
     if ten and job.paths:
         msg = msg.replace(Path(job.paths[0]).name, ten)
-    return msg
+    return "", ten, msg
 
 
 def _payload(job: Job, result) -> dict:
@@ -227,6 +240,8 @@ def to_json(job: Job) -> dict:
         "id": job.id,
         "status": job.status,
         "error": job.error,
+        "error_code": job.error_code,
+        "error_sheet": job.error_sheet,
         "sheet_ids": job.sheet_ids,
         "result": job.result,
     }

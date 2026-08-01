@@ -29,7 +29,7 @@ def test_dung_ten_mat_so_khong_dung_ten_file():
         kind="not_bankbook", label="source.jpg",
         reason="The provided image is a document about insurance.",
     )
-    msg = jobs._friendly(job, e)
+    _, _, msg = jobs._friendly(job, e)
     assert "通帳：見本 tr.2" in msg
     assert "source.jpg" not in msg
 
@@ -41,7 +41,7 @@ def test_khong_dan_loi_tieng_anh_cua_model():
         reason="The provided image is a document about insurance and medical "
                "information, not a bankbook.",
     )
-    msg = jobs._friendly(job, e)
+    _, _, msg = jobs._friendly(job, e)
     assert "insurance" not in msg
     assert "bankbook" not in msg
     assert "sổ ngân hàng" in msg
@@ -56,13 +56,13 @@ def test_khong_dan_loi_tieng_anh_cua_model():
     ],
 )
 def test_moi_loai_loi_co_cau_rieng(kind, mong_doi):
-    msg = jobs._friendly(make_job(["Mặt 1"]), PageSkipped("x", kind=kind, label="f.jpg"))
+    _, _, msg = jobs._friendly(make_job(["Mặt 1"]), PageSkipped("x", kind=kind, label="f.jpg"))
     assert mong_doi in msg
 
 
 def test_quet_nhieu_mat_thi_khong_doan_bua_ten():
     """Không biết chắc mặt nào hỏng thì đừng nêu tên mặt nào cả."""
-    msg = jobs._friendly(
+    _, _, msg = jobs._friendly(
         make_job(["Mặt 1", "Mặt 2", "Mặt 3"]),
         PageSkipped("x", kind="not_bankbook", label="source.jpg"),
     )
@@ -72,13 +72,13 @@ def test_quet_nhieu_mat_thi_khong_doan_bua_ten():
 
 def test_loi_khac_giu_nguyen_message_goc():
     """Lỗi mạng/API key vốn đã là tiếng Việt — không được nuốt mất."""
-    msg = jobs._friendly(make_job(["Mặt 1"]), ExtractError("API key không hợp lệ."))
+    _, _, msg = jobs._friendly(make_job(["Mặt 1"]), ExtractError("API key không hợp lệ."))
     assert msg == "API key không hợp lệ."
 
 
 def test_loi_file_hong_cung_khong_lo_ten_file_noi_bo():
     """Nhánh lỗi khác (file hỏng) vẫn phải gọi đúng tên mặt sổ."""
-    msg = jobs._friendly(
+    _, _, msg = jobs._friendly(
         make_job(["Trang bìa sổ Fukuoka"]),
         ExtractError("Không nhận diện được định dạng của 'source.jpg'."),
     )
@@ -128,6 +128,11 @@ def test_tron_duong_tu_model_den_su_kien_SSE(tmp_path, monkeypatch):
     assert "không phải sổ ngân hàng" in msg
     assert "insurance" not in msg and "source.jpg" not in msg
     assert results.load_all(ws.id) == {}, "quét hỏng thì không được ghi kết quả rỗng"
+
+    # Mã + tên mặt sổ phải đi kèm để trình duyệt tự dịch sang Nhật/Anh
+    assert loi[0]["code"] == "not_bankbook"
+    assert loi[0]["sheet"] == "Giấy bảo hiểm của khách"
+    assert jobs.to_json(job)["error_code"] == "not_bankbook"
 
 
 def test_sse_khong_ping_mai_khi_job_da_chet():

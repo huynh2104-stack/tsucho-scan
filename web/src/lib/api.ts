@@ -125,6 +125,8 @@ export type Job = {
   id: string;
   status: "pending" | "running" | "done" | "error";
   error: string | null;
+  error_code?: string;
+  error_sheet?: string;
   sheet_ids: string[];
   result: ScanPayload | null;
 };
@@ -141,6 +143,10 @@ export type ScanEvent = {
     | "error"
     | "ping";
   message: string;
+  /** Mã lỗi để giao diện tự dịch (server không biết đang xem tiếng nào). */
+  code?: string;
+  /** Tên mặt sổ hỏng — ghép vào câu đã dịch. */
+  sheet?: string;
   index?: number;
   total?: number;
   label?: string;

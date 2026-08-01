@@ -75,6 +75,23 @@ function flatRowIndex(store: ResultStore, sheetId: string | null, ref: TxRef): n
 
 export default function Workbench() {
   const { t } = useT();
+
+  /** Mã lỗi từ server → câu ĐÚNG THỨ TIẾNG người dùng đang xem.
+   *
+   * Server không biết giao diện đang để tiếng gì nên chỉ gửi mã; câu tiếng Việt
+   * nó gửi kèm chỉ là dự phòng cho mã lạ. Trước đây web hiện thẳng câu của
+   * server nên chuyển sang tiếng Nhật/Anh vẫn thấy tiếng Việt.
+   */
+  const errText = useCallback(
+    (code: string | undefined, sheet: string | undefined, fallback: string) => {
+      const name = sheet ?? "";
+      if (code === "not_bankbook") return t.errNotBankbook(name);
+      if (code === "unreadable") return t.errUnreadable(name);
+      if (code === "no_rows") return t.errNoRows(name);
+      return fallback;
+    },
+    [t],
+  );
   const { user, ready } = useAuth();
   const router = useRouter();
 
@@ -470,7 +487,7 @@ export default function Workbench() {
             });
           }
           if (e.stage === "error") {
-            setErr(e.message);
+            setErr(errText(e.code, e.sheet, e.message));
             // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
             // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
             setStates((prev) => {
@@ -485,7 +502,9 @@ export default function Workbench() {
         async () => {
           try {
             const done = await getJob(job.id);
-            if (done.error) setErr(done.error);
+            if (done.error) {
+              setErr(errText(done.error_code, done.error_sheet, done.error));
+            }
             // Nạp lại từ backend: kho đã được lưu theo TỪNG mặt sổ nên kết quả
             // các mặt quét trước vẫn còn nguyên.
             const w = await getWorkspace(ws.id);
