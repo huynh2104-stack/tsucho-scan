@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF — render trang PDF thành ảnh
+import numpy as np
 from PIL import Image, ImageEnhance
 
 DATA_DIR = Path(__file__).resolve().parents[1] / ".data"
@@ -42,6 +43,7 @@ class Sheet:
     rotation: float = 0.0        # tổng số độ đã xoay (chỉ để hiện lại trên UI)
     cropped: bool = False
     adjusted: bool = False       # đã kéo sáng / tương phản
+    warped: bool = False         # đã nắn phối cảnh (kéo 4 góc / thanh dọc-ngang)
     scanned: bool = False
     width: int = 0
     height: int = 0
@@ -52,7 +54,7 @@ class Sheet:
         return WS_DIR / ws_id / self.id
 
     def edited(self) -> bool:
-        return self.rotation != 0 or self.cropped or self.adjusted
+        return self.rotation != 0 or self.cropped or self.adjusted or self.warped
 
     def scan_path(self, ws_id: str) -> Path:
         """File ĐEM QUÉT.
@@ -397,6 +399,69 @@ def crop(ws: Workspace, sheet: Sheet, box: tuple[float, float, float, float],
     sheet.scanned = False
 
 
+def _perspective_coeffs(
+    quad: list[tuple[float, float]], w: int, h: int
+) -> tuple[float, ...]:
+    """8 hệ số cho `Image.transform(PERSPECTIVE)`.
+
+    PIL đi NGƯỢC: với mỗi điểm của ảnh ĐÍCH nó hỏi "lấy màu ở đâu trong ảnh
+    nguồn". Nên phải giải phép biến đổi từ 4 góc ảnh đích (hình chữ nhật đầy
+    khung) về 4 góc `quad` mà người dùng khoanh trên ảnh nguồn.
+
+    Mỗi cặp điểm cho 2 phương trình tuyến tính; 4 cặp là 8 phương trình, vừa
+    đủ cho 8 ẩn.
+    """
+    dst = [(0.0, 0.0), (float(w), 0.0), (float(w), float(h)), (0.0, float(h))]
+    A, B = [], []
+    for (dx, dy), (sx, sy) in zip(dst, quad):
+        A.append([dx, dy, 1, 0, 0, 0, -sx * dx, -sx * dy])
+        A.append([0, 0, 0, dx, dy, 1, -sy * dx, -sy * dy])
+        B += [sx, sy]
+    sol = np.linalg.solve(np.array(A, dtype=np.float64), np.array(B, dtype=np.float64))
+    return tuple(sol)
+
+
+def perspective(
+    ws: Workspace, sheet: Sheet, quad: list[tuple[float, float]], snapshot: bool = True
+) -> None:
+    """Nắn 4 góc `quad` (tỉ lệ 0..1) thành hình chữ nhật đầy khung.
+
+    Dùng cho ảnh chụp bằng điện thoại: cầm máy chếch xuống thì trang sổ ra hình
+    thang, dòng chữ ở xa xích lại gần nhau. Xoay ảnh không cứu được vì đó là
+    biến dạng phối cảnh, không phải phép quay.
+
+    `quad` theo thứ tự trái-trên, phải-trên, phải-dưới, trái-dưới — đúng thứ tự
+    4 tay nắm trên giao diện.
+    """
+    if len(quad) != 4:
+        raise ValueError("Cần đúng 4 góc")
+
+    d = sheet.dir(ws.id)
+    img = Image.open(d / "current.png")
+    img.load()
+    w, h = img.size
+
+    px = [(max(-0.5, min(1.5, x)) * w, max(-0.5, min(1.5, y)) * h) for x, y in quad]
+    # Tứ giác bẹp thì ma trận suy biến, ảnh ra một vệt vô nghĩa
+    rong = min(abs(px[1][0] - px[0][0]), abs(px[2][0] - px[3][0]))
+    cao = min(abs(px[3][1] - px[0][1]), abs(px[2][1] - px[1][1]))
+    if rong < w * 0.2 or cao < h * 0.2:
+        raise ValueError("Vùng nắn quá hẹp — hãy kéo 4 góc ra rộng hơn")
+
+    if snapshot:
+        _snapshot(ws, sheet)
+    try:
+        coeffs = _perspective_coeffs(px, w, h)
+    except np.linalg.LinAlgError as e:
+        raise ValueError("Bốn góc này không tạo thành tứ giác hợp lệ") from e
+
+    out = img.transform((w, h), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+    _regen_current(ws, sheet, out)
+    sheet.warped = True
+    sheet.sha256 = _hash_current(ws, sheet)
+    sheet.scanned = False
+
+
 def reset_sheet(ws: Workspace, sheet: Sheet) -> None:
     """Trả về ảnh gốc — hoàn tác mọi lần xoay/cắt."""
     d = sheet.dir(ws.id)
@@ -407,6 +472,7 @@ def reset_sheet(ws: Workspace, sheet: Sheet) -> None:
     sheet.rotation = 0
     sheet.cropped = False
     sheet.adjusted = False
+    sheet.warped = False
     sheet.sha256 = _hash_current(ws, sheet)
     sheet.scanned = False
 

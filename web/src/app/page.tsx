@@ -36,6 +36,7 @@ import {
   saveSheetResult,
   startScan,
   undoSheet,
+  warpSheet,
   type PerSheet,
   type ResultStore,
   type RowBands,
@@ -1009,6 +1010,9 @@ export default function Workbench() {
             }
             onCrop={(box) =>
               ws && active && void guard(() => cropSheet(ws.id, editTarget(), box))
+            }
+            onWarp={(corners) =>
+              ws && active && void guard(() => warpSheet(ws.id, active, corners))
             }
             onReset={() => {
               if (!ws || !active) return;

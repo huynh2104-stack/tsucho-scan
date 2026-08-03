@@ -268,6 +268,29 @@ def crop_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     return workspace.to_json(ws)
 
 
+@app.post("/api/ws/{ws_id}/perspective")
+def warp_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Nắn phối cảnh — CHỈ một mặt sổ (4 góc của ảnh này không hợp ảnh khác)."""
+    ws = _ws(ws_id, user)
+    ids = body.get("sheet_ids") or []
+    if len(ids) != 1:
+        raise HTTPException(
+            400, "Nắn phối cảnh áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
+        )
+    raw = body.get("corners") or []
+    try:
+        quad = [(float(p[0]), float(p[1])) for p in raw]
+    except (TypeError, ValueError, IndexError) as e:
+        raise HTTPException(400, "Toạ độ 4 góc không hợp lệ") from e
+
+    try:
+        workspace.perspective(ws, _sheet(ws, ids[0]), quad)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    ws.save()
+    return workspace.to_json(ws)
+
+
 @app.post("/api/ws/{ws_id}/adjust")
 def adjust_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Nghiêng tinh + độ sáng + độ tương phản. Áp cho mọi mặt đang chọn."""

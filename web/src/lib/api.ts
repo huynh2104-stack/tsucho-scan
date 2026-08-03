@@ -17,6 +17,7 @@ export type Sheet = {
   rotation: number;
   cropped: boolean;
   adjusted: boolean;
+  warped: boolean;
   scanned: boolean;
   width: number;
   height: number;
@@ -309,6 +310,17 @@ export const autofixPlan = async (wsId: string, sheetId: string) =>
 
 export const autofixApply = (wsId: string, sheetId: string, steps: AutofixStep[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/autofix`, { sheet_ids: [sheetId], steps });
+
+/** Bốn góc của vùng cần nắn thẳng, tỉ lệ 0..1, theo thứ tự
+ *  trái-trên → phải-trên → phải-dưới → trái-dưới. */
+export type Quad = [number, number][];
+
+/** Nắn phối cảnh: kéo tứ giác `corners` thành hình chữ nhật đầy khung. */
+export const warpSheet = (wsId: string, sheetId: string, corners: Quad) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/perspective`, {
+    sheet_ids: [sheetId],
+    corners,
+  });
 
 export const splitSheet = (wsId: string, sheetId: string, x: number) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });

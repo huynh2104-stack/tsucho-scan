@@ -220,6 +220,13 @@ const DICT = {
     errNoRows: (s: string) =>
       `${s ? `「${s}」` : "Ảnh này"} không có dòng giao dịch nào (có thể là trang bìa hoặc trang trắng).`,
 
+    warp: "Nắn phối cảnh",
+    warpApply: "Áp dụng nắn",
+    warpHint: "Kéo 4 góc ôm lấy trang sổ, hoặc dùng hai thanh Dọc/Ngang bên dưới (thanh trượt sẽ đặt lại cả 4 góc)",
+    warpVert: "Nắn dọc — sổ chụp chếch trên/dưới",
+    warpHorz: "Nắn ngang — sổ chụp chếch trái/phải",
+    warpCorner: (n: number) => `Góc ${n} — kéo để chỉnh`,
+
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
 
@@ -423,6 +430,13 @@ const DICT = {
     errNoRows: (s: string) =>
       `${s ? `"${s}"` : "This image"} has no transaction rows (it may be a cover page or a blank page).`,
 
+    warp: "Perspective",
+    warpApply: "Apply perspective",
+    warpHint: "Drag the 4 corners onto the page, or use the Vertical/Horizontal sliders below (a slider resets all 4 corners)",
+    warpVert: "Vertical — shot from above/below",
+    warpHorz: "Horizontal — shot from the left/right",
+    warpCorner: (n: number) => `Corner ${n} — drag to adjust`,
+
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
 
@@ -624,6 +638,13 @@ const DICT = {
       `${s ? `「${s}」` : "この画像"}は不鮮明で読み取れません。もう一度鮮明に撮影・スキャンするか、取引明細の表に寄せてトリミングしてください。`,
     errNoRows: (s: string) =>
       `${s ? `「${s}」` : "この画像"}に取引明細の行がありません（表紙または白紙の可能性があります）。`,
+
+    warp: "台形補正",
+    warpApply: "補正を適用",
+    warpHint: "4つの角を通帳のページに合わせてドラッグ、または下の「縦」「横」スライダーを使用（スライダーは4つの角を作り直します）",
+    warpVert: "縦 — 上下から斜めに撮影した場合",
+    warpHorz: "横 — 左右から斜めに撮影した場合",
+    warpCorner: (n: number) => `角${n} — ドラッグして調整`,
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

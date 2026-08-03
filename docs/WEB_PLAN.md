@@ -238,6 +238,13 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 
 1. **Click dòng → ảnh cuộn + zoom tới đúng dòng.** Không có cái này thì tool mất
    hết giá trị (xem §2). Cần bounding box ở §2.
+   - ✅ **Nắn phối cảnh** *(01/08/2026)* — `POST /api/ws/:ws/perspective`, kéo 4
+     góc thành hình chữ nhật (PIL `Image.transform(PERSPECTIVE)`). Giao diện có
+     4 tay nắm kéo được + hai thanh「Nắn dọc」「Nắn ngang」. Đo trên ảnh Fukuoka
+     chụp chếch: nắn xong nền tối biến mất, trang đầy khung, **và khung đỏ cũng
+     chuẩn hơn hẳn** (trước: dải bắt đầu từ dòng 6 rồi chạy xuống cả phần chú
+     thích; sau: bám đúng 24 dòng). Đây là cách thực dụng để cứu những ảnh mà
+     thuật toán tự động chịu thua.
    - *Bản 3 (01/08/2026)* — sau khi người dùng báo ẢNH CHỤP ĐIỆN THOẠI sai gần
      100% (ゆうちょ, Fukuoka để bao quát không cắt). Bốn lỗi thật đã sửa:
      **(a)** nền bàn tối quanh cuốn sổ bị tính là mực → cắt về vùng giấy trước

@@ -21,6 +21,38 @@ import { useT } from "@/lib/i18n";
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
+/** Một góc của vùng nắn, theo tỉ lệ 0..1 của ảnh. */
+type Pt = [number, number];
+
+/** Trái-trên → phải-trên → phải-dưới → trái-dưới. Thứ tự này khớp với backend. */
+const FULL_QUAD: Pt[] = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+];
+
+/** Hai thanh trượt → 4 góc.
+ *
+ * `doc` (dọc): chụp chếch từ trên xuống thì mép TRÊN của trang bị thu hẹp lại.
+ * Kéo dương = coi như mép trên đang hẹp, nắn cho nó rộng ra bằng mép dưới.
+ * `ngang` làm y hệt nhưng cho hai mép trái/phải.
+ *
+ * Tối đa 25% bề rộng: quá tay nữa thì ảnh giãn tới mức chữ nhoè không đọc nổi.
+ */
+function quadFromSliders(doc: number, ngang: number): Pt[] {
+  const kv = (doc / 100) * 0.25;
+  const kh = (ngang / 100) * 0.25;
+  const [t, b] = kv >= 0 ? [kv, 0] : [0, -kv];      // thu mép trên / mép dưới
+  const [l, r] = kh >= 0 ? [kh, 0] : [0, -kh];      // thu mép trái / mép phải
+  return [
+    [t, l],
+    [1 - t, r],
+    [1 - b, 1 - r],
+    [b, 1 - l],
+  ];
+}
+
 const BASE_WIDTH = 0.7; // 70% — chốt theo yêu cầu, để cân với cột review
 
 function Tool({
@@ -109,6 +141,7 @@ export default function SheetViewer({
   onRotate,
   onAdjust,
   onCrop,
+  onWarp,
   onReset,
   onUndo,
   onScanThis,
@@ -129,6 +162,7 @@ export default function SheetViewer({
     contrast: number;
   }) => Promise<boolean>;
   onCrop: (box: Box) => void;
+  onWarp: (corners: [number, number][]) => void;
   onReset: () => void;
   onUndo: () => void;
   onScanThis: () => void;
@@ -149,6 +183,18 @@ export default function SheetViewer({
   const [contrast, setContrast] = useState(100);
   const [cropping, setCropping] = useState(false);
   const [box, setBox] = useState<Box | null>(null);
+
+  /* ── Nắn phối cảnh ────────────────────────────────────────────────
+     `quad` là NGUỒN SỰ THẬT DUY NHẤT: 4 góc của vùng sẽ được kéo thành hình
+     chữ nhật. Hai thanh trượt chỉ là cách nhanh để đặt lại 4 góc đó — kéo tay
+     một góc rồi động vào thanh trượt thì 4 góc bị tính lại từ đầu (có ghi rõ
+     trong dòng nhắc), vì giữ hai nguồn sự thật song song thì không ai đoán
+     nổi kết quả. */
+  const [warping, setWarping] = useState(false);
+  const [quad, setQuad] = useState<Pt[]>(FULL_QUAD);
+  const [vert, setVert] = useState(0);
+  const [horz, setHorz] = useState(0);
+  const [grab, setGrab] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const imgBox = useRef<HTMLDivElement>(null);
   const scrollBox = useRef<HTMLDivElement>(null);
@@ -170,6 +216,11 @@ export default function SheetViewer({
   useEffect(() => {
     setCropping(false);
     setBox(null);
+    // 4 góc là của ẢNH NÀY — đổi sang mặt sổ khác mà giữ lại là nắn nhầm chỗ
+    setWarping(false);
+    setQuad(FULL_QUAD);
+    setVert(0);
+    setHorz(0);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
     clearPreview();
@@ -216,10 +267,50 @@ export default function SheetViewer({
 
         <span className="mx-1 h-5 w-px bg-rule" />
 
+        {/* Nắn phối cảnh — ảnh chụp chếch thì trang ra hình thang, xoay không cứu được */}
+        {!warping ? (
+          <Tool
+            onClick={() => {
+              setWarping(true);
+              setCropping(false);
+              setQuad(FULL_QUAD);
+              setVert(0);
+              setHorz(0);
+            }}
+            disabled={busy}
+            title={t.warpHint}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+              <path d="M7 4h10l3 16H4Z" />
+            </svg>
+            {t.warp}
+          </Tool>
+        ) : (
+          <>
+            <Tool
+              tone="accent"
+              onClick={() => {
+                onWarp(quad);
+                setWarping(false);
+              }}
+              disabled={busy}
+              title={t.warpApply}
+            >
+              ✓ {t.warpApply}
+            </Tool>
+            <Tool onClick={() => setWarping(false)} title={t.cancel}>
+              {t.cancel}
+            </Tool>
+          </>
+        )}
+
+        <span className="mx-1 h-5 w-px bg-rule" />
+
         {!cropping ? (
           <Tool
             onClick={() => {
               setCropping(true);
+              setWarping(false);
               setBox({ left: 0.06, top: 0.06, right: 0.94, bottom: 0.94 });
             }}
             disabled={busy}
@@ -261,7 +352,10 @@ export default function SheetViewer({
             clearPreview();
             onReset();
           }}
-          disabled={busy || (sheet.rotation === 0 && !sheet.cropped && !sheet.adjusted)}
+          disabled={
+            busy ||
+            (sheet.rotation === 0 && !sheet.cropped && !sheet.adjusted && !sheet.warped)
+          }
           title={t.resetImage}
         >
           ↺ {t.resetImage}
@@ -340,7 +434,8 @@ export default function SheetViewer({
           });
         }}
         onMouseDown={(e) => {
-          if (cropping || e.button !== 0) return;
+          // Đang nắn thì chuột dành cho 4 tay nắm, không dùng để di ảnh
+          if (cropping || warping || e.button !== 0) return;
           e.preventDefault();
           pan.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
           setPanning(true);
@@ -363,7 +458,7 @@ export default function SheetViewer({
           setOffset({ x: 0, y: 0 });
         }}
         className={`canvas-bg relative flex min-h-0 flex-1 items-center justify-center overflow-hidden ${
-          cropping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
+          cropping || warping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
         }`}
       >
         <div
@@ -453,6 +548,53 @@ export default function SheetViewer({
             />
           )}
 
+          {/* Tứ giác nắn: 4 tay nắm kéo được + đường nối cho thấy vùng sẽ bị
+              kéo thành hình chữ nhật. Vẽ bằng SVG vì tứ giác không phải hình
+              chữ nhật nên không dùng div viền được. */}
+          {warping && (
+            <>
+              <svg
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-hidden
+              >
+                <polygon
+                  points={quad.map(([x, y]) => `${x * 100},${y * 100}`).join(" ")}
+                  fill="color-mix(in srgb, var(--accent) 12%, transparent)"
+                  stroke="var(--accent)"
+                  strokeWidth="0.4"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              {quad.map(([x, y], i) => (
+                <button
+                  key={i}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();       // đừng để rơi vào thao tác kéo ảnh
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    setGrab(i);
+                  }}
+                  onPointerMove={(e) => {
+                    if (grab !== i) return;
+                    const r = imgBox.current?.getBoundingClientRect();
+                    if (!r) return;
+                    const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+                    const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+                    setQuad((q) => q.map((p, k) => (k === i ? [nx, ny] : p)) as Pt[]);
+                  }}
+                  onPointerUp={() => setGrab(null)}
+                  aria-label={t.warpCorner(i + 1)}
+                  className="absolute z-10 h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-white bg-accent shadow active:cursor-grabbing"
+                  style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                />
+              ))}
+              <p className="pointer-events-none absolute left-2 top-2 max-w-[85%] rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accentink">
+                {t.warpHint}
+              </p>
+            </>
+          )}
+
           {cropping && box && (
             <>
               <div
@@ -504,6 +646,54 @@ export default function SheetViewer({
             onChange={setFine}
             onReset={() => setFine(0)}
           />
+          {/* Hai thanh nắn phối cảnh — chỉ hiện khi đang ở chế độ nắn, vì
+              chúng ghi đè 4 góc nên bày ra lúc khác chỉ gây nhầm. */}
+          {warping && (
+            <>
+              <Slider
+                label={t.warpVert}
+                icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+                    <path d="M8 4h8l3 16H5Z" />
+                  </svg>
+                }
+                value={vert}
+                min={-100}
+                max={100}
+                step={2}
+                unit=""
+                onChange={(v) => {
+                  setVert(v);
+                  setQuad(quadFromSliders(v, horz));
+                }}
+                onReset={() => {
+                  setVert(0);
+                  setQuad(quadFromSliders(0, horz));
+                }}
+              />
+              <Slider
+                label={t.warpHorz}
+                icon={
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+                    <path d="M4 8v8l16 3V5Z" />
+                  </svg>
+                }
+                value={horz}
+                min={-100}
+                max={100}
+                step={2}
+                unit=""
+                onChange={(v) => {
+                  setHorz(v);
+                  setQuad(quadFromSliders(vert, v));
+                }}
+                onReset={() => {
+                  setHorz(0);
+                  setQuad(quadFromSliders(vert, 0));
+                }}
+              />
+            </>
+          )}
           <Slider
             label={t.brightness}
             icon={
