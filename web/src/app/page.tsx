@@ -62,7 +62,12 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 const WS_KEY = "tsucho.ws";
 
 /** Lỗi đang hiện trên thanh đỏ — giữ MÃ chứ không giữ câu đã dịch. */
-type ErrInfo = { code?: string; sheet?: string; text: string } | null;
+type ErrInfo = {
+  code?: string;
+  sheet?: string;
+  info?: { size_mb?: number; limit_mb?: number };
+  text: string;
+} | null;
 
 /** Thanh đỏ tự tắt sau ngần này — đủ đọc một câu, không đọng lại cả buổi.
  *  Thông tin không mất: thẻ mặt sổ vẫn giữ huy hiệu「Không quét được」. */
@@ -90,16 +95,16 @@ export default function Workbench() {
    * nó gửi kèm chỉ là dự phòng cho mã lạ. Trước đây web hiện thẳng câu của
    * server nên chuyển sang tiếng Nhật/Anh vẫn thấy tiếng Việt.
    */
-  const errText = useCallback(
-    (code: string | undefined, sheet: string | undefined, fallback: string) => {
-      const name = sheet ?? "";
-      if (code === "not_bankbook") return t.errNotBankbook(name);
-      if (code === "unreadable") return t.errUnreadable(name);
-      if (code === "no_rows") return t.errNoRows(name);
-      return fallback;
-    },
-    [t],
-  );
+  const errText = useCallback((e: NonNullable<ErrInfo>) => {
+    const name = e.sheet ?? "";
+    if (e.code === "not_bankbook") return t.errNotBankbook(name);
+    if (e.code === "unreadable") return t.errUnreadable(name);
+    if (e.code === "no_rows") return t.errNoRows(name);
+    if (e.code === "too_large") {
+      return t.errTooLarge(name, e.info?.size_mb ?? 0, e.info?.limit_mb ?? 0);
+    }
+    return e.text;
+  }, [t]);
   const { user, ready } = useAuth();
   const router = useRouter();
 
@@ -508,7 +513,7 @@ export default function Workbench() {
             });
           }
           if (e.stage === "error") {
-            setErr({ code: e.code, sheet: e.sheet, text: e.message });
+            setErr({ code: e.code, sheet: e.sheet, info: e.info, text: e.message });
             // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
             // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
             setStates((prev) => {
@@ -527,6 +532,7 @@ export default function Workbench() {
               setErr({
                 code: done.error_code,
                 sheet: done.error_sheet,
+                info: done.error_info,
                 text: done.error,
               });
             }
@@ -851,7 +857,7 @@ export default function Workbench() {
       {err && (
         <p className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger">
           {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
-          <span>{errText(err.code, err.sheet, err.text)}</span>
+          <span>{errText(err)}</span>
           <button
             onClick={() => setErr(null)}
             className="ml-auto flex-none text-[15px] leading-none hover:opacity-70"
@@ -1011,8 +1017,8 @@ export default function Workbench() {
             onCrop={(box) =>
               ws && active && void guard(() => cropSheet(ws.id, editTarget(), box))
             }
-            onWarp={(corners) =>
-              ws && active && void guard(() => warpSheet(ws.id, active, corners))
+            onWarp={(corners, mids) =>
+              ws && active && void guard(() => warpSheet(ws.id, active, corners, mids))
             }
             onReset={() => {
               if (!ws || !active) return;

@@ -114,6 +114,70 @@ def test_tu_giac_bet_bi_tu_choi(ws, quad):
         workspace.perspective(ws, sheet, quad)
 
 
+# ── Điểm giữa cạnh: sổ không bẹt phẳng ───────────────────────────────
+
+def test_diem_giua_dung_trung_diem_thi_khong_doi_gi(ws):
+    """Để 4 điểm giữa đúng ở trung điểm = cạnh thẳng = y hệt phối cảnh thuần."""
+    sheet_a = them(ws, ke_o())
+    sheet_b = them(ws, ke_o())
+    goc = [(0.1, 0.05), (0.9, 0.05), (0.95, 0.95), (0.05, 0.95)]
+    giua = [
+        ((goc[i][0] + goc[(i + 1) % 4][0]) / 2, (goc[i][1] + goc[(i + 1) % 4][1]) / 2)
+        for i in range(4)
+    ]
+    workspace.perspective(ws, sheet_a, goc)
+    workspace.perspective(ws, sheet_b, goc, giua)
+
+    a = np.asarray(Image.open(sheet_a.dir(ws.id) / "current.png").convert("L"), np.float32)
+    b = np.asarray(Image.open(sheet_b.dir(ws.id) / "current.png").convert("L"), np.float32)
+    assert float(np.abs(a - b).mean()) < 3.0
+
+
+def test_uon_thang_canh_cong_thanh_thang(ws):
+    """Cạnh trên CONG (sổ cong sấp) → kéo điểm giữa lên là nắn thẳng lại."""
+    w, h = 400, 300
+    img = Image.new("RGB", (w, h), (250, 250, 250))
+    dr = ImageDraw.Draw(img)
+    # Mép trên của "trang" võng xuống giữa: vẽ bằng nhiều đoạn ngắn
+    vong = 40
+    truoc = None
+    for i in range(41):
+        u = i / 40
+        x = 20 + u * (w - 40)
+        y = 30 + vong * 4 * u * (1 - u)          # võng xuống ở giữa
+        if truoc:
+            dr.line([truoc, (x, y)], fill=(20, 20, 20), width=3)
+        truoc = (x, y)
+    sheet = them(ws, img)
+
+    def do_vong(path) -> float:
+        """Chênh lệch y của vệt đen giữa MÉP và GIỮA — 0 là đã thẳng."""
+        a = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
+        hh, ww = a.shape
+
+        def y_toi(x: int) -> float:
+            toi = np.where(a[:, x] < 128)[0]
+            return float(toi[0]) / hh if len(toi) else 0.0
+
+        return abs(y_toi(int(ww * 0.5)) - y_toi(int(ww * 0.06)))
+
+    truoc_vong = do_vong(sheet.dir(ws.id) / "current.png")
+    assert truoc_vong > 0.08, "ảnh mẫu phải thật sự cong"
+
+    goc = [(20 / w, 30 / h), ((w - 20) / w, 30 / h), (1.0, 1.0), (0.0, 1.0)]
+    giua = [(0.5, (30 + vong) / h), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)]
+    workspace.perspective(ws, sheet, goc, giua)
+
+    sau_vong = do_vong(sheet.dir(ws.id) / "current.png")
+    assert sau_vong < truoc_vong / 2, f"vẫn cong: {truoc_vong:.3f} → {sau_vong:.3f}"
+
+
+def test_doi_dung_bon_diem_giua(ws):
+    sheet = them(ws, ke_o())
+    with pytest.raises(ValueError, match="điểm giữa"):
+        workspace.perspective(ws, sheet, [(0, 0), (1, 0), (1, 1), (0, 1)], [(0.5, 0)])
+
+
 def test_doi_dung_bon_goc(ws):
     sheet = them(ws, ke_o())
     with pytest.raises(ValueError, match="4 góc"):

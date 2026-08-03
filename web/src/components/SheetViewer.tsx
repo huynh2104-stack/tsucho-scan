@@ -32,6 +32,17 @@ const FULL_QUAD: Pt[] = [
   [0, 1],
 ];
 
+/** Điểm giữa 4 cạnh: trên → phải → dưới → trái.
+ *
+ * Sổ mở ra thường KHÔNG bẹt phẳng, còn cong sấp, nên mép trang là đường cong
+ * chứ không phải đoạn thẳng — 4 góc thôi thì không tả được. Kéo điểm giữa cạnh
+ * là uốn cong cạnh đó.
+ */
+function midsOf(q: Pt[]): Pt[] {
+  const giua = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  return [giua(q[0], q[1]), giua(q[1], q[2]), giua(q[2], q[3]), giua(q[3], q[0])];
+}
+
 /** Hai thanh trượt → 4 góc.
  *
  * `doc` (dọc): chụp chếch từ trên xuống thì mép TRÊN của trang bị thu hẹp lại.
@@ -162,7 +173,7 @@ export default function SheetViewer({
     contrast: number;
   }) => Promise<boolean>;
   onCrop: (box: Box) => void;
-  onWarp: (corners: [number, number][]) => void;
+  onWarp: (corners: [number, number][], mids: [number, number][]) => void;
   onReset: () => void;
   onUndo: () => void;
   onScanThis: () => void;
@@ -192,9 +203,14 @@ export default function SheetViewer({
      nổi kết quả. */
   const [warping, setWarping] = useState(false);
   const [quad, setQuad] = useState<Pt[]>(FULL_QUAD);
+  const [mids, setMids] = useState<Pt[]>(midsOf(FULL_QUAD));
   const [vert, setVert] = useState(0);
   const [horz, setHorz] = useState(0);
-  const [grab, setGrab] = useState<number | null>(null);
+  /* Đang kéo tay nắm nào: 0-3 là góc, 4-7 là điểm giữa cạnh.
+     Dùng ref chứ KHÔNG dùng state: state phải chờ React vẽ lại mới có giá trị
+     mới, mà `pointermove` đầu tiên có thể tới ngay trong cùng một nhịp —
+     lúc đó state vẫn là null nên cú kéo đầu bị nuốt. */
+  const grab = useRef<number | null>(null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const imgBox = useRef<HTMLDivElement>(null);
   const scrollBox = useRef<HTMLDivElement>(null);
@@ -219,6 +235,7 @@ export default function SheetViewer({
     // 4 góc là của ẢNH NÀY — đổi sang mặt sổ khác mà giữ lại là nắn nhầm chỗ
     setWarping(false);
     setQuad(FULL_QUAD);
+    setMids(midsOf(FULL_QUAD));
     setVert(0);
     setHorz(0);
     setZoom(1);
@@ -274,6 +291,7 @@ export default function SheetViewer({
               setWarping(true);
               setCropping(false);
               setQuad(FULL_QUAD);
+              setMids(midsOf(FULL_QUAD));
               setVert(0);
               setHorz(0);
             }}
@@ -290,7 +308,7 @@ export default function SheetViewer({
             <Tool
               tone="accent"
               onClick={() => {
-                onWarp(quad);
+                onWarp(quad, mids);
                 setWarping(false);
               }}
               disabled={busy}
@@ -559,36 +577,76 @@ export default function SheetViewer({
                 preserveAspectRatio="none"
                 aria-hidden
               >
-                <polygon
-                  points={quad.map(([x, y]) => `${x * 100},${y * 100}`).join(" ")}
+                {/* Cạnh vẽ bằng đường cong bậc hai đi ĐÚNG qua điểm giữa —
+                    phải khớp với công thức uốn cong ở backend, nếu không thì
+                    xem một đằng ra một nẻo. */}
+                <path
+                  d={quad
+                    .map((p, i) => {
+                      const nxt = quad[(i + 1) % 4];
+                      const m = mids[i];
+                      // Điểm điều khiển để đường cong đi qua đúng m tại t=0.5
+                      const cx = 2 * m[0] - (p[0] + nxt[0]) / 2;
+                      const cy = 2 * m[1] - (p[1] + nxt[1]) / 2;
+                      const head = i === 0 ? `M ${p[0] * 100} ${p[1] * 100} ` : "";
+                      return `${head}Q ${cx * 100} ${cy * 100} ${nxt[0] * 100} ${nxt[1] * 100}`;
+                    })
+                    .join(" ") + " Z"}
                   fill="color-mix(in srgb, var(--accent) 12%, transparent)"
                   stroke="var(--accent)"
                   strokeWidth="0.4"
                   vectorEffect="non-scaling-stroke"
                 />
               </svg>
-              {quad.map(([x, y], i) => (
-                <button
-                  key={i}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();       // đừng để rơi vào thao tác kéo ảnh
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    setGrab(i);
-                  }}
-                  onPointerMove={(e) => {
-                    if (grab !== i) return;
-                    const r = imgBox.current?.getBoundingClientRect();
-                    if (!r) return;
-                    const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-                    const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
-                    setQuad((q) => q.map((p, k) => (k === i ? [nx, ny] : p)) as Pt[]);
-                  }}
-                  onPointerUp={() => setGrab(null)}
-                  aria-label={t.warpCorner(i + 1)}
-                  className="absolute z-10 h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-white bg-accent shadow active:cursor-grabbing"
-                  style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
-                />
-              ))}
+              {[...quad, ...mids].map(([x, y], i) => {
+                const laGoc = i < 4;
+                return (
+                  <button
+                    key={i}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();     // đừng để rơi vào thao tác kéo ảnh
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      grab.current = i;
+                    }}
+                    onPointerMove={(e) => {
+                      if (grab.current !== i) return;
+                      const r = imgBox.current?.getBoundingClientRect();
+                      if (!r) return;
+                      const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+                      const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+                      if (laGoc) {
+                        /* Kéo GÓC thì kéo theo cả hai điểm giữa cạnh kề, giữ
+                           nguyên độ cong người dùng đã đặt — nếu để yên, điểm
+                           giữa bị bỏ lại giữa đường và cạnh vặn thành hình lạ. */
+                        const truoc = quad[i];
+                        const dx = nx - truoc[0];
+                        const dy = ny - truoc[1];
+                        const ke = [(i + 3) % 4, i];      // cạnh trước và cạnh sau góc này
+                        setQuad((q) => q.map((p, k) => (k === i ? [nx, ny] : p)) as Pt[]);
+                        setMids((m) =>
+                          m.map((p, k) =>
+                            ke.includes(k) ? [p[0] + dx / 2, p[1] + dy / 2] : p,
+                          ) as Pt[],
+                        );
+                      } else {
+                        setMids((m) =>
+                          m.map((p, k) => (k === i - 4 ? [nx, ny] : p)) as Pt[],
+                        );
+                      }
+                    }}
+                    onPointerUp={() => (grab.current = null)}
+                    aria-label={
+                      laGoc ? t.warpCorner(i + 1) : t.warpMid(i - 3)
+                    }
+                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab border-2 border-white shadow active:cursor-grabbing ${
+                      laGoc
+                        ? "h-5 w-5 rounded-full bg-accent"
+                        : "h-4 w-4 rounded-sm bg-accentmid"
+                    }`}
+                    style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                  />
+                );
+              })}
               <p className="pointer-events-none absolute left-2 top-2 max-w-[85%] rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accentink">
                 {t.warpHint}
               </p>
@@ -664,11 +722,15 @@ export default function SheetViewer({
                 unit=""
                 onChange={(v) => {
                   setVert(v);
-                  setQuad(quadFromSliders(v, horz));
+                  const q = quadFromSliders(v, horz);
+                  setQuad(q);
+                  setMids(midsOf(q));
                 }}
                 onReset={() => {
                   setVert(0);
-                  setQuad(quadFromSliders(0, horz));
+                  const q = quadFromSliders(0, horz);
+                  setQuad(q);
+                  setMids(midsOf(q));
                 }}
               />
               <Slider
@@ -685,11 +747,15 @@ export default function SheetViewer({
                 unit=""
                 onChange={(v) => {
                   setHorz(v);
-                  setQuad(quadFromSliders(vert, v));
+                  const q = quadFromSliders(vert, v);
+                  setQuad(q);
+                  setMids(midsOf(q));
                 }}
                 onReset={() => {
                   setHorz(0);
-                  setQuad(quadFromSliders(vert, 0));
+                  const q = quadFromSliders(vert, 0);
+                  setQuad(q);
+                  setMids(midsOf(q));
                 }}
               />
             </>

@@ -26,6 +26,8 @@ WS_DIR = DATA_DIR / "ws"
 ALLOWED_SUFFIX = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 MAX_FILE_MB = 64
 THUMB_W = 220
+# Ảnh đem quét phải dưới giới hạn 5MB của extract.py — chừa biên an toàn
+SCAN_MAX_MB = 4.2
 # Trang PDF render ở 200 DPI: đủ nét cho model đọc kana nhỏ, chưa nặng quá
 PDF_DPI = 200
 
@@ -62,13 +64,19 @@ class Sheet:
         Chưa chỉnh gì thì gửi ĐÚNG BYTES GỐC người dùng tải lên — cache của
         extract.py băm theo nội dung, gửi bản PNG render lại là cache trượt và
         mỗi lần quét đều mất tiền. Chỉnh rồi mới buộc phải gửi bản đã sửa.
+
+        Bản đã chỉnh gửi đi là **JPEG** (`scan.jpg`), không phải `current.png`.
+        Ảnh chụp điện thoại 3072×4096 nặng 0.4MB ở dạng JPEG nhưng phình lên
+        5–7MB khi lưu PNG, vượt giới hạn 5MB của API → cắt/nắn xong là không
+        quét được nữa (bug người dùng báo 01/08/2026).
         """
         d = self.dir(ws_id)
         if not self.edited():
             src = d / f"source{self.source_ext}"
             if src.is_file():
                 return src
-        return d / "current.png"
+        jpg = d / "scan.jpg"
+        return jpg if jpg.is_file() else d / "current.png"
 
 
 @dataclass
@@ -177,11 +185,29 @@ def _write_sheet_images(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     thumb.save(d / "thumb.png")
 
 
+def _write_scan_jpeg(path: Path, img: Image.Image) -> None:
+    """Ảnh ĐEM QUÉT của mặt sổ đã chỉnh — JPEG và luôn dưới ngưỡng gửi API.
+
+    Hạ chất lượng trước, cùng lắm mới thu nhỏ: chữ kana trong sổ rất nhỏ, mất
+    độ phân giải là model đọc sai, còn nén JPEG mạnh tay thì hầu như không ảnh
+    hưởng vì nền giấy vốn phẳng.
+    """
+    rgb = img.convert("RGB") if img.mode != "RGB" else img
+    for quality in (92, 85, 75):
+        rgb.save(path, "JPEG", quality=quality, optimize=True)
+        if path.stat().st_size <= SCAN_MAX_MB * 1024 * 1024:
+            return
+    while path.stat().st_size > SCAN_MAX_MB * 1024 * 1024 and min(rgb.size) > 900:
+        rgb = rgb.resize((rgb.width * 4 // 5, rgb.height * 4 // 5), Image.LANCZOS)
+        rgb.save(path, "JPEG", quality=85, optimize=True)
+
+
 def _regen_current(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     d = sheet.dir(ws.id)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     img.save(d / "current.png")
+    _write_scan_jpeg(d / "scan.jpg", img)
     sheet.width, sheet.height = img.size
     thumb = img.copy()
     thumb.thumbnail((THUMB_W, THUMB_W * 3), Image.LANCZOS)
@@ -421,10 +447,68 @@ def _perspective_coeffs(
     return tuple(sol)
 
 
+def _apply_h(coeffs: tuple[float, ...], x: float, y: float) -> tuple[float, float]:
+    """Điểm (x,y) của ảnh ĐÍCH → điểm tương ứng trong ảnh NGUỒN.
+
+    ⚠ Nhận toạ độ PIXEL, không phải tỉ lệ 0..1 — vì `_perspective_coeffs` giải
+    hệ trên toạ độ pixel của ảnh đích. Gọi nhầm bằng 0..1 thì mọi điểm dồn về
+    góc trên-trái (đã dính đúng lỗi này khi làm phần uốn cong cạnh).
+    """
+    a, b, c, d, e, f, g, hh = coeffs
+    z = g * x + hh * y + 1.0
+    return ((a * x + b * y + c) / z, (d * x + e * y + f) / z)
+
+
+def _mesh(
+    coeffs: tuple[float, ...],
+    lech: list[tuple[float, float]],
+    w: int,
+    h: int,
+    n: int = 14,
+) -> list:
+    """Lưới ô cho `Image.transform(MESH)` — phối cảnh CỘNG độ cong của cạnh.
+
+    Mỗi cạnh có một điểm giữa kéo được. `lech[i]` là ĐỘ LỆCH của điểm giữa cạnh
+    i so với chỗ mà phép phối cảnh thuần tuý đặt nó (thứ tự: trên, phải, dưới,
+    trái). Lệch bằng 0 nghĩa là cạnh thẳng.
+
+    Trộn bằng hàm trọng số hình chuông `4u(1-u)`: đúng bằng độ lệch tại chính
+    điểm giữa cạnh, bằng 0 ở hai góc, và tắt dần khi đi sang cạnh đối diện.
+    Nhờ vậy kéo điểm giữa chỉ uốn cong cạnh đó, không xô lệch cả trang.
+    """
+    def src(u: float, v: float) -> tuple[float, float]:
+        x, y = _apply_h(coeffs, u * w, v * h)      # u,v là 0..1 → đổi ra pixel
+        bu, bv = 4 * u * (1 - u), 4 * v * (1 - v)
+        for (dx, dy), wt in zip(
+            lech, ((1 - v) * bu, u * bv, v * bu, (1 - u) * bv)
+        ):
+            x += dx * wt
+            y += dy * wt
+        return x, y
+
+    pts = [[src(i / n, j / n) for i in range(n + 1)] for j in range(n + 1)]
+    out = []
+    for j in range(n):
+        for i in range(n):
+            box = (
+                round(i * w / n), round(j * h / n),
+                round((i + 1) * w / n), round((j + 1) * h / n),
+            )
+            tl, tr = pts[j][i], pts[j][i + 1]
+            bl, br = pts[j + 1][i], pts[j + 1][i + 1]
+            # Thứ tự PIL: trái-trên, trái-dưới, phải-dưới, phải-trên
+            out.append((box, (*tl, *bl, *br, *tr)))
+    return out
+
+
 def perspective(
-    ws: Workspace, sheet: Sheet, quad: list[tuple[float, float]], snapshot: bool = True
+    ws: Workspace,
+    sheet: Sheet,
+    quad: list[tuple[float, float]],
+    mids: list[tuple[float, float]] | None = None,
+    snapshot: bool = True,
 ) -> None:
-    """Nắn 4 góc `quad` (tỉ lệ 0..1) thành hình chữ nhật đầy khung.
+    """Nắn `quad` (tỉ lệ 0..1) thành hình chữ nhật đầy khung.
 
     Dùng cho ảnh chụp bằng điện thoại: cầm máy chếch xuống thì trang sổ ra hình
     thang, dòng chữ ở xa xích lại gần nhau. Xoay ảnh không cứu được vì đó là
@@ -432,9 +516,16 @@ def perspective(
 
     `quad` theo thứ tự trái-trên, phải-trên, phải-dưới, trái-dưới — đúng thứ tự
     4 tay nắm trên giao diện.
+
+    `mids` là 4 điểm giữa cạnh (trên, phải, dưới, trái) cho những cuốn sổ KHÔNG
+    BẸT PHẲNG — mở ra vẫn còn cong sấp, nên cạnh trang là đường cong chứ không
+    phải đoạn thẳng. Bỏ trống (hoặc để đúng trung điểm) thì dùng phép phối cảnh
+    thuần tuý như cũ.
     """
     if len(quad) != 4:
         raise ValueError("Cần đúng 4 góc")
+    if mids is not None and len(mids) not in (0, 4):
+        raise ValueError("Cần đúng 4 điểm giữa cạnh")
 
     d = sheet.dir(ws.id)
     img = Image.open(d / "current.png")
@@ -455,7 +546,29 @@ def perspective(
     except np.linalg.LinAlgError as e:
         raise ValueError("Bốn góc này không tạo thành tứ giác hợp lệ") from e
 
-    out = img.transform((w, h), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+    # Điểm giữa cạnh lệch khỏi TRUNG ĐIỂM HAI GÓC → cạnh cong.
+    #
+    # Mốc phải là trung điểm hai góc, KHÔNG phải chỗ phép phối cảnh đặt điểm
+    # (u=0.5): phối cảnh không giữ trung điểm, nên lấy mốc đó thì để yên tay
+    # nắm cũng sinh ra một vết uốn không ai yêu cầu — test bắt được đúng cảnh
+    # này. Mốc "trung điểm hai góc" cũng chính là thứ giao diện vẽ, nên nhìn
+    # sao ra vậy.
+    lech = [(0.0, 0.0)] * 4
+    if mids:
+        for k, (mx, my) in enumerate(mids):
+            a, b = px[k], px[(k + 1) % 4]
+            gx, gy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+            px_m = (max(-0.5, min(1.5, mx)) * w, max(-0.5, min(1.5, my)) * h)
+            lech[k] = (px_m[0] - gx, px_m[1] - gy)
+
+    cong = any(abs(dx) > 0.5 or abs(dy) > 0.5 for dx, dy in lech)
+    out = (
+        img.transform((w, h), Image.MESH, _mesh(coeffs, lech, w, h), Image.BICUBIC)
+        if cong
+        # Cạnh thẳng thì dùng phép phối cảnh thuần — chính xác tuyệt đối, không
+        # phải xấp xỉ từng ô lưới.
+        else img.transform((w, h), Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+    )
     _regen_current(ws, sheet, out)
     sheet.warped = True
     sheet.sha256 = _hash_current(ws, sheet)

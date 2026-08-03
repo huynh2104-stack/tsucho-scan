@@ -222,10 +222,15 @@ const DICT = {
 
     warp: "Nắn phối cảnh",
     warpApply: "Áp dụng nắn",
-    warpHint: "Kéo 4 góc ôm lấy trang sổ, hoặc dùng hai thanh Dọc/Ngang bên dưới (thanh trượt sẽ đặt lại cả 4 góc)",
+    warpHint: "Kéo 4 góc (tròn) ôm lấy trang sổ; 4 điểm vuông ở giữa cạnh để uốn cong khi sổ không bẹt phẳng. Hai thanh Dọc/Ngang bên dưới sẽ đặt lại toàn bộ",
     warpVert: "Nắn dọc — sổ chụp chếch trên/dưới",
     warpHorz: "Nắn ngang — sổ chụp chếch trái/phải",
     warpCorner: (n: number) => `Góc ${n} — kéo để chỉnh`,
+
+    errTooLarge: (s: string, size: number, limit: number) =>
+      `${s ? `「${s}」` : "Ảnh này"} quá lớn (${size}MB, giới hạn ${limit}MB). Hãy giảm kích thước ảnh.`,
+
+    warpMid: (n: number) => `Điểm giữa cạnh ${n} — kéo để uốn cong cạnh (sổ không bẹt phẳng)`,
 
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
@@ -432,10 +437,15 @@ const DICT = {
 
     warp: "Perspective",
     warpApply: "Apply perspective",
-    warpHint: "Drag the 4 corners onto the page, or use the Vertical/Horizontal sliders below (a slider resets all 4 corners)",
+    warpHint: "Drag the 4 round corners onto the page; the 4 square midpoints curve each edge when the book will not lie flat. The sliders below reset everything",
     warpVert: "Vertical — shot from above/below",
     warpHorz: "Horizontal — shot from the left/right",
     warpCorner: (n: number) => `Corner ${n} — drag to adjust`,
+
+    errTooLarge: (s: string, size: number, limit: number) =>
+      `${s ? `"${s}"` : "This image"} is too large (${size}MB, limit ${limit}MB). Please reduce the image size.`,
+
+    warpMid: (n: number) => `Edge midpoint ${n} — drag to curve the edge (book not lying flat)`,
 
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
@@ -641,10 +651,15 @@ const DICT = {
 
     warp: "台形補正",
     warpApply: "補正を適用",
-    warpHint: "4つの角を通帳のページに合わせてドラッグ、または下の「縦」「横」スライダーを使用（スライダーは4つの角を作り直します）",
+    warpHint: "丸い4つの角をページに合わせてドラッグ。通帳が平らに開かない場合は辺の中点（四角）で辺を湾曲。下の「縦」「横」スライダーは全体を作り直します",
     warpVert: "縦 — 上下から斜めに撮影した場合",
     warpHorz: "横 — 左右から斜めに撮影した場合",
     warpCorner: (n: number) => `角${n} — ドラッグして調整`,
+
+    errTooLarge: (s: string, size: number, limit: number) =>
+      `${s ? `「${s}」` : "この画像"}はサイズが大きすぎます（${size}MB、上限${limit}MB）。画像を小さくしてください。`,
+
+    warpMid: (n: number) => `辺の中点${n} — ドラッグして辺を湾曲（通帳が平らに開かない場合）`,
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

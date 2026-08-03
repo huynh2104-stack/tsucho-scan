@@ -277,14 +277,17 @@ def warp_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
         raise HTTPException(
             400, "Nắn phối cảnh áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
         )
-    raw = body.get("corners") or []
-    try:
-        quad = [(float(p[0]), float(p[1])) for p in raw]
-    except (TypeError, ValueError, IndexError) as e:
-        raise HTTPException(400, "Toạ độ 4 góc không hợp lệ") from e
+    def diem(raw) -> list[tuple[float, float]]:
+        return [(float(p[0]), float(p[1])) for p in raw or []]
 
     try:
-        workspace.perspective(ws, _sheet(ws, ids[0]), quad)
+        quad = diem(body.get("corners"))
+        mids = diem(body.get("mids"))       # điểm giữa cạnh, có thể bỏ trống
+    except (TypeError, ValueError, IndexError) as e:
+        raise HTTPException(400, "Toạ độ các điểm không hợp lệ") from e
+
+    try:
+        workspace.perspective(ws, _sheet(ws, ids[0]), quad, mids or None)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     ws.save()

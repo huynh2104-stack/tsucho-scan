@@ -35,6 +35,7 @@ class Job:
     error: str | None = None
     error_code: str = ""              # mã lỗi để trình duyệt tự dịch
     error_sheet: str = ""             # tên mặt sổ hỏng, để ghép vào câu dịch
+    error_info: dict = field(default_factory=dict)   # con số ghép vào câu dịch
     result: dict | None = None
     created_at: float = field(default_factory=time.time)
     events: queue.Queue = field(default_factory=queue.Queue)
@@ -116,11 +117,13 @@ def _run(job: Job, use_cache: bool) -> None:
     except ExtractError as e:
         job.status = "error"
         job.error_code, job.error_sheet, job.error = _friendly(job, e)
+        job.error_info = getattr(e, "info", {})
         job.emit({
             "stage": "error",
             "message": job.error,        # dự phòng khi trình duyệt chưa dịch mã
             "code": job.error_code,
             "sheet": job.error_sheet,
+            "info": getattr(e, "info", {}),   # con số ghép vào câu đã dịch
         })
     except Exception as e:                                   # lỗi ngoài dự tính
         job.status = "error"
@@ -167,6 +170,12 @@ def _friendly(job: Job, e: ExtractError) -> tuple[str, str, str]:
         return kind, ten, (
             f"{nhan} không có dòng giao dịch nào"
             " (có thể là trang bìa hoặc trang trắng)."
+        )
+    if kind == "too_large":
+        info = getattr(e, "info", {})
+        return kind, ten, (
+            f"{nhan} quá lớn ({info.get('size_mb')}MB, giới hạn"
+            f" {info.get('limit_mb')}MB). Hãy giảm kích thước ảnh."
         )
 
     # Lỗi khác (mạng, API key, file hỏng...) — message gốc vốn đã tiếng Việt,
@@ -242,6 +251,7 @@ def to_json(job: Job) -> dict:
         "error": job.error,
         "error_code": job.error_code,
         "error_sheet": job.error_sheet,
+        "error_info": job.error_info,
         "sheet_ids": job.sheet_ids,
         "result": job.result,
     }

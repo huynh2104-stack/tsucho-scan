@@ -128,6 +128,7 @@ export type Job = {
   error: string | null;
   error_code?: string;
   error_sheet?: string;
+  error_info?: { size_mb?: number; limit_mb?: number };
   sheet_ids: string[];
   result: ScanPayload | null;
 };
@@ -148,6 +149,8 @@ export type ScanEvent = {
   code?: string;
   /** Tên mặt sổ hỏng — ghép vào câu đã dịch. */
   sheet?: string;
+  /** Con số cần ghép vào câu đã dịch (cỡ file, giới hạn...). */
+  info?: { size_mb?: number; limit_mb?: number };
   index?: number;
   total?: number;
   label?: string;
@@ -316,10 +319,16 @@ export const autofixApply = (wsId: string, sheetId: string, steps: AutofixStep[]
 export type Quad = [number, number][];
 
 /** Nắn phối cảnh: kéo tứ giác `corners` thành hình chữ nhật đầy khung. */
-export const warpSheet = (wsId: string, sheetId: string, corners: Quad) =>
+export const warpSheet = (
+  wsId: string,
+  sheetId: string,
+  corners: Quad,
+  mids?: Quad,
+) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/perspective`, {
     sheet_ids: [sheetId],
     corners,
+    mids,
   });
 
 export const splitSheet = (wsId: string, sheetId: string, x: number) =>
