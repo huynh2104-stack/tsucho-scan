@@ -236,6 +236,10 @@ const DICT = {
     paneImage: "Chỉnh ảnh",
     paneResult: "Kết quả",
 
+    moreTools: "Thêm thao tác",
+    zoomIn: "Phóng to",
+    zoomOut: "Thu nhỏ",
+
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
 
@@ -455,6 +459,10 @@ const DICT = {
     paneImage: "Edit image",
     paneResult: "Results",
 
+    moreTools: "More actions",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
 
@@ -672,6 +680,10 @@ const DICT = {
     paneSheets: "ページ",
     paneImage: "画像調整",
     paneResult: "読取結果",
+
+    moreTools: "その他の操作",
+    zoomIn: "拡大",
+    zoomOut: "縮小",
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",
