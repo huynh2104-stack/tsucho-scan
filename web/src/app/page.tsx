@@ -155,6 +155,11 @@ export default function Workbench() {
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  /* Điện thoại không đủ chỗ cho 3 khung cạnh nhau; xếp chồng thì mỗi khung
+     còn 1/3 màn hình, không dùng được. Nên dưới `lg` chỉ hiện MỘT khung, đổi
+     bằng 3 thẻ ở dưới cùng. Từ `lg` trở lên vẫn là 3 khung như cũ. */
+  const [pane, setPane] = useState<"list" | "image" | "result">("list");
+
   const [mode, setMode] = useState<ViewMode>("page");
   const [cols, setCols] = useState<OptCols>({ store: true, extra: false, kind: true });
 
@@ -868,9 +873,13 @@ export default function Workbench() {
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[272px_minmax(0,1fr)_minmax(0,1.15fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 lg:grid-cols-[272px_minmax(0,1fr)_minmax(0,1.15fr)] lg:grid-rows-1">
         {/* ── Cột trái: kéo thả + danh sách mặt sổ ───────────── */}
-        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-rule bg-card lg:border-b-0 lg:border-r">
+        <aside
+          className={`min-h-0 flex-col overflow-hidden border-b border-rule bg-card lg:flex lg:border-b-0 lg:border-r ${
+            pane === "list" ? "flex" : "hidden"
+          }`}
+        >
           <DropZone busy={busy} onFiles={(f) => void upload(f)} />
 
           {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
@@ -977,7 +986,13 @@ export default function Workbench() {
               perSheet={perSheet}
               onToggle={toggle}
               onToggleRange={toggleRange}
-              onActivate={setActive}
+              onActivate={(id) => {
+                setActive(id);
+                // Trên điện thoại: chọn mặt sổ xong là muốn xem/chỉnh nó ngay,
+                // không phải tự đi tìm thẻ「Chỉnh ảnh」. Máy rộng thì cả ba
+                // khung cùng hiện nên dòng này không đổi gì.
+                setPane("image");
+              }}
               onRename={(id, name) =>
                 ws && void guard(() => renameSheet(ws.id, id, name))
               }
@@ -1002,7 +1017,11 @@ export default function Workbench() {
         </aside>
 
         {/* ── Khung giữa: chỉnh ảnh ──────────────────────────── */}
-        <section className="min-h-0 border-b border-rule bg-card lg:border-b-0 lg:border-r">
+        <section
+          className={`min-h-0 border-b border-rule bg-card lg:block lg:border-b-0 lg:border-r ${
+            pane === "image" ? "block" : "hidden"
+          }`}
+        >
           <SheetViewer
             wsId={ws?.id ?? ""}
             sheet={activeSheet}
@@ -1061,7 +1080,11 @@ export default function Workbench() {
         </section>
 
         {/* ── Cột phải: kết quả ──────────────────────────────── */}
-        <section className="flex min-h-0 flex-col bg-page">
+        <section
+          className={`min-h-0 flex-col bg-page lg:flex ${
+            pane === "result" ? "flex" : "hidden"
+          }`}
+        >
           {Object.keys(store).length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-1.5">
               <button
@@ -1169,6 +1192,37 @@ export default function Workbench() {
           </div>
         </section>
       </div>
+
+      {/* Ba thẻ chuyển khung — CHỈ trên màn hình hẹp (điện thoại, tablet dọc).
+          Kèm số đếm để biết đang có bao nhiêu mặt sổ / bao nhiêu dòng kết quả
+          mà không phải chuyển qua chuyển lại. */}
+      <nav className="flex border-t border-rule bg-card lg:hidden">
+        {(
+          [
+            { id: "list", label: t.paneSheets, n: sheets.length },
+            { id: "image", label: t.paneImage, n: 0 },
+            { id: "result", label: t.paneResult, n: Object.keys(store).length },
+          ] as const
+        ).map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPane(p.id)}
+            aria-current={pane === p.id}
+            className={`flex flex-1 items-center justify-center gap-1.5 border-t-2 py-2.5 text-[13px] ${
+              pane === p.id
+                ? "border-accent font-semibold text-accent"
+                : "border-transparent text-ink2"
+            }`}
+          >
+            {p.label}
+            {p.n > 0 && (
+              <span className="tnum rounded bg-card3 px-1.5 text-[11px] text-ink3">
+                {p.n}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
 
       {/* Giới hạn công cụ — không bao giờ giấu (WEB_PLAN §7.4-5) */}
       <p className="flex items-start gap-2 border-t border-rule bg-card px-4 py-1.5 text-[11.5px] text-ink2">

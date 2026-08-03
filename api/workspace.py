@@ -28,6 +28,8 @@ MAX_FILE_MB = 64
 THUMB_W = 220
 # Ảnh đem quét phải dưới giới hạn 5MB của extract.py — chừa biên an toàn
 SCAN_MAX_MB = 4.2
+# Cạnh dài tối đa của ảnh LƯU LẠI — chặn hết RAM trên máy chủ nhỏ (xem `_cap`)
+MAX_STORE_PX = 2600
 # Trang PDF render ở 200 DPI: đủ nét cho model đọc kana nhỏ, chưa nặng quá
 PDF_DPI = 200
 
@@ -169,12 +171,33 @@ def claim_ownerless(owner: str) -> int:
 
 # ── Thêm file ────────────────────────────────────────────────────────
 
+def _cap(img: Image.Image) -> Image.Image:
+    """Thu ảnh về cạnh dài tối đa `MAX_STORE_PX` trước khi lưu.
+
+    Ảnh điện thoại 3072×4096 chiếm ~36MB RAM MỖI BẢN SAO khi mở ra. Máy chủ
+    thuê thường chỉ có 512MB, mà một thao tác (mở + xoay + ghi + thumbnail) tạo
+    vài bản sao cùng lúc → hết RAM → tiến trình bị giết → trình duyệt thấy 502.
+    Đây chính là lỗi 502 chập chờn người dùng gặp khi chạy thật (03/08/2026).
+
+    2600px vẫn dư sức đọc: model tự thu nhỏ ảnh về ~1568px trước khi đọc. Và
+    ảnh CHƯA CHỈNH vẫn gửi đúng bytes gốc đi quét (xem `scan_path`), nên phép
+    thu này không đụng gì tới chất lượng nhận dạng của luồng thường dùng nhất.
+    """
+    if max(img.size) <= MAX_STORE_PX:
+        return img
+    k = MAX_STORE_PX / max(img.size)
+    return img.resize(
+        (max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS
+    )
+
+
 def _write_sheet_images(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     """Ghi ảnh gốc + ảnh hiện tại + thumbnail của một mặt sổ."""
     d = sheet.dir(ws.id)
     d.mkdir(parents=True, exist_ok=True)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
+    img = _cap(img)
 
     img.save(d / "original.png")
     img.save(d / "current.png")
@@ -206,6 +229,7 @@ def _regen_current(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     d = sheet.dir(ws.id)
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
+    img = _cap(img)
     img.save(d / "current.png")
     _write_scan_jpeg(d / "scan.jpg", img)
     sheet.width, sheet.height = img.size

@@ -232,6 +232,10 @@ const DICT = {
 
     warpMid: (n: number) => `Điểm giữa cạnh ${n} — kéo để uốn cong cạnh (sổ không bẹt phẳng)`,
 
+    paneSheets: "Mặt sổ",
+    paneImage: "Chỉnh ảnh",
+    paneResult: "Kết quả",
+
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
 
@@ -447,6 +451,10 @@ const DICT = {
 
     warpMid: (n: number) => `Edge midpoint ${n} — drag to curve the edge (book not lying flat)`,
 
+    paneSheets: "Sheets",
+    paneImage: "Edit image",
+    paneResult: "Results",
+
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
 
@@ -660,6 +668,10 @@ const DICT = {
       `${s ? `「${s}」` : "この画像"}はサイズが大きすぎます（${size}MB、上限${limit}MB）。画像を小さくしてください。`,
 
     warpMid: (n: number) => `辺の中点${n} — ドラッグして辺を湾曲（通帳が平らに開かない場合）`,
+
+    paneSheets: "ページ",
+    paneImage: "画像調整",
+    paneResult: "読取結果",
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",

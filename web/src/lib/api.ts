@@ -12,10 +12,15 @@
  * Lúc phát triển thì Next chạy cổng 3000 còn API cổng 8000, nên mặc định trỏ
  * sang 8000. Muốn ép khác thì đặt `NEXT_PUBLIC_API_URL`.
  */
-export const API = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000")
-).replace(/\/$/, "");
+export const API =
+  process.env.NODE_ENV === "production"
+    ? // Bản build luôn được chính FastAPI phục vụ → cùng gốc → đường dẫn tương
+      // đối. CỐ Ý không đọc biến môi trường ở đây: file `.env.local` của máy
+      // lập trình rất dễ bị "nướng" nhầm vào bản build, và khi đó web tải lên
+      // được nhưng mọi lời gọi API đều trỏ về `localhost:8000` của máy người
+      // xem — hỏng im lặng, rất khó đoán. (Đã dính thật khi thử 03/08/2026.)
+      ""
+    : (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 /** Một MẶT SỔ — ảnh đơn hoặc một trang tách ra từ PDF. */
 export type Sheet = {

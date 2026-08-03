@@ -15,7 +15,7 @@
  * với cột kết quả bên phải.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sheetImage, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
@@ -71,12 +71,15 @@ function Tool({
   disabled,
   title,
   children,
+  icon,
   tone = "normal",
 }: {
   onClick: () => void;
   disabled?: boolean;
   title: string;
-  children: React.ReactNode;
+  /** Chữ trên nút — TỰ ẨN khi thanh công cụ hẹp, chỉ còn `icon`. */
+  children?: React.ReactNode;
+  icon?: React.ReactNode;
   tone?: "normal" | "accent" | "ghost";
 }) {
   const cls =
@@ -90,9 +93,17 @@ function Tool({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[12.5px] transition-colors disabled:opacity-40 ${cls}`}
+      aria-label={title}
+      className={`flex h-8 flex-none items-center gap-1.5 rounded-lg border px-2.5 text-[12.5px] transition-colors disabled:opacity-40 ${cls}`}
     >
-      {children}
+      {icon}
+      {/* Khung công cụ hẹp (cột giữa nhỏ, hoặc điện thoại) thì bỏ chữ, giữ
+          biểu tượng — vẫn có `title`/`aria-label` nên không mất nghĩa.
+          Dùng container query: đo THANH CÔNG CỤ chứ không đo cả màn hình, vì
+          cột giữa hẹp hay rộng là do bố cục 3 khung quyết định. */}
+      {children != null && (
+        <span className="hidden @[560px]:inline">{children}</span>
+      )}
     </button>
   );
 }
@@ -221,12 +232,64 @@ export default function SheetViewer({
   const pan = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const [panning, setPanning] = useState(false);
 
+  /* Cỡ hiển thị của ảnh, tính bằng JS thay vì để CSS tự lo.
+   *
+   * Trước đây ảnh rộng cố định 70% khung, chiều cao thì tuỳ tỉ lệ ảnh — sổ dọc
+   * trên màn hình thấp là tràn ra ngoài và bị `overflow-hidden` cắt mất đầu và
+   * chân. Hậu quả: vào chế độ Cắt / Nắn phối cảnh thì **không với tới được hai
+   * tay nắm trên và dưới**, phải zoom nhỏ lại mới làm được (người dùng báo
+   * 03/08/2026).
+   *
+   * Tính tay thì bảo đảm ảnh LUÔN lọt trong khung ở mọi cỡ màn hình, mà 4 tay
+   * nắm vẫn đặt theo % của đúng khung ảnh nên toạ độ không lệch.
+   */
+  const [fit, setFit] = useState<{ w: number; h: number } | null>(null);
+  const aw = sheet?.width ?? 0;
+  const ah = sheet?.height ?? 0;
+
+  /* Đo lại sau MỖI lần vẽ, cộng thêm khi cửa sổ đổi cỡ.
+   *
+   * Đo sau mỗi lần vẽ nghe có vẻ thừa, nhưng nó tự đúng trong mọi tình huống:
+   * đổi mặt sổ, đổi thẻ khung trên điện thoại (khung từ `hidden` thành hiện),
+   * mở/đóng thanh cảnh báo... Không lặp vô tận vì chỉ gọi `setFit` khi số ĐO
+   * ĐƯỢC lệch quá nửa pixel.
+   *
+   * Cố ý KHÔNG chỉ dựa vào `ResizeObserver`: đã gặp môi trường nó không kích
+   * hoạt dù phần tử đổi cỡ thật, và khi đó ảnh giữ nguyên cỡ cũ rồi tràn ra
+   * ngoài khung — đúng cái lỗi đang phải sửa.
+   */
+  useLayoutEffect(() => {
+    const box = scrollBox.current;
+    if (!box || !aw || !ah) return;
+    const r = box.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    // Chừa 4% mép để tay nắm ở sát biên vẫn bấm được
+    const k = Math.min((r.width * BASE_WIDTH) / aw, (r.height * 0.96) / ah);
+    const w = aw * k;
+    const h = ah * k;
+    if (!fit || Math.abs(fit.w - w) > 0.5 || Math.abs(fit.h - h) > 0.5) {
+      setFit({ w, h });
+    }
+  });
+
+  useEffect(() => {
+    const doLai = () => setFit(null);      // xoá đi, lần vẽ kế sẽ đo lại
+    window.addEventListener("resize", doLai);
+    return () => window.removeEventListener("resize", doLai);
+  }, []);
+
   const dirty = fine !== 0 || bright !== 100 || contrast !== 100;
 
   const clearPreview = () => {
     setFine(0);
     setBright(100);
     setContrast(100);
+  };
+
+  /** Đưa ảnh về đúng cỡ vừa khung, bỏ mọi phóng to/di chuyển đang có. */
+  const vuaKhung = () => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
   };
 
   useEffect(() => {
@@ -263,19 +326,15 @@ export default function SheetViewer({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* ── Thanh công cụ ─────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-2">
-        <Tool onClick={() => onRotate(-90)} disabled={busy} title={t.rotateLeft}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M3 8h11a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5H8" />
-            <path d="M6.5 4.5 3 8l3.5 3.5" />
-          </svg>
+      <div className="@container thin-scroll flex items-center gap-1.5 overflow-x-auto border-b border-rule bg-card px-3 py-2">
+        <Tool onClick={() => onRotate(-90)} disabled={busy} title={t.rotateLeft}
+          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M3 8h11a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5H8" /> <path d="M6.5 4.5 3 8l3.5 3.5" /> </svg>}
+        >
           −90°
         </Tool>
-        <Tool onClick={() => onRotate(90)} disabled={busy} title={t.rotateRight}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M21 8H10a5 5 0 0 0-5 5v1a5 5 0 0 0 5 5h6" />
-            <path d="M17.5 4.5 21 8l-3.5 3.5" />
-          </svg>
+        <Tool onClick={() => onRotate(90)} disabled={busy} title={t.rotateRight}
+          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M21 8H10a5 5 0 0 0-5 5v1a5 5 0 0 0 5 5h6" /> <path d="M17.5 4.5 21 8l-3.5 3.5" /> </svg>}
+        >
           +90°
         </Tool>
         <Tool onClick={() => onRotate(180)} disabled={busy} title={t.flip180}>
@@ -290,6 +349,7 @@ export default function SheetViewer({
             onClick={() => {
               setWarping(true);
               setCropping(false);
+              vuaKhung();          // đang phóng to mà vào nắn thì tay nắm nằm ngoài màn hình
               setQuad(FULL_QUAD);
               setMids(midsOf(FULL_QUAD));
               setVert(0);
@@ -297,10 +357,9 @@ export default function SheetViewer({
             }}
             disabled={busy}
             title={t.warpHint}
+          
+            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden> <path d="M7 4h10l3 16H4Z" /> </svg>}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
-              <path d="M7 4h10l3 16H4Z" />
-            </svg>
             {t.warp}
           </Tool>
         ) : (
@@ -329,14 +388,14 @@ export default function SheetViewer({
             onClick={() => {
               setCropping(true);
               setWarping(false);
+              vuaKhung();
               setBox({ left: 0.06, top: 0.06, right: 0.94, bottom: 0.94 });
             }}
             disabled={busy}
             title={t.crop}
+          
+            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <path d="M6.5 2v15.5H22M2 6.5h15.5V22" /> </svg>}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <path d="M6.5 2v15.5H22M2 6.5h15.5V22" />
-            </svg>
             {t.crop}
           </Tool>
         ) : (
@@ -386,43 +445,33 @@ export default function SheetViewer({
           }}
           disabled={busy || !sheet.undo}
           title={sheet.undo ? t.undoHint : t.undoNothing}
+        
+          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M4 9h11a5 5 0 0 1 0 10H9" /> <path d="M7.5 5.5 4 9l3.5 3.5" /> </svg>}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M4 9h11a5 5 0 0 1 0 10H9" />
-            <path d="M7.5 5.5 4 9l3.5 3.5" />
-          </svg>
           {t.undo}
         </Tool>
 
         <span className="flex-1" />
 
-        <Tool tone="ghost" onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))} title="−">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6" />
-          </svg>
-        </Tool>
+        <Tool tone="ghost" onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))} title="−"
+          icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6" /> </svg>}
+        />
         <span className="tnum w-10 text-center text-[12px] text-ink3">
           {Math.round(zoom * 100)}%
         </span>
-        <Tool tone="ghost" onClick={() => setZoom((z) => Math.min(3, z + 0.2))} title="+">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6" />
-          </svg>
-        </Tool>
-        <Tool tone="ghost" onClick={() => setZoom(1)} title={t.fitFrame}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />
-          </svg>
-        </Tool>
+        <Tool tone="ghost" onClick={() => setZoom((z) => Math.min(3, z + 0.2))} title="+"
+          icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6" /> </svg>}
+        />
+        <Tool tone="ghost" onClick={() => setZoom(1)} title={t.fitFrame}
+          icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" /> </svg>}
+        />
 
         <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
           {scanning ? t.scanning : t.scanThisPage}
         </Tool>
-        <Tool onClick={onDelete} disabled={busy} title={t.deleteSheet}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
-          </svg>
-        </Tool>
+        <Tool onClick={onDelete} disabled={busy} title={t.deleteSheet}
+          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5" /> </svg>}
+        />
       </div>
 
       {/* ── Vùng ảnh: 70% chiều rộng khung ──────────────────────
@@ -483,7 +532,9 @@ export default function SheetViewer({
           ref={imgBox}
           className="relative select-none"
           style={{
-            width: `${BASE_WIDTH * 100}%`,
+            // Cỡ tính sẵn để ảnh luôn lọt khung; chưa đo xong thì tạm 70% bề ngang
+            width: fit ? `${fit.w}px` : `${BASE_WIDTH * 100}%`,
+            height: fit ? `${fit.h}px` : undefined,
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
             transformOrigin: "center center",
           }}
@@ -513,7 +564,7 @@ export default function SheetViewer({
             crossOrigin="use-credentials"
             alt={sheet.name}
             draggable={false}
-            className="block w-full rounded-lg border border-rule bg-white shadow-[var(--shadow)]"
+            className="block h-full w-full rounded-lg border border-rule bg-white shadow-[var(--shadow)]"
             style={{
               transform: fine ? `rotate(${fine}deg)` : undefined,
               filter:
@@ -687,7 +738,7 @@ export default function SheetViewer({
       )}
 
       {/* ── Chân khung: thanh trượt chỉnh tinh ────────────────── */}
-      <div className="flex flex-col gap-1.5 border-t border-rule bg-card px-3 py-2">
+      <div className="@container flex flex-col gap-1.5 border-t border-rule bg-card px-3 py-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <Slider
             label={t.fineTilt}
