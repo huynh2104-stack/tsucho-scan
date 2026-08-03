@@ -8,6 +8,7 @@ Toàn bộ xử lý đi qua `core.scan()` — không có logic đọc sổ nào 
 
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from typing import Annotated
@@ -25,11 +26,24 @@ app = FastAPI(title="tsucho-scan API", version="0.3.0")
 
 auth.init_db()
 
-# Next.js chạy ở cổng 3000 lúc phát triển. Khi lên thật phải thay bằng tên miền
-# thật — để "*" là cho phép mọi trang web gọi API kèm cookie của người dùng.
+# Trang web nào được phép gọi API này. Mặc định là Next.js chạy máy mình lúc
+# phát triển; khi triển khai thì đặt biến môi trường:
+#     TSUCHO_ORIGINS=https://tsucho.vercel.app
+# Nhiều tên miền thì ngăn bằng dấu phẩy.
+#
+# ⚠ TUYỆT ĐỐI không để "*": API này nhận cookie phiên, mở cho mọi trang web
+# nghĩa là bất kỳ site nào cũng đọc được sổ ngân hàng của người đang đăng nhập.
+_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "TSUCHO_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if o.strip() and o.strip() != "*"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
