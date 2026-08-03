@@ -20,6 +20,9 @@ PUBLIC = {
     "/docs/oauth2-redirect",
     "/openapi.json",
     "/redoc",
+    # Trang web tĩnh: phải với tới được /login thì mới đăng nhập được.
+    # Chỉ có ở bản đã build (`npm run build` sinh ra web/out).
+    "/{path:path}",
 }
 
 

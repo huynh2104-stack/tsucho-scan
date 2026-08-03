@@ -3,8 +3,19 @@
  * là ống dẫn. KHÔNG bao giờ đặt GEMINI_API_KEY ở đây: key chỉ nằm ở backend.
  */
 
-export const API =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
+/** Địa chỉ API.
+ *
+ * Để TRỐNG khi triển khai thật: lúc đó FastAPI phục vụ luôn trang web nên web
+ * và API cùng một gốc, đường dẫn tương đối (`/api/...`) là đủ — không CORS,
+ * cookie phiên là first-party.
+ *
+ * Lúc phát triển thì Next chạy cổng 3000 còn API cổng 8000, nên mặc định trỏ
+ * sang 8000. Muốn ép khác thì đặt `NEXT_PUBLIC_API_URL`.
+ */
+export const API = (
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === "production" ? "" : "http://localhost:8000")
+).replace(/\/$/, "");
 
 /** Một MẶT SỔ — ảnh đơn hoặc một trang tách ra từ PDF. */
 export type Sheet = {

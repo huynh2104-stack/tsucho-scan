@@ -17,6 +17,7 @@ from urllib.parse import quote
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from export import export_accounts
 
@@ -683,3 +684,46 @@ def export(ws_id: str, user: CurrentUser, body: dict = Body(...)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": _disposition(f"{book}.xlsx")},
     )
+
+
+# ── Phục vụ luôn trang web (khi đã build sẵn) ────────────────────────
+#
+# Đăng ký CUỐI CÙNG để mọi route /api/... ở trên được ưu tiên khớp trước.
+#
+# Có thư mục `web/out` (do `npm run build` sinh ra) thì chính FastAPI phục vụ
+# trang web. Nhờ vậy khi triển khai chỉ có MỘT dịch vụ và MỘT tên miền:
+#   • không cần cấu hình CORS (web và API cùng gốc),
+#   • cookie phiên là first-party nên SameSite=Lax chạy được, khỏi cần
+#     SameSite=None + HTTPS chéo tên miền,
+#   • người dùng chỉ nhận đúng một đường link.
+# Lúc phát triển thì thư mục này không có, Next chạy riêng ở cổng 3000.
+
+WEB_DIR = Path(__file__).resolve().parents[1] / "web" / "out"
+
+if WEB_DIR.is_dir():
+    app.mount(
+        "/_next",
+        StaticFiles(directory=WEB_DIR / "_next"),
+        name="next-assets",
+    )
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def web_page(path: str):
+        """Trả file tĩnh, không có thì trả trang chủ (kiểu ứng dụng một trang).
+
+        KHÔNG cần đăng nhập — phải với tới được trang /login thì mới đăng nhập
+        được. Dữ liệu sổ vẫn nằm sau /api/... và vẫn đòi đăng nhập như cũ.
+        """
+        # /api/... gõ sai thì trả 404 cho ra 404, đừng trả trang web làm lập
+        # trình viên tưởng đường dẫn đúng.
+        if path.startswith("api/"):
+            raise HTTPException(404, "Không có API này")
+
+        # Chặn đi ngược thư mục: '../../etc/passwd' phải không ra khỏi web/out
+        target = (WEB_DIR / path).resolve()
+        if WEB_DIR in target.parents or target == WEB_DIR:
+            if target.is_file():
+                return FileResponse(target)
+            if (target / "index.html").is_file():
+                return FileResponse(target / "index.html")
+        return FileResponse(WEB_DIR / "index.html")

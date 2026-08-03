@@ -1,0 +1,32 @@
+# Không đưa vào ảnh Docker — vừa nặng vừa lộ dữ liệu thật
+.git
+.env
+.env.local
+web/.env.local
+
+# Dữ liệu người dùng và cache (ảnh sổ, Excel, kết quả API)
+.data/
+.cache/
+data/
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep
+Claude Cowork Outputs/
+skills/
+thùng-rác/
+mau-*.xlsx
+
+# Sẽ được cài/dựng lại bên trong Docker
+web/node_modules
+web/.next
+web/out
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+tests/
+docs/
+README.md
