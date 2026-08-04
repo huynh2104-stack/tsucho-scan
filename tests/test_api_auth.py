@@ -5,6 +5,8 @@ nó tự quét MỌI route trong app, nên thêm route mới mà quên khoá là
 ngay — không phải nhớ bằng đầu.
 """
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -123,6 +125,104 @@ def test_khong_dang_ky_trung_email(client):
     register(client, "an@vd.com")
     r = client.post("/api/auth/register", json={"email": "AN@vd.com", "password": "matkhau123"})
     assert r.status_code == 400
+
+
+# ── Chống dò mật khẩu ────────────────────────────────────────────────
+
+def sai_mat_khau(client, email="an@vd.com", lan=1):
+    for _ in range(lan):
+        r = client.post("/api/auth/login", json={"email": email, "password": "sai-be-bet"})
+    return r
+
+
+def test_sai_qua_nguong_thi_bi_khoa(client):
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+
+    assert sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL - 1).status_code == 401
+    assert sai_mat_khau(client).status_code == 401, "lần chạm ngưỡng vẫn là 401"
+
+    # Đã khoá: lần sau bị chặn NGAY, kể cả mật khẩu ĐÚNG — có thế mới chặn được
+    # dò, vì nếu vẫn kiểm tra thì kẻ dò vẫn biết lần nào đoán trúng.
+    r = client.post("/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"})
+    assert r.status_code == 429
+    assert r.json()["detail"]["kind"] == "locked"
+    assert r.json()["detail"]["seconds"] > 0
+
+
+def test_dang_nhap_dung_xoa_bo_dem(client):
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+
+    sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL - 1)
+    assert client.post(
+        "/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}
+    ).status_code == 200
+    client.post("/api/auth/logout")
+
+    # Bộ đếm đã về 0 → lại được sai đủ ngưỡng lần nữa mà chưa bị khoá
+    assert sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL - 1).status_code == 401
+
+
+def test_khoa_het_han_thi_vao_lai_duoc(client):
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+    sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL)
+
+    # Dời hạn khoá về quá khứ thay vì chờ thật 15 phút
+    with auth._db() as conn:
+        conn.execute("UPDATE login_fails SET locked_until = ?", (time.time() - 1,))
+
+    assert client.post(
+        "/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}
+    ).status_code == 200
+
+
+def test_email_khong_ton_tai_cung_bi_khoa(client):
+    """Nếu chỉ khoá email CÓ THẬT thì chính cái khoá lại tố cáo tài khoản nào tồn tại."""
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+
+    sai_mat_khau(client, email="chua@co.com", lan=auth.MAX_FAILS_EMAIL)
+    r = client.post("/api/auth/login", json={"email": "chua@co.com", "password": "x"})
+    assert r.status_code == 429
+
+
+def test_khoa_theo_email_khong_lam_ket_nguoi_khac(client):
+    """Người dùng khác trên cùng máy vẫn vào được, miễn chưa chạm ngưỡng IP."""
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+    register(client, "binh@vd.com", "matkhau456")
+    client.post("/api/auth/logout")
+
+    sai_mat_khau(client, email="an@vd.com", lan=auth.MAX_FAILS_EMAIL)
+    assert client.post(
+        "/api/auth/login", json={"email": "binh@vd.com", "password": "matkhau456"}
+    ).status_code == 200
+
+
+def test_khoa_theo_ip_khi_rai_qua_nhieu_email(client):
+    """Đổi email mỗi lần đoán thì khoá theo email không bắt được — cần khoá IP."""
+    for i in range(auth.MAX_FAILS_IP):
+        client.post("/api/auth/login", json={"email": f"ai{i}@vd.com", "password": "x"})
+
+    r = client.post("/api/auth/login", json={"email": "moi-tinh@vd.com", "password": "x"})
+    assert r.status_code == 429
+
+
+def test_khong_tin_x_forwarded_for_khi_chua_bat(client, monkeypatch):
+    """Header giả được. Chưa bật TSUCHO_TRUST_PROXY thì đổi header không thoát khoá."""
+    monkeypatch.delenv("TSUCHO_TRUST_PROXY", raising=False)
+    register(client, "an@vd.com", "matkhau123")
+    client.post("/api/auth/logout")
+    sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL)
+
+    r = client.post(
+        "/api/auth/login",
+        json={"email": "an@vd.com", "password": "matkhau123"},
+        headers={"X-Forwarded-For": "9.9.9.9"},
+    )
+    assert r.status_code == 429
 
 
 # ── Mật khẩu ─────────────────────────────────────────────────────────

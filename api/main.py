@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -98,12 +98,28 @@ def register(response: Response, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/auth/login")
-def login(response: Response, body: dict = Body(...)) -> dict:
-    found = auth.get_by_email(str(body.get("email", "")))
+def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
+    email = str(body.get("email", ""))
+    keys = auth.attempt_keys(email, auth.client_ip(request))
+
+    # Đang bị khoá thì KHÔNG kiểm tra mật khẩu. Kiểm tra rồi mới từ chối là vô
+    # nghĩa: kẻ dò cứ gọi tiếp và vẫn biết được lần đoán nào đúng.
+    wait = auth.lock_remaining(keys)
+    if wait:
+        # detail là dict để giao diện tự dịch sang tiếng người dùng đang xem —
+        # cùng lối với mã lỗi lúc quét (api/jobs.py).
+        raise HTTPException(429, {"kind": "locked", "seconds": wait})
+
+    found = auth.get_by_email(email)
     # Sai email và sai mật khẩu phải trả CÙNG một câu — nếu khác nhau thì người
     # ngoài dò được email nào đã có tài khoản.
+    if not found:
+        auth.burn_time()          # trả lời chậm y như khi email có thật
     if not found or not auth.verify_password(str(body.get("password", "")), found[1]):
+        auth.record_failure(keys)
         raise HTTPException(401, "Email hoặc mật khẩu không đúng")
+
+    auth.clear_failures(keys)
     user = found[0]
     auth.set_cookie(response, auth.start_session(user))
     return user.to_json()

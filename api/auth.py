@@ -11,7 +11,10 @@ Cách làm — chọn thứ ĐƠN GIẢN NHẤT mà vẫn đúng, không thêm t
   ngay. Trong CSDL chỉ lưu **băm SHA-256 của token**, lộ file .db cũng không
   đăng nhập được.
 
-⚠ Chưa có: giới hạn số lần đăng nhập sai, quên mật khẩu, xác minh email.
+- Chống dò mật khẩu: đếm số lần sai trong bảng `login_fails`, khoá tạm 15 phút.
+  Xem phần "Chống dò mật khẩu" bên dưới.
+
+⚠ Chưa có: quên mật khẩu, xác minh email.
    Cần làm trước khi mở cho người ngoài (xem WEB_PLAN §5b).
 """
 
@@ -40,6 +43,16 @@ MIN_PASSWORD = 8
 _SCRYPT = dict(n=2**14, r=8, p=1)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# ── Ngưỡng chống dò mật khẩu ─────────────────────────────────────────
+# Đếm theo HAI khoá cùng lúc:
+#   e:<email> — chặn dò một tài khoản cụ thể (ngưỡng thấp)
+#   i:<ip>    — chặn rải mật khẩu qua nhiều email từ một máy (ngưỡng cao hơn,
+#               vì cả văn phòng có thể dùng chung một IP)
+MAX_FAILS_EMAIL = 5
+MAX_FAILS_IP = 20
+LOCK_SECONDS = 15 * 60
+WINDOW_SECONDS = 15 * 60
 
 
 @dataclass
@@ -70,6 +83,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS login_fails (
+    key          TEXT PRIMARY KEY,
+    fails        INTEGER NOT NULL,
+    first_at     REAL NOT NULL,
+    locked_until REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -127,6 +146,116 @@ def verify_password(password: str, stored: str) -> bool:
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(dk.hex(), hash_hex)
+
+
+# ── Chống dò mật khẩu ────────────────────────────────────────────────
+#
+# scrypt tuy chậm (~50-100ms/lần) nhưng KHÔNG đủ: cứ để mặc thì một máy vẫn thử
+# được hơn một triệu mật khẩu mỗi ngày. Đếm số lần sai rồi khoá tạm là lớp chặn
+# thật sự.
+#
+# Đánh đổi đã cân nhắc: người ngoài biết email của giám đốc có thể cố tình gõ
+# sai 5 lần để KHOÁ ông ấy 15 phút. Chấp nhận được vì (a) khoá tự hết, không cần
+# ai mở, (b) mất 15 phút vẫn nhẹ hơn mất cả sổ ngân hàng. Muốn chặt hơn thì phải
+# thêm CAPTCHA hoặc mã qua email — cả hai đều nặng hơn nhiều so với lợi ích ở
+# quy mô này.
+
+def attempt_keys(email: str, ip: str) -> list[str]:
+    return [f"e:{normalize_email(email)}", f"i:{ip}"]
+
+
+def _limit_for(key: str) -> int:
+    return MAX_FAILS_EMAIL if key.startswith("e:") else MAX_FAILS_IP
+
+
+def _cleanup(conn, now: float) -> None:
+    """Bỏ hàng đã hết hạn khoá, và hàng đếm dở đã quá cửa sổ.
+
+    Hết 15 phút khoá là **xoá sạch bộ đếm**, không giữ lại. Nếu giữ thì người
+    dùng thật gõ sai đúng một lần nữa là bị khoá tiếp ngay — quên mật khẩu
+    thành ra bị phạt vĩnh viễn.
+    """
+    conn.execute(
+        "DELETE FROM login_fails WHERE (locked_until > 0 AND locked_until <= ?)"
+        " OR (locked_until = 0 AND first_at < ?)",
+        (now, now - WINDOW_SECONDS),
+    )
+
+
+def lock_remaining(keys: list[str]) -> int:
+    """Còn bị khoá bao nhiêu GIÂY nữa (0 = không khoá)."""
+    now = time.time()
+    with _db() as conn:
+        _cleanup(conn, now)
+        holes = ",".join("?" * len(keys))
+        row = conn.execute(
+            f"SELECT MAX(locked_until) AS u FROM login_fails WHERE key IN ({holes})",
+            keys,
+        ).fetchone()
+    until = row["u"] if row and row["u"] else 0
+    return max(0, int(until - now) + 1) if until > now else 0
+
+
+def record_failure(keys: list[str]) -> None:
+    now = time.time()
+    with _db() as conn:
+        _cleanup(conn, now)
+        for key in keys:
+            old = conn.execute(
+                "SELECT fails, first_at FROM login_fails WHERE key = ?", (key,)
+            ).fetchone()
+            fails = (old["fails"] + 1) if old else 1
+            first_at = old["first_at"] if old else now
+            locked = now + LOCK_SECONDS if fails >= _limit_for(key) else 0
+            conn.execute(
+                "INSERT INTO login_fails (key, fails, first_at, locked_until)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET fails = excluded.fails,"
+                " locked_until = excluded.locked_until",
+                (key, fails, first_at, locked),
+            )
+
+
+def clear_failures(keys: list[str]) -> None:
+    """Đăng nhập đúng → xoá bộ đếm, không để lần sai hôm qua cộng dồn."""
+    with _db() as conn:
+        holes = ",".join("?" * len(keys))
+        conn.execute(f"DELETE FROM login_fails WHERE key IN ({holes})", keys)
+
+
+def client_ip(request) -> str:
+    """IP người gọi.
+
+    Sau proxy (Render, Cloudflare) thì `request.client.host` là IP của proxy —
+    mọi người dùng chung một khoá, một người gõ sai là cả nhà bị khoá. Lúc đó
+    phải đọc `X-Forwarded-For`.
+
+    Nhưng header ấy do trình duyệt gửi nên **giả được**: chạy trực tiếp không
+    qua proxy mà vẫn tin nó thì kẻ dò chỉ cần đổi header mỗi lần gọi là thoát
+    khoá theo IP. Vì vậy chỉ tin khi `TSUCHO_TRUST_PROXY=1` — đặt biến này khi
+    và chỉ khi app thật sự nằm sau proxy.
+    """
+    if os.getenv("TSUCHO_TRUST_PROXY", "").lower() in ("1", "true", "yes"):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded.strip():
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+_DUMMY_HASH: str | None = None
+
+
+def burn_time() -> None:
+    """Băm một mật khẩu giả để lần gọi này tốn thời gian y như lần thật.
+
+    Không có nó thì email chưa từng đăng ký trả lời trong ~1ms còn email có
+    thật mất ~80ms — đo thời gian là biết địa chỉ nào đã có tài khoản, đúng thứ
+    mà câu báo lỗi giống nhau đang cố giấu.
+    """
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password(secrets.token_hex(16))
+    verify_password("khong-bao-gio-dung", _DUMMY_HASH)
 
 
 # ── Người dùng ───────────────────────────────────────────────────────

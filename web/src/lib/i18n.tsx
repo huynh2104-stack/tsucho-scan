@@ -205,6 +205,9 @@ const DICT = {
     authClaimed: (n: number) =>
       `Đã chuyển ${n} không gian làm việc có sẵn về tài khoản này.`,
     authAccount: "Tài khoản",
+    authBadLogin: "Email hoặc mật khẩu không đúng.",
+    authLocked: (phut: number) =>
+      `Sai quá nhiều lần. Hãy thử lại sau ${phut} phút — đây là cách chặn người ngoài dò mật khẩu.`,
 
     saveSaving: "Đang lưu...",
     saveSaved: "Đã lưu",
@@ -242,6 +245,38 @@ const DICT = {
 
     caveat:
       "Chuỗi số dư chỉ chứng minh các con số khớp nhau. Nó KHÔNG phát hiện được dòng bị bỏ sót hay tên đối tác đọc sai — hai lỗi đó vẫn phải soát bằng mắt.",
+
+    helpBtn: "Hướng dẫn sử dụng",
+
+    tour: {
+      step: (i: number, n: number) => `Bước ${i} / ${n}`,
+      skip: "Bỏ qua",
+      back: "Quay lại",
+      next: "Tiếp tục",
+      done: "Bắt đầu dùng",
+
+      s1Title: "Bắt đầu từ đây",
+      s1Body:
+        "Kéo ảnh hoặc file PDF sổ ngân hàng vào đây, hoặc bấm để chọn file. PDF nhiều trang được tách sẵn thành từng mặt sổ riêng.",
+      s2Title: "Danh sách mặt sổ",
+      s2Body:
+        "Mỗi thẻ là một mặt sổ. Bấm vào thẻ để xem ảnh ở khung giữa; bấm ô vuông bên trái để chọn mặt sổ đem đi quét.",
+      s3Title: "Quét",
+      s3Body:
+        "Bấm nút này để máy đọc những mặt sổ đang được chọn. Mỗi mặt sổ là một lượt gọi API, nên chỉ chọn những mặt thật sự cần.",
+      s4Title: "Chỉnh ảnh trước khi quét",
+      s4Body:
+        "Xoay, cắt viền, nắn ảnh chụp nghiêng. Ảnh càng thẳng và rõ thì máy đọc càng đúng — chỉnh ở đây tốn ít công hơn sửa tay cả bảng.",
+      s5Title: "Soát kết quả",
+      s5Body:
+        "Ô màu vàng là chỗ máy không chắc — hãy so với ảnh bên trái và sửa thẳng trong ô. Ctrl+Z để hoàn tác.",
+      s6Title: "Xuất file",
+      s6Body:
+        "Tải kết quả về dạng Excel hoặc CSV, đúng như những gì đang hiện trên màn hình.",
+      s7Title: "Xem lại hướng dẫn",
+      s7Body:
+        "Bất cứ lúc nào muốn xem lại hướng dẫn này từ đầu, hãy bấm nút dấu hỏi ở đây.",
+    },
 
     colGloss: {
       date: "Ngày",
@@ -428,6 +463,9 @@ const DICT = {
       "Passbook images and results are visible only to the account that uploaded them. Another person signing in on this machine cannot see your data.",
     authClaimed: (n: number) => `Moved ${n} existing workspace(s) to this account.`,
     authAccount: "Account",
+    authBadLogin: "Email or password is incorrect.",
+    authLocked: (min: number) =>
+      `Too many failed attempts. Try again in ${min} minute(s) — this is what stops outsiders guessing your password.`,
 
     saveSaving: "Saving...",
     saveSaved: "Saved",
@@ -465,6 +503,38 @@ const DICT = {
 
     caveat:
       "The balance chain only proves the numbers agree with each other. It CANNOT detect a skipped row or a misread name — those still need your eyes.",
+
+    helpBtn: "How to use",
+
+    tour: {
+      step: (i: number, n: number) => `Step ${i} / ${n}`,
+      skip: "Skip",
+      back: "Back",
+      next: "Next",
+      done: "Get started",
+
+      s1Title: "Start here",
+      s1Body:
+        "Drop passbook images or a PDF here, or click to pick files. A multi-page PDF is split into one sheet per page automatically.",
+      s2Title: "Your sheets",
+      s2Body:
+        "Each card is one passbook page. Click a card to view it in the middle pane; tick the box on the left to include it in a scan.",
+      s3Title: "Scan",
+      s3Body:
+        "Reads the ticked sheets. Each sheet is one API call, so tick only what you actually need.",
+      s4Title: "Fix the image first",
+      s4Body:
+        "Rotate, crop, and straighten photos taken at an angle. A straight, sharp image is read far more accurately — a minute here saves fixing rows by hand.",
+      s5Title: "Check the result",
+      s5Body:
+        "Yellow cells are where the machine is unsure — compare with the image and type the correction straight into the cell. Ctrl+Z undoes.",
+      s6Title: "Export",
+      s6Body:
+        "Download the result as Excel or CSV, exactly as shown on screen.",
+      s7Title: "See this again",
+      s7Body:
+        "Whenever you want this walkthrough again from the start, click the question mark button here.",
+    },
 
     colGloss: {
       date: "Date",
@@ -650,6 +720,9 @@ const DICT = {
       "通帳の画像と読み取り結果は、アップロードしたアカウントにのみ表示されます。同じ端末から別の方がログインしても閲覧できません。",
     authClaimed: (n: number) => `既存のワークスペース${n}件をこのアカウントに移しました。`,
     authAccount: "アカウント",
+    authBadLogin: "メールアドレスまたはパスワードが正しくありません。",
+    authLocked: (min: number) =>
+      `失敗が続いたため、一時的にロックしました。${min}分後にもう一度お試しください（パスワードの総当たりを防ぐためです）。`,
 
     saveSaving: "保存中...",
     saveSaved: "保存しました",
@@ -687,6 +760,38 @@ const DICT = {
 
     caveat:
       "残高チェーンは数字の整合性のみを示します。行の欠落や摘要の誤読は検出できません — その二つは目視確認が必要です。",
+
+    helpBtn: "使い方ガイド",
+
+    tour: {
+      step: (i: number, n: number) => `ステップ ${i} / ${n}`,
+      skip: "スキップ",
+      back: "戻る",
+      next: "次へ",
+      done: "はじめる",
+
+      s1Title: "ここから始めます",
+      s1Body:
+        "通帳の画像やPDFをここにドラッグ＆ドロップするか、クリックしてファイルを選んでください。複数ページのPDFは1ページずつ自動で分かれます。",
+      s2Title: "通帳の一覧",
+      s2Body:
+        "カード1枚が通帳の1面です。カードを押すと中央に画像が表示されます。左のチェックボックスを押すと、読み取る対象に選ばれます。",
+      s3Title: "スキャン",
+      s3Body:
+        "チェックした面を読み取ります。1面につきAPIを1回使いますので、必要な面だけ選んでください。",
+      s4Title: "先に画像を整えます",
+      s4Body:
+        "回転・余白の切り取り・斜め撮影の補正ができます。まっすぐで鮮明な画像ほど正確に読み取れます。ここで整えるほうが、後で表を手直しするより楽です。",
+      s5Title: "結果の確認",
+      s5Body:
+        "黄色のセルは機械が自信を持てなかった箇所です。左の画像と見比べて、セルに直接入力して修正できます。Ctrl+Z で元に戻せます。",
+      s6Title: "ファイル出力",
+      s6Body:
+        "画面に表示されているとおりの内容を、ExcelまたはCSVで保存できます。",
+      s7Title: "もう一度見たいとき",
+      s7Body:
+        "この案内をもう一度最初から見たいときは、ここにあるハテナ（？）ボタンを押してください。",
+    },
 
     /* 日本語では列名がそのまま読めるので注釈なし */
     colGloss: {

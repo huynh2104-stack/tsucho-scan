@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { LANGS, LANG_LABEL, useT, type Lang } from "@/lib/i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
+import { useTour } from "@/lib/tour";
 
 function SunIcon() {
   return (
@@ -33,6 +34,7 @@ export default function TopBar() {
   const { lang, t, setLang } = useT();
   const { mode, setMode } = useTheme();
   const { user, logout } = useAuth();
+  const { start: startTour } = useTour();
 
   const themes: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
     { id: "light", label: t.themeLight, icon: <SunIcon /> },
@@ -111,6 +113,17 @@ export default function TopBar() {
       {/* Tài khoản — chỉ hiện khi đã đăng nhập, để trang /login không bị rối */}
       {user && (
         <div className="flex items-center gap-2.5">
+          {/* Xem lại hướng dẫn. Để cạnh tên tài khoản vì đây là chỗ mắt tìm
+              đến khi bí, và bước cuối của hướng dẫn chỉ thẳng vào nút này. */}
+          <button
+            data-tour="help"
+            onClick={startTour}
+            title={t.helpBtn}
+            aria-label={t.helpBtn}
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[13px] font-bold text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
+          >
+            ?
+          </button>
           <span className="max-w-[190px] truncate text-[13px] text-ink2" title={user.email}>
             {user.email}
           </span>

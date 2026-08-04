@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { LangProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_KEY } from "@/lib/theme";
+import { TourProvider } from "@/lib/tour";
 import TopBar from "@/components/TopBar";
 
 export const metadata: Metadata = {
@@ -42,8 +43,12 @@ export default function RootLayout({
         <ThemeProvider>
           <LangProvider>
             <AuthProvider>
-              <TopBar />
-              <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+              {/* TourProvider nằm TRONG AuthProvider: "đã xem hướng dẫn chưa"
+                  ghi theo từng người dùng nên phải biết ai đang đăng nhập. */}
+              <TourProvider>
+                <TopBar />
+                <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+              </TourProvider>
             </AuthProvider>
           </LangProvider>
         </ThemeProvider>

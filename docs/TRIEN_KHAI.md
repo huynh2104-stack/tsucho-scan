@@ -87,13 +87,24 @@ và giao diện dễ hiểu nhất cho người mới.
    > Đừng chọn Free: bản Free **không có ổ đĩa lưu trữ**, và tự ngủ sau 15 phút
    > không ai dùng — giám đốc mở link sẽ phải chờ ~1 phút màn hình trắng.
 
-5. Kéo xuống **Environment Variables**, bấm **Add Environment Variable** 3 lần:
+5. Kéo xuống **Environment Variables**, bấm **Add Environment Variable** 5 lần:
 
-   | Key | Value |
-   |---|---|
-   | `GEMINI_API_KEY` | dán API key của anh |
-   | `EXTRACT_MODEL` | `gemini-3.1-flash-lite` |
-   | `PYTHONUNBUFFERED` | `1` |
+   | Key | Value | Để làm gì |
+   |---|---|---|
+   | `GEMINI_API_KEY` | dán API key của anh | |
+   | `EXTRACT_MODEL` | `gemini-3.1-flash-lite` | |
+   | `PYTHONUNBUFFERED` | `1` | |
+   | `TSUCHO_COOKIE_SECURE` | `1` | Cookie phiên chỉ đi qua HTTPS |
+   | `TSUCHO_TRUST_PROXY` | `1` | **Bắt buộc trên Render** — xem bên dưới |
+
+   > ⚠ `TSUCHO_TRUST_PROXY` liên quan đến chức năng khoá khi gõ sai mật khẩu
+   > nhiều lần. App đếm số lần sai theo địa chỉ IP; nhưng trên Render mọi lượt
+   > truy cập đều đi qua máy trung gian, nên nếu không bật biến này thì **cả
+   > thế giới bị đếm chung một IP** — một người gõ sai nhiều là mọi người khác
+   > bị khoá theo. Bật biến này thì app đọc IP thật từ header của Render.
+   >
+   > Ngược lại, chạy ở máy nhà **đừng bật** — lúc đó header ấy do trình duyệt
+   > gửi nên giả được, kẻ dò mật khẩu chỉ cần đổi header là thoát khoá.
 
 6. Bấm **Create Web Service**. Render bắt đầu build (~5–10 phút lần đầu).
 
@@ -171,8 +182,8 @@ thì đó là tính năng; giấu đi rồi bị phát hiện thì đó là lỗ
 
 | Việc | Vì sao |
 |---|---|
-| **Giới hạn số lần đăng nhập sai** | Hiện chưa có. Ai biết link đều có thể dò mật khẩu không giới hạn. Demo ngắn thì chấp nhận được, chạy lâu dài thì phải làm. |
-| **Quên mật khẩu** | Chưa có. Giám đốc quên là phải nhờ anh xoá tài khoản trong CSDL. |
+| **Chặn tự do đăng ký** | Hiện ai có link cũng tạo được tài khoản. Demo thì tiện, nhưng dùng thật nên chỉ cho phép email đã mời. |
+| **Quên mật khẩu** | Chưa có. Giám đốc quên là phải nhờ anh xoá tài khoản trong CSDL. Đây cũng là lý do khoá đăng nhập sai chỉ kéo dài 15 phút rồi tự mở. |
 | **Sao lưu định kỳ** | Ổ đĩa Render không tự backup. Dữ liệu tài chính nên có bản sao. |
 | **Nhật ký (ai quét file nào, lúc nào)** | Dữ liệu tài chính nên có vết. |
 | **Xoá dữ liệu tự động sau N ngày** | Ảnh sổ ngân hàng không nên nằm mãi trên máy chủ. |
@@ -187,6 +198,7 @@ thì đó là tính năng; giấu đi rồi bị phát hiện thì đó là lỗ
 | Mở link ra trang trắng | Đợi thêm — lần deploy đầu mất ~10 phút. |
 | Đăng nhập xong bị đá ra ngay | Cookie không lưu được. Kiểm tra link có **https** không (Render tự có sẵn). |
 | Quét báo lỗi hạn mức | Chưa bật trả phí ở Bước 0(a). |
+| Báo「sai quá nhiều lần」dù gõ đúng | Đã gõ sai 5 lần trong 15 phút. Đợi 15 phút là tự mở, không phải sửa gì. Nếu nhiều người cùng bị thì thiếu `TSUCHO_TRUST_PROXY=1` (Bước 2). |
 | Mất hết dữ liệu sau khi cập nhật | Ổ đĩa chưa gắn, hoặc Mount Path không phải `/app/.data`. |
 
 ---

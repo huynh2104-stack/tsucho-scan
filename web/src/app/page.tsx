@@ -46,7 +46,9 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
+import { useTour } from "@/lib/tour";
 import DropZone from "@/components/DropZone";
+import Tour from "@/components/Tour";
 import SheetRail, { Tick, type ScanState } from "@/components/SheetRail";
 import SheetViewer from "@/components/SheetViewer";
 import ReviewPane, {
@@ -106,6 +108,7 @@ export default function Workbench() {
     return e.text;
   }, [t]);
   const { user, ready } = useAuth();
+  const { startIfFirstTime } = useTour();
   const router = useRouter();
 
   const [ws, setWs] = useState<Workspace | null>(null);
@@ -190,6 +193,13 @@ export default function Workbench() {
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, user, router]);
+
+  // Lần đầu vào được bàn làm việc thì tự mở hướng dẫn. Đặt ở ĐÂY chứ không ở
+  // TourProvider: trang /login cũng nằm trong provider, mở hướng dẫn ở đó thì
+  // không có nút nào để chỉ vào.
+  useEffect(() => {
+    if (ready && user) startIfFirstTime();
+  }, [ready, user, startIfFirstTime]);
 
   // Mở lại không gian làm việc cũ — F5 không mất ảnh đã tải lên
   useEffect(() => {
@@ -880,7 +890,9 @@ export default function Workbench() {
             pane === "list" ? "flex" : "hidden"
           }`}
         >
-          <DropZone busy={busy} onFiles={(f) => void upload(f)} />
+          <div data-tour="drop">
+            <DropZone busy={busy} onFiles={(f) => void upload(f)} />
+          </div>
 
           {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
               mà không tốn lượt gọi và không cần đưa sổ thật lên. */}
@@ -957,6 +969,7 @@ export default function Workbench() {
               </button>
             )}
             <button
+              data-tour="scan"
               onClick={() => void runScan(tickedIds())}
               disabled={scanning || ticked.size === 0}
               className="flex items-center gap-1 rounded-lg border border-accent bg-accent px-2.5 py-1 text-[12px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
@@ -976,7 +989,7 @@ export default function Workbench() {
             </button>
           </div>
 
-          <div className="thin-scroll min-h-0 flex-1 overflow-auto">
+          <div data-tour="rail" className="thin-scroll min-h-0 flex-1 overflow-auto">
             <SheetRail
               wsId={ws?.id ?? ""}
               sheets={sheets}
@@ -1018,6 +1031,7 @@ export default function Workbench() {
 
         {/* ── Khung giữa: chỉnh ảnh ──────────────────────────── */}
         <section
+          data-tour="viewer"
           className={`min-h-0 border-b border-rule bg-card lg:block lg:border-b-0 lg:border-r ${
             pane === "image" ? "block" : "hidden"
           }`}
@@ -1081,6 +1095,7 @@ export default function Workbench() {
 
         {/* ── Cột phải: kết quả ──────────────────────────────── */}
         <section
+          data-tour="review"
           className={`min-h-0 flex-col bg-page lg:flex ${
             pane === "result" ? "flex" : "hidden"
           }`}
@@ -1179,6 +1194,7 @@ export default function Workbench() {
               className="min-w-0 flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[13px] placeholder:text-ink3"
             />
             <button
+              data-tour="export"
               onClick={() => setShowExport(true)}
               disabled={Object.keys(store).length === 0}
               className="flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
@@ -1243,6 +1259,11 @@ export default function Workbench() {
           setConfirm(null);
         }}
       />
+
+      {/* Hướng dẫn dựng ở đây chứ không ở layout: trên màn hình hẹp nó phải
+          chuyển khung (mặt sổ / chỉnh ảnh / kết quả) mới chỉ được vào đúng chỗ,
+          mà `pane` là state của trang này. */}
+      <Tour onPane={setPane} />
 
       <ExportDialog
         open={showExport}

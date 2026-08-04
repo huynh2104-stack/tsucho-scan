@@ -29,7 +29,19 @@ MAX_PDF_MB = 32
 
 
 class ExtractError(Exception):
-    """Lỗi trích xuất — message đã thân thiện, in thẳng cho người dùng."""
+    """Lỗi trích xuất — message đã thân thiện, in thẳng cho người dùng.
+
+    Mang thêm `kind` (mã lỗi) để tầng web dịch sang tiếng của người đang xem;
+    `info` chứa các con số cần ghép vào câu đã dịch (cỡ file, giới hạn...).
+    """
+
+    def __init__(self, message: str, *, kind: str = "", label: str = "",
+                 reason: str = "", info: dict | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.label = label
+        self.reason = reason
+        self.info = info or {}
 
 
 class PageSkipped(ExtractError):
@@ -37,7 +49,12 @@ class PageSkipped(ExtractError):
 
     Khi chạy nhiều trang thì bỏ qua trang đó và đi tiếp, không làm hỏng cả lần
     chạy — PDF sổ ngân hàng gần như luôn có trang bìa và trang giải thích.
+
+    Mang theo `kind` và `label` để tầng trên (api/jobs.py) viết lại câu thông
+    báo bằng TÊN MẶT SỔ người dùng đang thấy. `reason` là lời model giải thích,
+    thường bằng tiếng Anh — **không ghép vào message**, chỉ giữ để ghi log.
     """
+
 
 
 def _emit(on_progress, stage: str, message: str, **extra) -> None:
@@ -141,7 +158,9 @@ def _prepare_units(path: Path, rotate: int = 0) -> list[tuple[str, str, bytes]]:
         if size_mb > limit:
             raise ExtractError(
                 f"'{label}' quá lớn ({size_mb:.1f}MB, giới hạn {limit}MB). "
-                "Hãy giảm kích thước ảnh hoặc chia nhỏ PDF."
+                "Hãy giảm kích thước ảnh hoặc chia nhỏ PDF.",
+                kind="too_large", label=label,
+                info={"size_mb": round(size_mb, 1), "limit_mb": limit},
             )
     return units
 
@@ -577,9 +596,13 @@ def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
     if "error" in result:
         reason = result.get("message", "")
         if result["error"] == "not_bankbook":
-            raise PageSkipped(f"'{label}' không phải sổ ngân hàng (通帳). {reason}")
+            raise PageSkipped(
+                f"'{label}' không phải sổ ngân hàng (通帳).",
+                kind="not_bankbook", label=label, reason=reason,
+            )
         raise PageSkipped(
-            f"'{label}' quá mờ hoặc không đọc được. Hãy chụp lại rõ nét hơn. {reason}"
+            f"'{label}' quá mờ hoặc không đọc được. Hãy chụp lại rõ nét hơn.",
+            kind="unreadable", label=label, reason=reason,
         )
 
     accounts = result.get("accounts", [])
@@ -591,7 +614,10 @@ def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
             for k in ("bank_name", "store_no", "account_no", "holder")
         )
         if not has_meta:
-            raise PageSkipped(f"Không tìm thấy giao dịch nào trong '{label}'.")
+            raise PageSkipped(
+                f"Không tìm thấy giao dịch nào trong '{label}'.",
+                kind="no_rows", label=label,
+            )
 
     result["usage"] = usage
     result["cached"] = False

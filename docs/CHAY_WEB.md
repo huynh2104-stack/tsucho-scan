@@ -51,6 +51,7 @@ Dừng: bấm `Ctrl + C` ở từng cửa sổ.
 | `CORS policy` trong console | Frontend đang chạy ở cổng khác 3000 → sửa `allow_origins` trong `api/main.py` |
 | `Chưa có GEMINI_API_KEY` | Thiếu `.env` ở thư mục gốc (không phải trong `web/`) |
 | Quét mãi không xong | Bậc miễn phí Gemini = 20 request/ngày. Xem log ở cửa sổ 1 |
+| Đăng nhập báo「sai quá nhiều lần」 | Gõ sai 5 lần trong 15 phút là bị khoá tạm. Đợi 15 phút, hoặc lúc đang phát triển thì xoá bảng: `DELETE FROM login_fails;` trong `.data/app.db` |
 | Đổi cổng backend | Sửa `web/.env.local` → `NEXT_PUBLIC_API_URL`, rồi khởi động lại `npm run dev` |
 
 ---
@@ -115,7 +116,15 @@ web/src/
   components/SheetRail   cột trái: mặt sổ, chọn nhiều
   components/SheetViewer khung giữa: xem + xoay/cắt
   components/ReviewPane  khung phải: bảng dạng sổ, bật tắt cột
+  components/Tour        hướng dẫn 7 bước, tô sáng đúng nút trên giao diện thật
+  lib/tour.tsx           nhớ "đã xem hướng dẫn chưa" theo từng người dùng
 ```
+
+**Hướng dẫn sử dụng**: tự mở lần đầu mỗi người dùng đăng nhập; sau đó bấm nút
+`?` ở thanh trên để xem lại từ đầu. Mốc tô sáng là thuộc tính `data-tour="..."`
+đặt thẳng trên phần tử — thêm bước mới thì gắn thêm một mốc rồi khai báo trong
+mảng `steps` của `Tour.tsx`. Sửa nội dung hướng dẫn thì **tăng `VERSION` trong
+`lib/tour.tsx`** để người đã xem bản cũ được xem lại bản mới.
 
 **Quy tắc:** không viết logic đọc sổ trong `api/` hay `web/`. Mọi thứ đi qua
 `core.scan()`.

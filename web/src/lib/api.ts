@@ -178,17 +178,39 @@ export type ScanEvent = {
 /** Chưa đăng nhập / phiên hết hạn. Trang gọi bắt lỗi này để đá về /login. */
 export class Unauthorized extends Error {}
 
+/** Lỗi có MÃ để giao diện tự dịch — server không biết đang xem tiếng nào.
+ *  `detail` của FastAPI có thể là chuỗi (câu tiếng Việt dự phòng) hoặc object
+ *  `{kind, ...}`; chỉ object mới có `code`. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly info?: Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+
 async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
+    let code: string | undefined;
+    let info: Record<string, unknown> | undefined;
     try {
       const body = await res.json();
-      if (body?.detail) detail = body.detail;
+      if (body?.detail && typeof body.detail === "object") {
+        info = body.detail as Record<string, unknown>;
+        code = typeof info.kind === "string" ? info.kind : undefined;
+        detail = code ?? detail;
+      } else if (body?.detail) {
+        detail = body.detail;
+      }
     } catch {
       /* backend trả về không phải JSON — giữ nguyên mã lỗi */
     }
     if (res.status === 401) throw new Unauthorized(detail);
-    throw new Error(detail);
+    throw new ApiError(detail, res.status, code, info);
   }
   return res.json() as Promise<T>;
 }

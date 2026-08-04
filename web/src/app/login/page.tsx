@@ -13,6 +13,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { ApiError, Unauthorized } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
 
@@ -25,7 +26,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // Giữ NGUYÊN lỗi chứ không giữ câu đã dịch: dịch lúc lưu thì người dùng đổi
+  // sang tiếng Nhật vẫn thấy câu tiếng Việt đứng nguyên đó.
+  const [err, setErr] = useState<unknown>(null);
 
   useEffect(() => {
     if (ready && user) router.replace("/");
@@ -40,9 +43,22 @@ export default function LoginPage() {
       else await login(email, password);
       router.replace("/");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(e);
       setBusy(false);
     }
+  }
+
+  /** Server gửi MÃ lỗi vì nó không biết người dùng đang xem tiếng nào; câu chữ
+   *  ghép ở đây, ngay lúc VẼ. Lỗi chưa có mã thì hiện nguyên văn. */
+  function errText(e: unknown): string {
+    if (e instanceof ApiError && e.code === "locked") {
+      const giay = Number(e.info?.seconds ?? 0);
+      return t.authLocked(Math.max(1, Math.ceil(giay / 60)));
+    }
+    // Ở TRANG NÀY 401 chỉ có một nghĩa: sai email hoặc sai mật khẩu (server cố
+    // ý không nói rõ cái nào, để người ngoài không dò ra email nào có thật).
+    if (e instanceof Unauthorized) return t.authBadLogin;
+    return e instanceof Error ? e.message : String(e);
   }
 
   return (
@@ -90,12 +106,12 @@ export default function LoginPage() {
           <p className="mt-1.5 text-[12px] text-ink3">{t.authPasswordHint}</p>
         )}
 
-        {err && (
+        {err !== null && (
           <p
             role="alert"
             className="mt-4 rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[13px] text-warnink"
           >
-            {err}
+            {errText(err)}
           </p>
         )}
 
