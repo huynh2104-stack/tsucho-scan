@@ -4,7 +4,10 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "web",
       "port": 3000
     },
@@ -20,6 +23,19 @@
         "8000"
       ],
       "port": 8000
+    },
+    {
+      "name": "homepage",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "3100"
+      ],
+      "cwd": "tsucho-scan-homepage",
+      "port": 3100
     }
   ]
 }

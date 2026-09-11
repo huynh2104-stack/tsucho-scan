@@ -23,14 +23,14 @@ def make_job(names: list[str]) -> jobs.Job:
 
 
 def test_dung_ten_mat_so_khong_dung_ten_file():
-    job = make_job(["通帳：見本 tr.2"])
+    job = make_job(["通帳：みなと工業 tr.2"])
     e = PageSkipped(
         "'source.jpg' không phải sổ ngân hàng (通帳).",
         kind="not_bankbook", label="source.jpg",
         reason="The provided image is a document about insurance.",
     )
     _, _, msg = jobs._friendly(job, e)
-    assert "通帳：見本 tr.2" in msg
+    assert "通帳：みなと工業 tr.2" in msg
     assert "source.jpg" not in msg
 
 

@@ -1,0 +1,290 @@
+@import 'tailwindcss';
+
+/* ============================================================
+   通帳スキャン — hệ thiết kế lấy từ CHÍNH CUỐN SỔ
+
+   Ba thứ có thật trên một cuốn 通帳 quyết định toàn bộ trang này:
+   1. Giấy sổ 普通預金 màu xanh-xám nhạt (KHÔNG phải giấy kem) với lưới
+      罫線 in sẵn — nên trang web là một tờ sổ kẻ dòng liền mạch, phần
+      nào ra phần nấy bằng đường kẻ chứ không bằng thẻ bo góc.
+   2. Mực đen của máy in kim in dữ liệu, mực màu của biểu mẫu in sẵn.
+      Chữ dùng Minh Triều (明朝) cho tiêu đề vì biểu mẫu in bằng Minh
+      Triều, và chữ đánh máy đều (mono) cho MỌI con số.
+   3. Con dấu 朱 đỏ của kiểm tra — màu đỏ chỉ xuất hiện ở đúng ba chỗ:
+      dấu đã kiểm, vệt đỏ chỉ dòng, và nút hành động chính.
+   ============================================================ */
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-rule: var(--rule);
+  --color-rule-soft: var(--rule-soft);
+  --color-sumi: var(--sumi);
+  --color-sumi-2: var(--sumi-2);
+  --color-sumi-3: var(--sumi-3);
+  --color-shu: var(--shu);
+  --color-kin: var(--kin);
+  --color-kin-soft: var(--kin-soft);
+  --color-ao: var(--ao);
+  --color-desk: var(--desk);
+  --color-desk-2: var(--desk-2);
+  --color-beni: var(--beni);
+  --color-beni-soft: var(--beni-soft);
+
+  --font-display: var(--font-newsreader), var(--font-shippori), Georgia, serif;
+  --font-sans: var(--font-bevietnam), var(--font-zenkaku), system-ui, sans-serif;
+  --font-mono: var(--font-plexmono), ui-monospace, monospace;
+  --font-hand: var(--font-klee), var(--font-shippori), cursive;
+}
+
+:root {
+  /* Cố ý CHỈ có một chế độ sáng: cuốn sổ là tờ giấy, không có bản tối. */
+  color-scheme: light;
+
+  /* Giấy sổ 普通預金 — xanh xám nhạt, lấy từ ảnh sổ thật */
+  --paper: #eff0ea;
+  --paper-2: #e6e8e0; /* dải nền xen kẽ, giống vệt kẻ ô của sổ */
+  --paper-3: #f7f8f4; /* mặt giấy sáng nhất — ô nhập liệu, bảng */
+
+  /* Lưới 罫線 in sẵn */
+  --rule: #c3cabb;
+  --rule-soft: #d8ded1;
+
+  /* Mực sumi — đen ngả xanh vì in trên giấy xanh xám */
+  --sumi: #18201a;
+  --sumi-2: #4d574f;
+  --sumi-3: #77817a;
+
+  /* 朱 — mực dấu kiểm. Dùng ĐÚNG ba chỗ, không hơn. */
+  --shu: #bd392c;
+
+  /* Vàng「cần soát」— lấy nguyên màu ô cảnh báo trong ứng dụng thật */
+  --kin: #e0b84a;
+  --kin-soft: #f7ecc9;
+
+  /* Xanh mực bút — dùng cho liên kết phụ, giữ cho đỏ khỏi bị loãng */
+  --ao: #2f5d7c;
+
+  /* MẶT BÀN nơi cuốn sổ nằm. Đây là thứ trang cũ thiếu: không có nền thì
+     không có hình, mọi thứ cùng một sắc độ nên phẳng lì. Cố ý KHÔNG dùng
+     đen — đen kịt cộng một màu chói là lối mòn. Đây là xanh rêu sẫm, màu
+     mặt bàn gỗ sơn mài, và thứ sáng nhất trên đó là TỜ GIẤY chứ không
+     phải một điểm nhấn neon. */
+  --desk: #212a23;
+  --desk-2: #2b352d;
+
+  /* Mực HỒNG của biểu mẫu in sẵn (ゆうちょ in khung bằng màu này). Chính
+     là tín hiệu mà thuật toán dò dòng dùng để tách biểu mẫu khỏi dữ liệu:
+     khung in mực màu, máy in kim in mực đen. Nay mắt người cũng thấy được
+     điều đó ngay trên trang. */
+  --beni: #b8596b;
+  --beni-soft: #e8cdd2;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Thanh cuộn không nhảy khi mở/đóng menu */
+    scrollbar-gutter: stable;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--sumi);
+    font-family: var(--font-sans);
+    /* palt: dồn khoảng cách chữ Nhật cho sát nhau như bản in */
+    font-feature-settings: 'palt' 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  p,
+  li {
+    word-break: normal;
+    overflow-wrap: break-word;
+    line-break: strict;
+  }
+
+  /* Tiêu đề: ngắt dòng theo CỤM TỪ, không ngắt giữa cụm.
+     Không có luật này thì tiêu đề tiếng Nhật ngắt ngay giữa「そこ」,
+     đọc lên thấy vô nghĩa. `auto-phrase` là thứ sinh ra để giải quyết
+     đúng chuyện này; trình duyệt chưa hỗ trợ thì rơi về `normal`. */
+  h1,
+  h2,
+  h3 {
+    word-break: normal;
+    word-break: auto-phrase;
+    line-break: strict;
+    overflow-wrap: normal;
+  }
+
+  /* MỌI con số dùng chữ đánh máy đều, bề ngang cố định — cột tiền phải
+     thẳng hàng như trên sổ thật, đây là điểm cốt lõi của sản phẩm. */
+  .tnum {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: var(--kin-soft);
+    color: var(--sumi);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--shu);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* Vệt đỏ chỉ dòng — chính là thứ ứng dụng vẽ lên ảnh khi bấm một dòng */
+  .rowmark {
+    background: color-mix(in srgb, var(--shu) 12%, transparent);
+    box-shadow: inset 3px 0 0 0 var(--shu);
+  }
+
+  /* VÂN GIẤY. Giấy sổ có thớ; mặt phẳng tuyệt đối trông ra màn hình chứ
+     không ra giấy. Nhiễu SVG ở 3.5% — đủ để mắt cảm thấy chất liệu, không
+     đủ để nhận ra là hoa văn. */
+  .grain::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* z-index 0: vân nằm DƯỚI nội dung. Không có dòng này thì `::before`
+       vẽ đè lên mọi phần tử con không định vị — tức là đè lên chữ, và chữ
+       mất nét. Nội dung bên trong phải có `relative` để nổi lên trên. */
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* GÁY SỔ giữa hai trang. Một cuốn sổ khâu chỉ thì chỗ gấp tối lại và
+     hơi lõm — thiếu chi tiết này thì hai nửa trông như hai ô bảng cạnh
+     nhau chứ không phải một cuốn sổ mở ra. */
+  .gutter {
+    background-image: linear-gradient(
+      to right,
+      transparent 0,
+      rgba(24, 32, 26, 0.09) 38%,
+      rgba(24, 32, 26, 0.16) 50%,
+      rgba(24, 32, 26, 0.07) 62%,
+      transparent 100%
+    );
+  }
+
+  /* Con dấu kiểm tra 検証済 */
+  .seal {
+    color: var(--shu);
+    border: 2px solid var(--shu);
+    border-radius: 3px;
+    letter-spacing: 0.08em;
+    transform: rotate(-4deg);
+  }
+}
+
+@layer utilities {
+  /* CÂU TRẢ LỜI mở ra. `backwards` chứ không `both` — xem ghi chú ở
+     `.settle` bên dưới về chuyện transform còn sót lại làm chữ mất nét. */
+  .faq-a {
+    animation: faqMo 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  @keyframes faqMo {
+    from {
+      opacity: 0;
+      transform: translateY(-5px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* VỆT QUÉT của màn mở đầu — dải sáng chạy dọc trang giấy đúng một lần,
+     mô phỏng việc máy đang đọc từ trên xuống. */
+  .sweep {
+    background-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      color-mix(in srgb, var(--shu) 16%, transparent) 45%,
+      color-mix(in srgb, var(--shu) 30%, transparent) 50%,
+      color-mix(in srgb, var(--shu) 16%, transparent) 55%,
+      transparent 100%
+    );
+  }
+
+  /* Con số vừa được đọc ra thì hiện lên, không trượt — trượt là hiệu ứng
+     trang trí, còn hiện lên là "vừa có thêm dữ liệu". */
+  .landed {
+    animation: landed 0.34s ease-out both;
+  }
+  @keyframes landed {
+    from {
+      opacity: 0;
+      filter: blur(2px);
+    }
+    to {
+      opacity: 1;
+      filter: none;
+    }
+  }
+
+  /* Chỉ dùng cho MỘT màn mở đầu, không rải khắp trang */
+  /* `backwards` chứ KHÔNG phải `both`.
+   *
+   * `both` giữ lại trạng thái cuối, mà trạng thái cuối là `transform: none`
+   * — nghe thì vô hại, nhưng trình duyệt vẫn tính ra một ma trận đơn vị và
+   * chỉ cần CÓ transform là nó tách phần tử thành lớp riêng rồi TẮT khử
+   * răng cưa theo điểm phụ. Chữ mờ đi dù không xoay gì cả.
+   *
+   * `backwards` chỉ áp trạng thái đầu trước khi chạy, chạy xong thì buông
+   * hẳn — chữ trở lại nét như chữ tĩnh. */
+  .settle {
+    animation: settle 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  @keyframes settle {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .stamp {
+    animation: stamp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  @keyframes stamp {
+    0% {
+      opacity: 0;
+      transform: rotate(-4deg) scale(1.6);
+    }
+    60% {
+      opacity: 1;
+      transform: rotate(-4deg) scale(0.96);
+    }
+    100% {
+      opacity: 1;
+      transform: rotate(-4deg) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settle,
+    .stamp,
+    .landed,
+    .faq-a {
+      animation: none !important;
+    }
+  }
+}

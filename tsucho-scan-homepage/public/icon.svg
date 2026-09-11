@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="通帳スキャン">
+  <!--
+    DẤU KIỂM — biểu tượng thương hiệu.
+
+    Hình con dấu 朱 (mực đỏ) của Nhật, bên trong là mấy dòng kẻ của cuốn sổ
+    và MỘT dòng được tô đậm. Đó đúng là thứ ứng dụng làm: chỉ ra đúng một
+    dòng trên trang giấy.
+
+    Cố ý không dùng chữ Hán trong hình: chữ cần phông chữ, mà favicon thì
+    không tải được phông. Hình học thuần nên nét ở mọi cỡ, kể cả 16px.
+  -->
+  <rect x="1.5" y="1.5" width="29" height="29" rx="5" fill="#bd392c" />
+  <g fill="#ffffff">
+    <rect x="7" y="8" width="18" height="2" rx="1" opacity="0.45" />
+    <!-- dòng đang được chỉ: đậm và dài hơn, đọc rõ cả ở 16px -->
+    <rect x="7" y="14" width="18" height="4" rx="1.4" />
+    <rect x="7" y="22" width="18" height="2" rx="1" opacity="0.45" />
+  </g>
+</svg>
