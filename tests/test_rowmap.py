@@ -221,3 +221,82 @@ def test_bien_dang_va_anh_rong():
     assert len(tiny["bands"]) == 5 and not tiny["exact"]
     blank = rowmap.bands_for(Image.new("L", (700, 1000), 245), 7)
     assert len(blank["bands"]) == 7
+
+
+# ── Ca đo được trên ảnh thật, 11/09/2026 ────────────────────────────
+
+def test_dinh_rac_o_nep_gap_khong_lam_lech_ca_trang():
+    """Vệt mờ ở nếp gấp + mép giấy dưới cùng → phải bỏ ĐÚNG chúng, không cắt đầu.
+
+    Ca thật `SCAN0000_page-0001`: 27 đỉnh cho 24 dòng, ba đỉnh thừa là hai vệt
+    mờ hai bên nếp gấp và đường mép giấy ở đáy. Bản cũ cắt 3 đỉnh ĐẦU (dòng dữ
+    liệu thật) nên click dòng 1 lại khoanh vào dòng 4 — cả trang lệch 3 bậc.
+    """
+    top = rows_even(40, 12, 26)
+    bottom = rows_even(420, 12, 26)
+    rows = top + bottom
+    img = make_page(rows, h=760)
+    dr = ImageDraw.Draw(img)
+    # hai vệt MỜ hai bên nếp gấp (xám nhạt, không phải chữ)
+    for y in (366, 400):
+        for x in range(60, 640, 40):
+            dr.rectangle([x, y, x + 18, y + 5], fill=205)
+    # mép giấy: đường kẻ liền sát đáy
+    dr.rectangle([10, 752, 690, 754], fill=10)
+
+    assert_hits(rowmap.bands_for(img, 24), rows, 760, 26)
+
+
+def test_dong_dai_ngan_xen_ke_khong_lam_nhip_gap_doi():
+    """Sổ ゆうちょ: dòng 料金 ngắn, mảnh, nép bên phải, xen giữa các dòng dài.
+
+    Lượng mực khi ấy lặp theo chu kỳ HAI dòng, nên tự tương quan mạnh nhất ở
+    2×nhịp. Bản cũ lấy luôn 2× rồi `_peaks` gạt mất một nửa số dòng — cả 4 mặt
+    sổ dính lỗi này đều tụt xuống chế độ chia đều (đoán). Đo lại trên ảnh giả
+    này: nhịp cũ ra 53px, nhịp đúng là 28px.
+    """
+    pitch = 28
+    rows = rows_even(60, 22, pitch)
+    img = Image.new("L", (700, 60 + 22 * pitch + 80), 245)
+    dr = ImageDraw.Draw(img)
+    for i, y in enumerate(rows):
+        dai = i % 2 == 0
+        x, x1 = (40, 660) if dai else (430, 620)   # 料金 nép sát cột tiền
+        hh = 12 if dai else 7                       # và in nhỏ hơn
+        while x < x1:
+            dr.rectangle([x, y, min(x + 26, x1), y + hh], fill=30)
+            x += 34
+
+    assert_hits(rowmap.bands_for(img, len(rows)), rows, img.height, pitch)
+
+
+def test_dong_bieu_mau_in_muc_mau_khong_bi_tinh_la_dong():
+    """Tiêu đề cột + chú thích in bằng MỰC MÀU của biểu mẫu, dữ liệu in mực ĐEN.
+
+    Ca thật `so-yucho-dep`: hàng tiêu đề「年月日 取扱店 …」có lượng mực, vị trí
+    cột số dư và cả cột số thứ tự ở mép **y hệt một dòng dữ liệu** — đo cả ba
+    tín hiệu đó đều không tách nổi, nên nó chiếm mất dải của dòng 01, đẩy cả
+    trang lệch. Chỉ có màu mực tách được: biểu mẫu in hồng/đỏ, còn máy in kim
+    in dữ liệu bằng mực đen.
+    """
+    pitch = 26
+    rows = rows_even(150, 20, pitch)             # dữ liệu: mực ĐEN
+    img = Image.new("RGB", (700, 1000), (245, 243, 240))
+    dr = ImageDraw.Draw(img)
+
+    def ke_dong(y: int, mau: tuple[int, int, int], hh: int = 12):
+        x = 40
+        while x < 660:
+            dr.rectangle([x, y, min(x + 26, 660), y + hh], fill=mau)
+            x += 34
+
+    HONG = (214, 122, 132)                       # mực biểu mẫu
+    DEN = (32, 32, 34)                           # mực máy in kim
+    for y in (98, 124):                          # tựa + hàng tiêu đề cột
+        ke_dong(y, HONG)
+    for y in rows:
+        ke_dong(y, DEN)
+    for y in (rows[-1] + pitch, rows[-1] + 2 * pitch):   # chú thích chân trang
+        ke_dong(y, HONG)
+
+    assert_hits(rowmap.bands_for(img, len(rows)), rows, 1000, pitch)

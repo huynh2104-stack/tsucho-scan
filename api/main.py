@@ -391,7 +391,9 @@ def sheet_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, rows: int = 0) ->
     ws = _ws(ws_id, user)
     sheet = _sheet(ws, sheet_id)
     if rows <= 0:
-        return {"bands": [], "exact": False}
+        # Trả ĐỦ khoá như đường thường: giao diện đọc `x0`/`x1` để vẽ vệt, thiếu
+        # là vệt kéo hết bề ngang ảnh (kể cả mặt bàn) mà không báo lỗi gì.
+        return {"bands": [], "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0}
     img = Image.open(sheet.dir(ws.id) / "current.png")
     img.load()
     return rowmap.bands_for(img, rows)

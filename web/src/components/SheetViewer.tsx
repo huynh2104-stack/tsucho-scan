@@ -197,6 +197,7 @@ export default function SheetViewer({
   highlight,
   highlightExact,
   highlightSkew,
+  highlightSpan,
   stale,
 }: {
   wsId: string;
@@ -218,6 +219,8 @@ export default function SheetViewer({
   /** Dải ảnh của dòng đang chọn ở bảng kết quả — để khoanh đúng chỗ. */
   highlight: { y0: number; y1: number } | null;
   highlightExact: boolean;
+  /** Bề ngang TỜ GIẤY trong ảnh (0..1) — vệt chỉ kéo trong khoảng này. */
+  highlightSpan: { x0: number; x1: number } | null;
   /** Trang chụp nghiêng bao nhiêu độ — vệt nghiêng theo cho khớp dòng chữ. */
   highlightSkew: number;
   /** Có kết quả cũ nhưng ảnh đã bị chỉnh sau đó → kết quả không còn khớp. */
@@ -587,25 +590,37 @@ export default function SheetViewer({
           cropping || warping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
         }`}
       >
-        {/* Thanh phóng to nổi ở góc ảnh, không nằm trong thanh công cụ nữa:
+        {/* Thanh phóng to nổi ở mép ảnh, không nằm trong thanh công cụ nữa:
             3 nút này chiếm chỗ của những nút quan trọng hơn, mà đặt cạnh ảnh
-            thì còn đúng chỗ tay đang thao tác hơn. Góc dưới-phải nên không đè
-            lên đầu trang sổ. */}
-        <div className="absolute bottom-2 right-2 z-10 flex items-center gap-0.5 rounded-lg border border-rule bg-card/90 px-1 py-0.5 backdrop-blur">
-          <Tool
-            tone="ghost"
-            onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
-            title={t.zoomOut}
-            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6" /> </svg>}
-          />
-          <span className="tnum w-10 text-center text-[11.5px] text-ink3">
-            {Math.round(zoom * 100)}%
-          </span>
+            thì còn đúng chỗ tay đang thao tác hơn.
+
+            XẾP DỌC chứ không xếp ngang: ảnh chưa cắt thì phủ kín khung, thanh
+            nằm ngang che mất một vệt dài ở đáy — đúng chỗ hay có dòng cuối và
+            góc dưới của trang sổ. Dựng dọc sát mép phải thì chỉ che một cột hẹp.
+
+            Và ẩn hẳn khi đang CẮT hoặc NẮN PHỐI CẢNH: hai chế độ đó có tay nắm
+            ở bốn góc, mà thanh này nằm đúng chỗ tay nắm góc dưới-phải. Lúc ấy
+            ảnh cũng đã được kéo vừa khung sẵn (`vuaKhung`) nên không cần zoom. */}
+        <div
+          className={`absolute right-2 top-1/2 z-10 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg border border-rule bg-card/90 px-0.5 py-1 backdrop-blur ${
+            cropping || warping ? "hidden" : "flex"
+          }`}
+        >
+          {/* Phóng to ở TRÊN, thu nhỏ ở DƯỚI — cùng chiều với trục dọc. */}
           <Tool
             tone="ghost"
             onClick={() => setZoom((z) => Math.min(3, z + 0.2))}
             title={t.zoomIn}
             icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6" /> </svg>}
+          />
+          <span className="tnum text-[10.5px] leading-none text-ink3">
+            {Math.round(zoom * 100)}
+          </span>
+          <Tool
+            tone="ghost"
+            onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
+            title={t.zoomOut}
+            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6" /> </svg>}
           />
           <Tool
             tone="ghost"
@@ -670,10 +685,20 @@ export default function SheetViewer({
               biết chỗ nào tin được, không phải đoán. */}
           {highlight && !cropping && (
             <div
-              className="pointer-events-none absolute inset-x-0 transition-all duration-200"
+              className="pointer-events-none absolute transition-all duration-200"
               style={{
                 top: `${highlight.y0 * 100}%`,
                 height: `${Math.max(0.006, highlight.y1 - highlight.y0) * 100}%`,
+                /* Chỉ kéo hết bề ngang TỜ GIẤY, không kéo hết bề ngang ẢNH.
+                   Hai lý do, lý do sau mới là lý do thật:
+                   1. Ảnh chụp còn cả mặt bàn hai bên — vệt quét qua đó thừa.
+                   2. `skewY` của CSS xoay quanh TÂM của chính vệt này. Góc
+                      nghiêng lại được api/rowmap.py đo quanh TÂM TỜ GIẤY. Tờ
+                      giấy nằm lệch trong khung hình thì hai tâm khác nhau, và
+                      cả vệt bị đẩy lệch đi (lệch tâm × tang góc). Cho vệt trùng
+                      đúng bề ngang tờ giấy là hai tâm trùng nhau, hết lệch. */
+                left: `${(highlightSpan?.x0 ?? 0) * 100}%`,
+                width: `${((highlightSpan?.x1 ?? 1) - (highlightSpan?.x0 ?? 0)) * 100}%`,
                 background: `color-mix(in srgb, var(--danger) ${
                   highlightExact ? 13 : 7
                 }%, transparent)`,
@@ -767,12 +792,55 @@ export default function SheetViewer({
                           ) as Pt[],
                         );
                       } else {
+                        /* ĐIỂM GIỮA CẠNH: chỉ cho đi VUÔNG GÓC với cạnh.
+                           Trước đây thả tự do cả hai chiều, mà trượt DỌC theo
+                           cạnh thì không phải là uốn cong — nó kéo lệch tham số
+                           của đường cong, làm cả trang vặn đi, và muốn trả về
+                           thẳng thì phải rà đúng một điểm nên gần như không
+                           sửa lại được. Chiếu điểm thả lên đường vuông góc đi
+                           qua trung điểm hai góc: kéo ra là cong, kéo về là
+                           thẳng, chỉ còn MỘT chiều nên tay làm là được ngay.
+
+                           Tính trong toạ độ PIXEL (nhân với bề rộng/cao khung)
+                           rồi mới đổi lại về 0..1 — khung ảnh không vuông, làm
+                           thẳng trên toạ độ 0..1 thì "vuông góc" không còn
+                           vuông trên màn hình và tay kéo thấy trượt. */
+                        const c = i - 4;
+                        const a = quad[c];
+                        const b = quad[(c + 1) % 4];
+                        const ax = a[0] * r.width, ay = a[1] * r.height;
+                        const bx = b[0] * r.width, by = b[1] * r.height;
+                        const gx = (ax + bx) / 2, gy = (ay + by) / 2;
+                        const dai = Math.hypot(bx - ax, by - ay) || 1;
+                        const px = -(by - ay) / dai, py = (bx - ax) / dai;
+                        const t =
+                          (e.clientX - r.left - gx) * px + (e.clientY - r.top - gy) * py;
+                        const kep = (v: number) => Math.max(0, Math.min(1, v));
                         setMids((m) =>
-                          m.map((p, k) => (k === i - 4 ? [nx, ny] : p)) as Pt[],
+                          m.map((p, k) =>
+                            k === c
+                              ? [kep((gx + t * px) / r.width), kep((gy + t * py) / r.height)]
+                              : p,
+                          ) as Pt[],
                         );
                       }
                     }}
                     onPointerUp={() => (grab.current = null)}
+                    /* Bấm đúp vào điểm giữa = trả CẠNH ĐÓ về thẳng. Kéo tay về
+                       đúng đường thẳng vẫn được, nhưng lỡ uốn quá đà thì bấm
+                       đúp là xong, không phải rà. Bấm đúp vào GÓC thì không
+                       làm gì — góc không có trạng thái "thẳng" để trả về. */
+                    onDoubleClick={() => {
+                      if (laGoc) return;
+                      const c = i - 4;
+                      const a = quad[c];
+                      const b = quad[(c + 1) % 4];
+                      setMids((m) =>
+                        m.map((p, k) =>
+                          k === c ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : p,
+                        ) as Pt[],
+                      );
+                    }}
                     aria-label={
                       laGoc ? t.warpCorner(i + 1) : t.warpMid(i - 3)
                     }

@@ -233,7 +233,9 @@ const DICT = {
     errTooLarge: (s: string, size: number, limit: number) =>
       `${s ? `「${s}」` : "Ảnh này"} quá lớn (${size}MB, giới hạn ${limit}MB). Hãy giảm kích thước ảnh.`,
 
-    warpMid: (n: number) => `Điểm giữa cạnh ${n} — kéo để uốn cong cạnh (sổ không bẹt phẳng)`,
+    warpMid: (n: number) =>
+      `Điểm giữa cạnh ${n} — kéo RA/VÀO để uốn cong cạnh (sổ không bẹt phẳng).`
+      + ` Bấm đúp để trả cạnh này về thẳng.`,
 
     paneSheets: "Mặt sổ",
     paneImage: "Chỉnh ảnh",
@@ -491,7 +493,9 @@ const DICT = {
     errTooLarge: (s: string, size: number, limit: number) =>
       `${s ? `"${s}"` : "This image"} is too large (${size}MB, limit ${limit}MB). Please reduce the image size.`,
 
-    warpMid: (n: number) => `Edge midpoint ${n} — drag to curve the edge (book not lying flat)`,
+    warpMid: (n: number) =>
+      `Edge midpoint ${n} — drag out/in to curve the edge (book not lying flat).`
+      + ` Double-click to straighten this edge.`,
 
     paneSheets: "Sheets",
     paneImage: "Edit image",
@@ -748,7 +752,9 @@ const DICT = {
     errTooLarge: (s: string, size: number, limit: number) =>
       `${s ? `「${s}」` : "この画像"}はサイズが大きすぎます（${size}MB、上限${limit}MB）。画像を小さくしてください。`,
 
-    warpMid: (n: number) => `辺の中点${n} — ドラッグして辺を湾曲（通帳が平らに開かない場合）`,
+    warpMid: (n: number) =>
+      `辺の中点${n} — 外/内にドラッグして辺を湾曲（通帳が平らに開かない場合）。`
+      + ` ダブルクリックでこの辺をまっすぐに戻します。`,
 
     paneSheets: "ページ",
     paneImage: "画像調整",

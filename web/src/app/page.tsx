@@ -1089,6 +1089,7 @@ export default function Workbench() {
             highlight={highlight}
             highlightExact={!!bands?.exact}
             highlightSkew={bands?.skew_deg ?? 0}
+            highlightSpan={bands ? { x0: bands.x0, x1: bands.x1 } : null}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
           />
         </section>

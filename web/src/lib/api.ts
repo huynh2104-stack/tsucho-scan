@@ -378,6 +378,11 @@ export type RowBands = {
   exact: boolean;
   /** Độ nghiêng đo được của trang — vệt đánh dấu nghiêng theo cho khớp chữ. */
   skew_deg: number;
+  /** Bề ngang TỜ GIẤY trong ảnh (0..1). Vệt chỉ kéo trong khoảng này: vừa gọn
+   *  mắt, vừa để CSS `skewY` xoay đúng quanh tâm giấy — chính là tâm mà
+   *  api/rowmap.py đo góc nghiêng. */
+  x0: number;
+  x1: number;
 };
 
 export const rowMap = async (wsId: string, sheetId: string, rows: number) =>
