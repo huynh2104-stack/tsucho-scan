@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
 import { SAMPLE_ROWS, yen } from '@/lib/sample-data'
 
@@ -64,8 +64,36 @@ export function PassbookSpread() {
     return () => clearTimeout(batDau)
   }, [])
 
-  const dongTo = xong ? chon : daDoc - 1
-  const iChuoi = chon ?? Math.max(0, daDoc - 1)
+  /* Rê chuột (hoặc dùng phím Tab) lên một hàng thì xem trước hàng đó; bấm
+     thì chọn hẳn. Chỉ có hiệu lực sau khi máy đã đọc xong. */
+  const [ro, setRo] = useState<number | null>(null)
+  const dongTo = xong ? (ro ?? chon) : daDoc - 1
+
+  /* VỆT SON TRƯỢT. Đo vị trí từng hàng trên trang giấy rồi dịch MỘT vệt
+     tới đó bằng transform — không bật tắt lớp trên từng hàng, nên vệt
+     trượt liền một mạch thay vì nhảy cóc. Hàng viết tay cao hơn các hàng
+     khác, nên phải đo chứ không nhân chiều cao cố định. */
+  const hangRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const [vet, setVet] = useState<{ top: number; h: number } | null>(null)
+  const [, doDoLai] = useState(0)
+
+  // Đổi bề ngang cửa sổ thì hàng xuống dòng khác đi — đo lại
+  useEffect(() => {
+    const doi = () => doDoLai((n) => n + 1)
+    window.addEventListener('resize', doi)
+    return () => window.removeEventListener('resize', doi)
+  }, [])
+
+  useLayoutEffect(() => {
+    const i = xong ? dongTo : null
+    const el = i == null ? null : hangRefs.current[i]
+    if (!el) return
+    const moi = { top: el.offsetTop, h: el.offsetHeight }
+    setVet((cu) => (cu && cu.top === moi.top && cu.h === moi.h ? cu : moi))
+  })
+
+  // Chuỗi số dư ở đáy đi theo đúng hàng đang xem (kể cả khi chỉ rê chuột)
+  const iChuoi = xong ? (dongTo ?? 0) : Math.max(0, daDoc - 1)
   const row = SAMPLE_ROWS[iChuoi]
   const truoc =
     iChuoi > 0 ? SAMPLE_ROWS[iChuoi - 1].balance : row.balance + (row.out ?? 0) - (row.in ?? 0)
@@ -89,12 +117,19 @@ export function PassbookSpread() {
             {SAMPLE_ROWS.map((r, i) => (
               <button
                 key={r.no}
+                ref={(el) => {
+                  hangRefs.current[i] = el
+                }}
                 type="button"
                 onClick={() => xong && setChon(i)}
-                aria-pressed={dongTo === i}
-                className={`relative grid w-full grid-cols-[1.9rem_4.4rem_minmax(0,1fr)] items-center border-b border-beni-soft/70 px-3.5 py-[9px] text-left last:border-0 ${
-                  dongTo === i ? 'rowmark' : ''
-                } ${xong ? 'cursor-pointer' : 'cursor-default'}`}
+                onPointerEnter={(e) => xong && e.pointerType === 'mouse' && setRo(i)}
+                onPointerLeave={() => setRo(null)}
+                onFocus={() => xong && setRo(i)}
+                onBlur={() => setRo(null)}
+                aria-pressed={xong && chon === i}
+                className={`relative z-[1] grid w-full grid-cols-[1.9rem_4.4rem_minmax(0,1fr)] items-center border-b border-beni-soft/70 px-3.5 py-[9px] text-left last:border-0 focus-visible:outline-offset-[-2px] ${
+                  xong ? 'cursor-pointer' : 'cursor-default'
+                }`}
               >
                 <span className="tnum text-[10.5px] text-beni/80">{r.no}</span>
                 {r.hand ? (
@@ -117,6 +152,17 @@ export function PassbookSpread() {
               </button>
             ))}
 
+            {/* Vệt son: một phần tử duy nhất, dịch tới hàng đang chọn */}
+            <div
+              aria-hidden
+              className="rowmark band-slide pointer-events-none absolute inset-x-0 top-0"
+              style={{
+                height: vet?.h ?? 0,
+                transform: `translateY(${vet?.top ?? 0}px)`,
+                opacity: xong && vet ? 1 : 0,
+              }}
+            />
+
             {/* Ai bật "giảm chuyển động" thì effect đặt `xong` ngay lập tức,
                 nên vệt quét này tự khắc không hiện — không cần hỏi lại. */}
             {!xong && (
@@ -138,7 +184,7 @@ export function PassbookSpread() {
               {h.demoRead}
             </p>
 
-            <div className="grid grid-cols-3 border-b border-rule px-3.5 py-1 text-[10px] text-sumi-3">
+            <div className="grid grid-cols-3 border-b border-rule px-3.5 py-1 text-[10px] text-sumi-2">
               <span className="text-right">{h.col.out}</span>
               <span className="text-right">{h.col.in}</span>
               <span className="text-right">{h.col.bal}</span>
@@ -149,9 +195,12 @@ export function PassbookSpread() {
               return (
                 <div
                   key={r.no}
-                  className={`grid grid-cols-3 items-center border-b border-rule-soft px-3.5 py-[9px] last:border-0 ${
-                    dongTo === i ? 'bg-shu/10' : ''
-                  }`}
+                  onPointerEnter={(e) => xong && e.pointerType === 'mouse' && setRo(i)}
+                  onPointerLeave={() => setRo(null)}
+                  onClick={() => xong && setChon(i)}
+                  className={`grid grid-cols-3 items-center border-b border-rule-soft px-3.5 py-[9px] transition-colors duration-200 last:border-0 ${
+                    dongTo === i ? 'rowmark' : ''
+                  } ${xong ? 'cursor-pointer' : ''}`}
                 >
                   {!hien ? (
                     <>

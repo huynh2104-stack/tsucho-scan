@@ -120,7 +120,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             những khối chờ hiện sẽ nằm ẩn mãi mãi. Đoạn này ép chúng hiện.
             Phải là `!important` vì kiểu nội tuyến thắng mọi bảng kiểu. */}
         <noscript>
-          <style>{`[data-motion]{opacity:1!important;transform:none!important}`}</style>
+          <style>{`[data-motion]{opacity:1!important;transform:none!important}[data-faq-panel]{grid-template-rows:1fr!important}`}</style>
         </noscript>
         <MotionRoot>
           <LanguageProvider>{children}</LanguageProvider>

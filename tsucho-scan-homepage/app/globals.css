@@ -80,6 +80,20 @@
      điều đó ngay trên trang. */
   --beni: #b8596b;
   --beni-soft: #e8cdd2;
+
+  /* HỆ CHUYỂN ĐỘNG — mọi thời lượng và đường cong trên trang lấy từ đây.
+     `lib/motion.tsx` giữ đúng các số này cho phần chạy bằng Motion. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
+  --t-instant: 120ms;
+  --t-fast: 200ms;
+  --t-base: 320ms;
+  --t-slow: 520ms;
+
+  /* Header CỐ ĐỊNH chiều cao (không đo bằng JS rồi mới biết): neo menu,
+     cột ảnh dính của #how và thanh CTA đáy đều tính từ con số này.
+     = 56px hàng nội dung (h-14) + 1px đường kẻ đáy. Đã đo: 57px. */
+  --header-h: 57px;
 }
 
 @layer base {
@@ -93,6 +107,10 @@
     html {
       scroll-behavior: auto;
     }
+  }
+
+  section[id] {
+    scroll-margin-top: calc(var(--header-h) + 12px);
   }
 
   body {
@@ -140,12 +158,56 @@
 
   :focus-visible {
     outline: 2px solid var(--shu);
-    outline-offset: 3px;
+    outline-offset: 2px;
     border-radius: 2px;
   }
 }
 
 @layer components {
+  /* NÚT SON. Lúc nghỉ KHÔNG có transform (có transform là chữ mất nét);
+     chỉ khi rê chuột mới nhích lên 1px, ấn xuống thì lún lại. */
+  .btn-shu {
+    background: var(--shu);
+    color: var(--paper-3);
+    box-shadow: 0 1px 0 rgba(24, 32, 26, 0.18);
+    transition:
+      transform var(--t-fast) var(--ease-out),
+      box-shadow var(--t-fast) var(--ease-out),
+      filter var(--t-fast) var(--ease-out);
+  }
+  .btn-shu:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow:
+      0 1px 0 rgba(24, 32, 26, 0.22),
+      0 6px 14px -8px rgba(24, 32, 26, 0.5);
+  }
+  .btn-shu:active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 0 0 rgba(24, 32, 26, 0);
+    transition-duration: var(--t-instant);
+  }
+
+  /* KHUNG GIẤY cho ảnh chụp màn hình thật: một tờ giấy lót dưới ảnh,
+     viền kẻ 1px, bóng mực rất nhạt. Dùng chung cho #how và #screen. */
+  .khung-anh {
+    background: var(--paper-3);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 8px;
+    box-shadow:
+      0 1px 0 rgba(24, 32, 26, 0.06),
+      0 18px 36px -24px rgba(24, 32, 26, 0.35);
+  }
+
+  .nav-link {
+    color: var(--sumi-2);
+    transition: color var(--t-fast) var(--ease-out);
+  }
+  .nav-link:hover {
+    color: var(--sumi);
+  }
+
   /* Vệt đỏ chỉ dòng — chính là thứ ứng dụng vẽ lên ảnh khi bấm một dòng */
   .rowmark {
     background: color-mix(in srgb, var(--shu) 12%, transparent);
@@ -193,21 +255,12 @@
 }
 
 @layer utilities {
-  /* CÂU TRẢ LỜI mở ra. `backwards` chứ không `both` — xem ghi chú ở
-     `.settle` bên dưới về chuyện transform còn sót lại làm chữ mất nét. */
-  .faq-a {
-    animation: faqMo 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
-  }
-  @keyframes faqMo {
-    from {
-      opacity: 0;
-      transform: translateY(-5px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
+  /* ────────────────────────────────────────────────────────────
+     Mỗi chuyển động dưới đây kể một đoạn của cùng MỘT câu chuyện:
+     ảnh vào → hàng hiện → số đáp xuống ô → son đóng「検算済」→ ô sai
+     ngả vàng. Cái nào không thuộc câu đó thì không có mặt ở đây.
+     Không có nảy, không có đàn hồi.
+     ──────────────────────────────────────────────────────────── */
 
   /* VỆT QUÉT của màn mở đầu — dải sáng chạy dọc trang giấy đúng một lần,
      mô phỏng việc máy đang đọc từ trên xuống. */
@@ -222,10 +275,9 @@
     );
   }
 
-  /* Con số vừa được đọc ra thì hiện lên, không trượt — trượt là hiệu ứng
-     trang trí, còn hiện lên là "vừa có thêm dữ liệu". */
+  /* SỐ ĐÁP XUỐNG Ô: hiện lên, không trượt — "vừa có thêm dữ liệu". */
   .landed {
-    animation: landed 0.34s ease-out both;
+    animation: landed var(--t-base) var(--ease-out) both;
   }
   @keyframes landed {
     from {
@@ -238,18 +290,10 @@
     }
   }
 
-  /* Chỉ dùng cho MỘT màn mở đầu, không rải khắp trang */
-  /* `backwards` chứ KHÔNG phải `both`.
-   *
-   * `both` giữ lại trạng thái cuối, mà trạng thái cuối là `transform: none`
-   * — nghe thì vô hại, nhưng trình duyệt vẫn tính ra một ma trận đơn vị và
-   * chỉ cần CÓ transform là nó tách phần tử thành lớp riêng rồi TẮT khử
-   * răng cưa theo điểm phụ. Chữ mờ đi dù không xoay gì cả.
-   *
-   * `backwards` chỉ áp trạng thái đầu trước khi chạy, chạy xong thì buông
-   * hẳn — chữ trở lại nét như chữ tĩnh. */
+  /* `backwards` chứ KHÔNG phải `both`: `both` giữ lại `transform: none`,
+     trình duyệt vẫn tách lớp riêng và tắt khử răng cưa — chữ mờ đi. */
   .settle {
-    animation: settle 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation: settle var(--t-slow) var(--ease-out) backwards;
   }
   @keyframes settle {
     from {
@@ -261,21 +305,122 @@
       transform: none;
     }
   }
+
+  /* SON ĐÓNG DẤU. Ấn thẳng xuống rồi đứng yên — không nảy lại. */
   .stamp {
-    animation: stamp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation: stamp var(--t-base) var(--ease-out) both;
   }
   @keyframes stamp {
-    0% {
+    from {
       opacity: 0;
-      transform: rotate(-4deg) scale(1.6);
+      transform: rotate(-4deg) scale(1.35);
     }
-    60% {
-      opacity: 1;
-      transform: rotate(-4deg) scale(0.96);
-    }
-    100% {
+    to {
       opacity: 1;
       transform: rotate(-4deg) scale(1);
+    }
+  }
+
+  /* Ô SAI NGẢ VÀNG: nền vàng đập một nhịp rồi đứng. */
+  .kin-pulse {
+    animation: kinPulse 900ms var(--ease-in-out) 1 both;
+  }
+  @keyframes kinPulse {
+    0% {
+      background-color: var(--paper-3);
+    }
+    45% {
+      background-color: color-mix(in srgb, var(--kin) 55%, var(--kin-soft));
+    }
+    100% {
+      background-color: var(--kin-soft);
+    }
+  }
+
+  /* FAQ: mở bằng grid-template-rows 0fr → 1fr, nên chiều cao chạy mượt
+     mà không phải đo nội dung bằng JS. */
+  .faq-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--t-base) var(--ease-out);
+  }
+  .faq-panel[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+  .faq-panel > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .faq-mark {
+    transition: transform var(--t-fast) var(--ease-out);
+  }
+  [aria-expanded='true'] > .faq-mark {
+    transform: rotate(45deg);
+  }
+
+  /* #how: ảnh các bước chồng lên nhau, đổi bằng mờ-tỏ + trượt 12px.
+     Không gỡ thẻ ra khỏi DOM nên khung không nhảy. */
+  .how-shot {
+    opacity: 0;
+    transform: translateY(12px);
+    transition:
+      opacity var(--t-base) var(--ease-out),
+      transform var(--t-base) var(--ease-out);
+  }
+  .how-shot[data-active='true'] {
+    opacity: 1;
+    transform: none;
+  }
+  .how-step {
+    transition:
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+
+  /* Vệt son trượt tới đúng hàng trên trang sổ của màn mở đầu */
+  .band-slide {
+    transition:
+      transform var(--t-base) var(--ease-out),
+      height var(--t-base) var(--ease-out),
+      opacity var(--t-fast) var(--ease-out);
+  }
+
+  /* Thanh CTA dính đáy trên điện thoại */
+  .cta-dock {
+    /* Tailwind v4 dịch chuyển bằng thuộc tính `translate`, không phải `transform` */
+    transition: translate var(--t-base) var(--ease-out);
+  }
+
+  /* Menu điện thoại gập/mở cùng kỹ thuật với FAQ */
+  .menu-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--t-base) var(--ease-out);
+  }
+  .menu-panel[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+  .menu-panel > div {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ĐỔI NGÔN NGỮ: chỉ mờ-tỏ và nhích 6px. Không morph chữ Nhật ↔ Việt. */
+  ::view-transition-old(root) {
+    animation: vtOut 180ms var(--ease-out) both;
+  }
+  ::view-transition-new(root) {
+    animation: vtIn 280ms var(--ease-out) both;
+  }
+  @keyframes vtOut {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes vtIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
     }
   }
 
@@ -283,7 +428,29 @@
     .settle,
     .stamp,
     .landed,
-    .faq-a {
+    .kin-pulse {
+      animation: none !important;
+    }
+    .faq-panel,
+    .faq-mark,
+    .how-shot,
+    .how-step,
+    .band-slide,
+    .cta-dock,
+    .menu-panel,
+    .btn-shu,
+    .nav-link {
+      transition: none !important;
+    }
+    .how-shot {
+      transform: none !important;
+    }
+    .btn-shu:hover,
+    .btn-shu:active {
+      transform: none !important;
+    }
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
       animation: none !important;
     }
   }

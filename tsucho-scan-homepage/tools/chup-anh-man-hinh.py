@@ -169,9 +169,11 @@ def main() -> int:
         trinh_duyet.close()
 
     print("Cắt ảnh cho web…")
-    cat("nen-toi", (0, 0, 3840, 2400), "app-dark", 2200, 80)
+    # Ảnh màn hình đầy đủ: bản SÁNG hợp tông giấy của trang hơn bản tối
+    cat("nen-sang", (0, 0, 3840, 2400), "app-light", 2200, 80)
+    # Năm bước đều 4:3 — chúng chồng lên nhau trong một khung ở #how
     cat("nen-sang", (10, 90, 570, 510), "step-1-import", 880)
-    cat("nan-phoi-canh", (640, 360, 1990, 1850), "step-2-straighten", 1050)
+    cat("nan-phoi-canh", (600, 596, 2080, 1706), "step-2-straighten", 880)
     cat("nen-sang", (2085, 100, 3245, 970), "step-3-scan", 880)
     cat("nen-sang", (820, 700, 1820, 1450), "step-4-fix", 1000)
     cat("xuat-file", (1053, 553, 2787, 1853), "step-5-export", 1100)

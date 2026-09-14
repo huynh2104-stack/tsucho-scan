@@ -1,26 +1,27 @@
 'use client'
 
-import Image from 'next/image'
 import { useRef } from 'react'
-import { motion, useScroll, useTransform } from 'motion/react'
+import { motion, useInView } from 'motion/react'
 import { ExcelPreview } from '@/components/excel-preview'
 import { Explain } from '@/components/explain'
 import { HINH_READS, HINH_TOOLS } from '@/components/diagrams'
-import { Laptop } from '@/components/laptop'
+import { Faq as DanhSachHoiDap } from '@/components/faq'
+import { HowSteps } from '@/components/how-steps'
+import { ManHinh } from '@/components/man-hinh'
 import { PassbookSpread } from '@/components/passbook-spread'
 import { DASHBOARD_URL } from '@/lib/constants'
 import { useI18n } from '@/lib/i18n'
-import { Item, List, Reveal, TAM_NHIN, damNhip, len } from '@/lib/motion'
+import { EASE_OUT, Item, NHIP, Reveal, TAM_NHIN, T_SLOW, len } from '@/lib/motion'
 
 /* Khung chung cho mọi phần.
  *
  *   1. NỀN đổi theo nhịp bốn mức (giấy → giấy đậm → giấy sáng → mặt bàn
  *      tối), nên hai phần cạnh nhau không bao giờ cùng một sắc độ.
- *   2. Mỗi tiêu đề có một VẠCH MỰC HỒNG dựng đứng bên trái — chính màu
- *      mực biểu mẫu của cuốn sổ. Vạch ấy TỰ KẺ XUỐNG khi cuộn tới, như
- *      một nét bút vạch ở lề trước khi viết. Đó là chuyển động chữ ký
- *      của trang: nó lặp ở mọi phần nên thành nhịp, và nó mang nghĩa
- *      "phần mới bắt đầu từ đây" chứ không phải hoa lá cành.
+ *   2. Mỗi tiêu đề có một VẠCH MỰC HỒNG dựng đứng bên trái — màu mực biểu
+ *      mẫu của cuốn sổ — tự kẻ xuống khi cuộn tới, rồi tiêu đề hiện ra.
+ *
+ * Neo menu không bị header che: `section[id]` có scroll-margin-top trong
+ * globals.css, tính từ --header-h.
  */
 type Nen = 'giay' | 'giayDam' | 'giaySang' | 'toi'
 
@@ -46,13 +47,12 @@ function Section({
 }) {
   const toi = nen === 'toi'
   return (
-    <section id={id} className={`scroll-mt-14 border-t border-rule ${NEN[nen]}`}>
-      <div className="relative mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-24">
+    <section id={id} className={`border-t border-rule ${NEN[nen]}`}>
+      <div className="relative mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
         <motion.div
           initial="an"
           whileInView="hien"
           viewport={TAM_NHIN}
-          variants={damNhip(0.11)}
           className="relative pl-4 sm:pl-6"
         >
           <motion.span
@@ -62,11 +62,12 @@ function Section({
             style={{ originY: 0 }}
             variants={{
               an: { scaleY: 0 },
-              hien: { scaleY: 1, transition: { duration: 0.52, ease: [0.22, 1, 0.36, 1] } },
+              hien: { scaleY: 1, transition: { duration: T_SLOW, ease: EASE_OUT } },
             }}
           />
           <motion.h2
             data-motion
+            custom={0.06}
             variants={len}
             className={`max-w-[26ch] font-display text-[26px] leading-[1.3] font-semibold sm:text-[34px] ${
               toi ? 'text-paper' : 'text-sumi'
@@ -77,9 +78,10 @@ function Section({
           {lead && (
             <motion.p
               data-motion
+              custom={0.06 + NHIP}
               variants={len}
               className={`mt-3 max-w-[62ch] text-[14.5px] leading-[1.75] ${
-                toi ? 'text-paper/70' : 'text-sumi-2'
+                toi ? 'text-paper/75' : 'text-sumi-2'
               }`}
             >
               {lead}
@@ -92,50 +94,18 @@ function Section({
   )
 }
 
-/** Khung ảnh chụp màn hình thật. Viền kẻ như mọi thứ khác trên trang. */
-function Anh({
-  src,
-  alt,
-  className = '',
-}: {
-  src: string
-  alt: string
-  className?: string
-}) {
-  return (
-    <figure
-      className={`m-0 overflow-hidden rounded-sm bg-paper-3 ring-1 ring-rule ${className}`}
-    >
-      <Image
-        src={src}
-        alt={alt}
-        width={880}
-        height={660}
-        sizes="(max-width: 640px) 92vw, 420px"
-        className="block h-auto w-full"
-      />
-    </figure>
-  )
-}
-
 export function Hero() {
   const { t } = useI18n()
   const h = t.hero
-  const khung = useRef<HTMLDivElement>(null)
-  const { scrollYProgress } = useScroll({ target: khung, offset: ['start start', 'end start'] })
-  /* Cuốn sổ chìm xuống chậm hơn chữ khi cuộn qua — chỉ 40px, đủ để thấy
-     có chiều sâu, không đủ để thành trò. */
-  const chim = useTransform(scrollYProgress, [0, 1], [0, 40])
 
   return (
-    <section
-      id="top"
-      ref={khung}
-      className="grain relative overflow-hidden bg-desk"
-    >
-      <div className="relative mx-auto grid max-w-[1120px] gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-16 lg:py-28">
+    /* MẶT BÀN TỐI: cuốn sổ là tờ giấy SÁNG nằm trên mặt bàn SẪM.
+       Toàn bộ tiêu đề + mô tả + hai nút + bảng mẫu nằm gọn trong một khung
+       1440×900; chỉ dòng chú thích dưới bảng được phép tràn. */
+    <section id="top" className="grain relative overflow-hidden bg-desk">
+      <div className="relative mx-auto grid max-w-[1120px] gap-10 px-4 pt-12 pb-14 sm:px-6 sm:pt-16 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-14 lg:pt-14 lg:pb-12">
         <div className="settle min-w-0">
-          <h1 className="font-display text-[38px] leading-[1.14] font-semibold tracking-[-0.015em] text-paper sm:text-[54px] lg:text-[62px]">
+          <h1 className="font-display text-[38px] leading-[1.14] font-semibold tracking-[-0.015em] text-paper sm:text-[52px] lg:text-[58px]">
             {h.title.split('\n').map((d, i) => (
               <span key={i} className="block">
                 {d}
@@ -143,38 +113,29 @@ export function Hero() {
             ))}
           </h1>
 
-          <p className="mt-6 max-w-[52ch] text-[15px] leading-[1.85] text-paper/70">{h.lead}</p>
+          <p className="mt-5 max-w-[52ch] text-[15px] leading-[1.8] text-paper/75">{h.lead}</p>
 
-          <div className="mt-8 flex flex-col gap-2.5 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center">
-            <motion.a
+          <div className="mt-7 flex flex-col gap-2.5 min-[420px]:flex-row min-[420px]:flex-wrap min-[420px]:items-center">
+            <a
               href={DASHBOARD_URL}
-              whileHover={{ y: -2 }}
-              whileTap={{ y: 0, scale: 0.985 }}
-              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-              className="rounded-sm bg-shu px-5 py-2.5 text-center text-[14.5px] font-medium text-paper-3 hover:brightness-110"
+              className="btn-shu rounded-sm px-5 py-2.5 text-center text-[14.5px] font-medium"
             >
               {h.primary}
-            </motion.a>
+            </a>
             <a
               href="#reads"
-              className="rounded-sm border border-paper/25 px-5 py-2.5 text-center text-[14.5px] text-paper/85 hover:border-paper/50 hover:text-paper"
+              className="rounded-sm border border-paper/25 px-5 py-2.5 text-center text-[14.5px] text-paper/85 transition-colors duration-200 hover:border-paper/55 hover:text-paper"
             >
               {h.secondary}
             </a>
           </div>
 
-          <p className="mt-5 max-w-[46ch] text-[12.5px] leading-relaxed text-paper/45">{h.note}</p>
+          <p className="mt-5 max-w-[46ch] text-[12.5px] leading-relaxed text-paper/55">{h.note}</p>
         </div>
 
-        {/* Hai lớp, cố ý tách: lớp NGOÀI do Motion giữ để trôi theo cuộn,
-            lớp TRONG là hoạt ảnh mở đầu bằng CSS. Gộp vào một thẻ thì hai
-            bên cùng ghi `transform` và giành nhau — hoạt ảnh CSS thắng
-            lúc đang chạy, rồi buông ra cho Motion, thành một cú giật. */}
-        <motion.div style={{ y: chim }} className="min-w-0">
-          <div className="settle">
-            <PassbookSpread />
-          </div>
-        </motion.div>
+        <div className="settle min-w-0" style={{ animationDelay: '120ms' }}>
+          <PassbookSpread />
+        </div>
       </div>
     </section>
   )
@@ -186,15 +147,16 @@ export function Reads() {
 
   return (
     <Section id="reads" title={r.title} lead={r.lead} nen="giayDam">
-      {/* Mỗi mục một HÌNH VẼ của chính trang sổ. Hình tự diễn khi cuộn
-          tới — cột đảo chỗ, vòng tròn tự khoanh — nên hiểu được cả khi
-          chưa đọc chữ. */}
-      <List className="m-0 grid list-none gap-x-8 gap-y-0 border-t border-rule p-0 md:grid-cols-2">
+      {/* Mỗi mục tự hiện khi lọt vào khung nhìn. Hai mục cùng hàng lệch
+          nhau 50ms (trái trước, phải sau). Hình vẽ bên trong tự diễn theo
+          mục của nó — cột đảo chỗ, vòng tròn tự khoanh — không co giãn. */}
+      <ul className="m-0 grid list-none gap-x-8 gap-y-0 border-t border-rule p-0 md:grid-cols-2">
         {r.items.map((it, i) => {
           const Hinh = HINH_READS[i]
           return (
             <Item
               key={it.title}
+              tre={(i % 2) * NHIP}
               className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-4 border-b border-rule py-5 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-5 sm:py-6"
             >
               <figure className="m-0 self-start overflow-hidden rounded-sm">
@@ -221,25 +183,36 @@ export function Reads() {
                 <p className="mt-1.5 max-w-[52ch] text-[13.5px] leading-[1.75] text-sumi-2">
                   {it.body}
                 </p>
-                <p className="tnum mt-3 inline-block rounded-sm bg-paper-3 px-2.5 py-1.5 text-[12px] text-sumi ring-1 ring-rule">
+                <p className="tnum mt-3 inline-block max-w-full rounded-sm bg-paper-3 px-2.5 py-1.5 text-[12px] break-words text-sumi ring-1 ring-rule">
                   {it.sample}
                 </p>
               </div>
             </Item>
           )
         })}
-      </List>
+      </ul>
     </Section>
   )
 }
 
-/* PHÉP TÍNH BA DÒNG, chạy ra kết quả từng dòng một khi cuộn tới.
+/* 残高チェーン — chạy ĐÚNG MỘT LẦN khi khối này vào khung nhìn ~40%.
  *
- * Đây là ý cốt lõi của cả sản phẩm, mà trước đó chỉ có một dòng công
- * thức khô khốc. Cho ba dòng THẬT của sổ mẫu tự cộng ra trước mắt thì
- * người xem hiểu ngay "kiểm chứng" nghĩa là gì — nhanh hơn mọi đoạn văn.
+ * Thứ tự là câu chuyện của sản phẩm: công thức hiện → ba dòng tính lần
+ * lượt (cách nhau 80ms) → kết quả mỗi dòng "đáp xuống" (landed) → son
+ * đóng「一致」nhỏ (stamp). Cuộn lên xuống không chạy lại.
+ *
+ * Dùng lại hai lớp CSS đã có: `.landed` và `.stamp`. Trước khi chạy, các
+ * dòng chỉ ẩn bằng opacity nên bố cục không nhảy.
  */
-function ChuoiSoDu() {
+function useChayMotLan<T extends Element>(amount: number) {
+  const ref = useRef<T>(null)
+  const chay = useInView(ref, { once: true, amount })
+  return [ref, chay] as const
+}
+
+const BUOC_CHUOI = 0.08
+
+function ChuoiSoDu({ chay }: { chay: boolean }) {
   const { t } = useI18n()
   const v = t.verify
   const hang = [
@@ -248,60 +221,61 @@ function ChuoiSoDu() {
     { truoc: '373,174', dau: '−', so: '350,000', ra: '23,174' },
   ]
   return (
-    <motion.ul
-      initial="an"
-      whileInView="hien"
-      viewport={TAM_NHIN}
-      variants={damNhip(0.16, 0.15)}
-      className="m-0 grid list-none gap-0 p-0"
-    >
-      {hang.map((h) => (
-        <motion.li
-          key={h.ra}
-          data-motion
-          variants={len}
-          className="tnum flex items-center gap-2 border-b border-rule-soft py-2.5 text-[13px] last:border-0 sm:gap-3 sm:text-[15px]"
-        >
-          <span className="text-sumi-2">{h.truoc}</span>
-          <span className="text-sumi-3">{h.dau}</span>
-          <span className="text-sumi-2">{h.so}</span>
-          <span className="text-sumi-3">=</span>
-          <motion.span
-            variants={{
-              an: { opacity: 0, filter: 'blur(3px)' },
-              hien: { opacity: 1, filter: 'blur(0px)', transition: { duration: 0.34, delay: 0.22 } },
-            }}
-            className="font-semibold text-sumi"
+    <ul className="m-0 grid list-none gap-0 p-0">
+      {hang.map((h, i) => {
+        const tre = (i + 1) * BUOC_CHUOI
+        return (
+          <li
+            key={h.ra}
+            data-motion
+            className={`tnum flex items-center gap-2 border-b border-rule-soft py-2.5 text-[13px] last:border-0 sm:gap-3 sm:text-[15px] ${
+              chay ? 'settle' : 'opacity-0'
+            }`}
+            style={chay ? { animationDelay: `${tre}s` } : undefined}
           >
-            {h.ra}
-          </motion.span>
-          <motion.span
-            variants={{
-              an: { opacity: 0, scale: 0.6 },
-              hien: {
-                opacity: 1,
-                scale: 1,
-                transition: { duration: 0.3, delay: 0.42, ease: [0.34, 1.56, 0.64, 1] },
-              },
-            }}
-            className="ml-auto text-[11px] text-shu"
-          >
-            {v.tick}
-          </motion.span>
-        </motion.li>
-      ))}
-    </motion.ul>
+            <span className="text-sumi-2">{h.truoc}</span>
+            <span className="text-sumi-3">{h.dau}</span>
+            <span className="text-sumi-2">{h.so}</span>
+            <span className="text-sumi-3">=</span>
+            <span
+              data-motion
+              className={`font-semibold text-sumi ${chay ? 'landed' : 'opacity-0'}`}
+              style={chay ? { animationDelay: `${tre + 0.22}s` } : undefined}
+            >
+              {h.ra}
+            </span>
+            <span
+              data-motion
+              className={`seal ml-auto px-1.5 py-px text-[10.5px] leading-tight font-medium ${
+                chay ? 'stamp' : 'opacity-0'
+              }`}
+              style={chay ? { animationDelay: `${tre + 0.44}s` } : undefined}
+            >
+              {v.tick}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
 export function Verify() {
   const { t } = useI18n()
   const v = t.verify
+  const [khoiChuoi, chayChuoi] = useChayMotLan<HTMLDivElement>(0.4)
+  const [khoiVang, chayVang] = useChayMotLan<HTMLTableElement>(0.6)
 
   return (
     <Section id="verify" title={v.title} lead={v.lead}>
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center">
-        <Reveal className="border-y-2 border-sumi bg-paper-3">
+      <div
+        ref={khoiChuoi}
+        className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center"
+      >
+        <div
+          data-motion
+          className={`border-y-2 border-sumi bg-paper-3 ${chayChuoi ? 'settle' : 'opacity-0'}`}
+        >
           <p className="tnum m-0 max-w-[36ch] px-4 py-7 text-[15px] leading-[1.55] text-sumi sm:px-8 sm:py-10 sm:text-[20px] lg:max-w-none lg:text-[24px]">
             {v.formula}
             <Explain label={t.explains.chain.label}>
@@ -310,12 +284,12 @@ export function Verify() {
               </span>
             </Explain>
           </p>
-        </Reveal>
+        </div>
 
-        <Reveal delay={0.08} className="rounded-sm bg-paper-3 px-4 py-4 ring-1 ring-rule sm:px-6">
-          <p className="m-0 mb-2 text-[12.5px] text-sumi-3">{v.workedLabel}</p>
-          <ChuoiSoDu />
-        </Reveal>
+        <div className="rounded-sm bg-paper-3 px-4 py-4 ring-1 ring-rule sm:px-6">
+          <p className="m-0 mb-2 text-[12.5px] text-sumi-2">{v.workedLabel}</p>
+          <ChuoiSoDu chay={chayChuoi} />
+        </div>
       </div>
 
       <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
@@ -346,7 +320,9 @@ export function Verify() {
           </dl>
         </Reveal>
 
-        <Reveal delay={0.08}>
+        {/* Cột「黄色は…」KHÔNG bọc trong khối hiện-dần: nó từng bị chụp lại
+            khi còn đang mờ dở, trông như chữ nhạt. Chữ tối thiểu --sumi-2. */}
+        <div>
           <h3 className="font-display text-[17px] font-semibold text-sumi">
             {v.yellowTitle}
             <Explain label={v.yellowExplainLabel}>
@@ -359,7 +335,10 @@ export function Verify() {
             {v.yellowBody}
           </p>
 
-          <table className="mt-4 w-full border-collapse overflow-hidden rounded-sm text-left ring-1 ring-rule">
+          <table
+            ref={khoiVang}
+            className="mt-4 w-full border-collapse overflow-hidden rounded-sm text-left ring-1 ring-rule"
+          >
             <tbody className="bg-paper-3">
               <tr className="border-b border-rule-soft">
                 <td className="tnum py-2 pl-3 text-[12.5px] text-sumi-2">07-04-01</td>
@@ -367,7 +346,12 @@ export function Verify() {
               </tr>
               <tr className="border-b border-rule-soft">
                 <td className="tnum py-2 pl-3 text-[12.5px] text-sumi-2">07-04-01</td>
-                <td className="tnum bg-kin-soft py-2 pr-3 text-right text-[12.5px] font-semibold text-sumi ring-1 ring-inset ring-kin">
+                {/* Ô SAI NGẢ VÀNG: đập một nhịp rồi đứng, chỉ một lần */}
+                <td
+                  className={`tnum bg-kin-soft py-2 pr-3 text-right text-[12.5px] font-semibold text-sumi ring-1 ring-kin ring-inset ${
+                    chayVang ? 'kin-pulse' : ''
+                  }`}
+                >
                   544,489
                 </td>
               </tr>
@@ -377,7 +361,7 @@ export function Verify() {
               </tr>
             </tbody>
           </table>
-        </Reveal>
+        </div>
       </div>
 
       <Reveal className="mt-12 border-l-2 border-shu bg-paper-3 px-4 py-4 sm:pl-6">
@@ -396,22 +380,11 @@ export function Workspace() {
 
   return (
     <Section id="screen" title={a.title} lead={a.lead} nen="toi">
-      <Laptop />
-      <Reveal as="p" className="mt-8 text-center text-[12.5px] text-paper/50">
-        {a.caption}
-      </Reveal>
+      <ManHinh />
+      <p className="mt-8 text-center text-[12.5px] text-paper/60">{a.caption}</p>
     </Section>
   )
 }
-
-/** Ảnh chụp thật cho từng bước. Thứ tự khớp với `how.steps`. */
-const ANH_BUOC = [
-  '/shots/step-1-import.webp',
-  '/shots/step-2-straighten.webp',
-  '/shots/step-3-scan.webp',
-  '/shots/step-4-fix.webp',
-  '/shots/step-5-export.webp',
-]
 
 export function How() {
   const { t } = useI18n()
@@ -419,37 +392,7 @@ export function How() {
 
   return (
     <Section id="how" title={h.title} lead={h.lead} nen="giayDam">
-      {/* Số ở lề trái là số thứ tự 01–24 in mờ trên chính cuốn sổ, và ở
-          đây nội dung ĐÚNG LÀ một trình tự nên con số có nghĩa thật.
-          Mỗi bước kèm một ảnh chụp thật của đúng bước đó. */}
-      <List as="ol" buoc={0.09} className="m-0 list-none border-t border-rule p-0">
-        {h.steps.map((s, i) => (
-          <Item key={s.title} className="border-b border-rule py-5 sm:py-7">
-            <div className="flex items-baseline gap-3 sm:gap-5">
-              <span className="tnum shrink-0 text-[12px] text-beni">
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <h3 className="font-display text-[16.5px] font-semibold text-sumi">{s.title}</h3>
-            </div>
-            <div
-              className={`mt-3 grid gap-4 sm:mt-4 sm:gap-8 sm:pl-[2rem] ${
-                i % 2 === 0
-                  ? 'sm:grid-cols-[24rem_minmax(0,1fr)]'
-                  : 'sm:grid-cols-[minmax(0,1fr)_24rem]'
-              }`}
-            >
-              <Anh
-                src={ANH_BUOC[i]}
-                alt={s.title}
-                className={i % 2 === 0 ? '' : 'sm:order-2'}
-              />
-              <p className="m-0 max-w-[46ch] self-center text-[14px] leading-[1.85] text-sumi-2 sm:justify-self-center">
-                {s.body}
-              </p>
-            </div>
-          </Item>
-        ))}
-      </List>
+      <HowSteps />
     </Section>
   )
 }
@@ -460,12 +403,13 @@ export function Tools() {
 
   return (
     <Section title={w.title} lead={w.lead}>
-      <List className="m-0 grid list-none gap-x-8 gap-y-0 border-t border-rule p-0 sm:grid-cols-2">
+      <ul className="m-0 grid list-none gap-x-8 gap-y-0 border-t border-rule p-0 sm:grid-cols-2">
         {w.items.map((it, i) => {
           const Hinh = HINH_TOOLS[i]
           return (
             <Item
               key={it.title}
+              tre={(i % 2) * NHIP}
               className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-4 border-b border-rule py-5 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-5"
             >
               <figure className="m-0 self-start overflow-hidden rounded-sm">
@@ -480,7 +424,7 @@ export function Tools() {
             </Item>
           )
         })}
-      </List>
+      </ul>
     </Section>
   )
 }
@@ -495,9 +439,9 @@ export function Excel() {
         <Reveal className="min-w-0">
           <ExcelPreview />
         </Reveal>
-        <List className="m-0 list-none border-t border-rule p-0">
+        <ul className="m-0 list-none border-t border-rule p-0">
           {e.points.map((p, i) => (
-            <Item key={p.t} className="border-b border-rule py-4">
+            <Item key={p.t} tre={i * NHIP} className="border-b border-rule py-4">
               <h3 className="font-display text-[15.5px] font-semibold text-sumi">
                 {p.t}
                 {i === 0 && (
@@ -523,7 +467,7 @@ export function Excel() {
               <p className="mt-1 max-w-[46ch] text-[13px] leading-[1.7] text-sumi-2">{p.d}</p>
             </Item>
           ))}
-        </List>
+        </ul>
       </div>
     </Section>
   )
@@ -585,7 +529,7 @@ export function Limits() {
 
         <Reveal
           as="p"
-          delay={0.08}
+          delay={NHIP}
           className="m-0 self-center font-display text-[18px] leading-[1.6] text-balance text-sumi italic sm:text-[21px]"
         >
           {l.value}
@@ -597,32 +541,10 @@ export function Limits() {
 
 export function Faq() {
   const { t } = useI18n()
-  const f = t.faq
 
   return (
-    <Section id="faq" title={f.title}>
-      <List as="div" className="border-t border-rule">
-        {f.items.map((it) => (
-          <motion.details key={it.q} data-motion variants={len} className="group border-b border-rule">
-            <summary className="flex cursor-pointer list-none items-baseline gap-3 py-4 text-[14.5px] font-medium text-sumi marker:content-none">
-              <span
-                aria-hidden
-                className="mt-[2px] shrink-0 text-[13px] text-shu transition-transform duration-200 group-open:rotate-45"
-              >
-                ＋
-              </span>
-              <span className="max-w-[58ch]">{it.q}</span>
-            </summary>
-            {/* Mở ra thì chữ trôi xuống. Làm bằng CSS gắn vào `details[open]`
-                chứ không bằng Motion: thẻ đóng thì nội dung là `display:none`,
-                nên hoạt ảnh của Motion chạy lúc dựng thẻ — tức là chạy vào
-                lúc không ai thấy, rồi khi mở ra thì đã xong từ đời nào. */}
-            <p className="faq-a m-0 max-w-[64ch] pb-5 pl-[1.6rem] text-[13.5px] leading-[1.8] text-sumi-2">
-              {it.a}
-            </p>
-          </motion.details>
-        ))}
-      </List>
+    <Section id="faq" title={t.faq.title}>
+      <DanhSachHoiDap />
     </Section>
   )
 }
@@ -632,22 +554,19 @@ export function Cta() {
   const c = t.cta
 
   return (
-    <section className="border-t border-rule bg-sumi text-paper">
-      <div className="mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-24">
+    <section id="start" className="border-t border-rule bg-sumi text-paper">
+      <div className="mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
         <Reveal>
           <h2 className="max-w-[24ch] font-display text-[26px] leading-[1.3] font-semibold sm:text-[34px]">
             {c.title}
           </h2>
-          <p className="mt-3 max-w-[54ch] text-[14.5px] leading-[1.75] text-paper/70">{c.lead}</p>
-          <motion.a
+          <p className="mt-3 max-w-[54ch] text-[14.5px] leading-[1.75] text-paper/75">{c.lead}</p>
+          <a
             href={DASHBOARD_URL}
-            whileHover={{ y: -2 }}
-            whileTap={{ y: 0, scale: 0.985 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-            className="mt-8 inline-block rounded-sm bg-shu px-6 py-3 text-[15px] font-medium text-paper-3 hover:brightness-110"
+            className="btn-shu mt-8 inline-block rounded-sm px-6 py-3 text-[15px] font-medium"
           >
             {c.button}
-          </motion.a>
+          </a>
         </Reveal>
       </div>
     </section>

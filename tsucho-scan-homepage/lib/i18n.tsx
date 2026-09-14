@@ -1,6 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 /* Nội dung trang chủ, ba thứ tiếng.
  *
@@ -943,8 +944,22 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  /* Đổi ngôn ngữ qua View Transitions API: trang cũ mờ đi, trang mới hiện
+     lên và nhích 6px (CSS trong globals.css). Không morph từng chữ — chữ
+     Nhật và chữ Việt không có gì để "biến hình" sang nhau.
+     `flushSync` bắt React vẽ xong ngay trong lượt chuyển, nếu không trình
+     duyệt chụp ảnh "sau" khi DOM chưa đổi. Trình duyệt không hỗ trợ, hoặc
+     người dùng bật giảm chuyển động: đổi thẳng, không hiệu ứng. */
   const setLang = useCallback((l: Lang) => {
-    setLangState(l)
+    const doi = () => setLangState(l)
+    const coVT = typeof document !== 'undefined' && 'startViewTransition' in document
+    const it = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (coVT && !it) {
+      ;(document as Document & { startViewTransition: (cb: () => void) => unknown })
+        .startViewTransition(() => flushSync(doi))
+    } else {
+      doi()
+    }
     document.documentElement.lang = HTML_LANG[l]
     try {
       localStorage.setItem(KEY, l)

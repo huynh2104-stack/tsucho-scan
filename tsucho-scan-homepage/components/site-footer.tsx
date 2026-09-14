@@ -9,7 +9,7 @@ export function SiteFooter() {
 
   return (
     <footer className="border-t border-rule bg-paper">
-      <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 py-10 sm:flex-row sm:items-end sm:justify-between sm:px-6">
+      <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 pt-10 pb-24 min-[560px]:pb-10 sm:flex-row sm:items-end sm:justify-between sm:px-6">
         <div>
           <p className="m-0 text-[17px] text-sumi">
             <Brand size={24} />
@@ -40,7 +40,7 @@ export function SiteFooter() {
               </button>
             ))}
           </div>
-          <p className="tnum m-0 mt-3 text-[12px] text-sumi-3">
+          <p className="tnum m-0 mt-3 text-[12px] text-sumi-2">
             © {new Date().getFullYear()} {t.footer.rights}
           </p>
         </div>
