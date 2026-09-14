@@ -30,7 +30,7 @@ const DICT = {
       how: '進め方',
       screen: '作業画面',
       output: '出力ファイル',
-      limits: '精度と費用',
+      limits: '精度',
       pricing: '料金',
       faq: 'よくある質問',
       login: 'ログイン',
@@ -175,13 +175,12 @@ const DICT = {
       ],
     },
     limits: {
-      title: '精度と費用について、先にお伝えします',
+      title: '精度について、先にお伝えします',
       lead:
         '100%とは言いません。実際に測った数字はこうです。先に知っておけば道具として使えますが、隠されていれば不具合になります。',
       rows: [
         { metric: '金額・残高', value: '93〜100%', note: '残高チェーンで裏づけが取れる部分です' },
         { metric: '振込先のカナ', value: '60〜95%', note: '検算では守れません。目で見る必要があります' },
-        { metric: '1ページの費用', value: '約$0.004〜0.006', note: '実測。無料枠の範囲なら$0です' },
         { metric: '1ページの時間', value: '数秒〜十数秒', note: '通帳の面数だけ並べて処理します' },
       ],
       notDoTitle: 'できないこと',
@@ -262,7 +261,6 @@ const DICT = {
         '台形補正・切り抜き・回転・明るさ',
         '複数ページPDFの自動分割',
         '面ごと／1つの表にまとめる',
-        '日本語・English・Tiếng Việt',
       ],
       ask: '面数が足りないときや、もっと大きな量をお考えのときはご相談ください。',
     },
@@ -321,7 +319,6 @@ const DICT = {
       title: '手元の通帳で、1ページだけ試してみてください',
       lead: '見本の通帳なら費用はかかりません。動きを見てから、実際の通帳を出すか決められます。',
       button: '読み取りを始める',
-      note: '日本語でも、English でも、Tiếng Việt でも使えます',
     },
     footer: {
       tagline: '通帳の明細を、検算済みの表に。',
@@ -472,13 +469,12 @@ const DICT = {
       ],
     },
     limits: {
-      title: 'Nói trước về độ chính xác và chi phí',
+      title: 'Nói trước về độ chính xác',
       lead:
         'Tôi không hứa 100%. Đây là số đo thật. Biết trước thì đây là công cụ dùng được; giấu đi rồi bị phát hiện thì thành lỗi.',
       rows: [
         { metric: 'Số tiền và số dư', value: '93–100%', note: 'Phần này có chuỗi số dư bảo chứng' },
         { metric: 'Tên đối tác katakana', value: '60–95%', note: 'Chuỗi số dư không đỡ được, phải soát mắt' },
-        { metric: 'Chi phí mỗi trang', value: '~$0.004–0.006', note: 'Đo thật. Trong hạn mức miễn phí thì $0' },
         { metric: 'Thời gian mỗi trang', value: 'Vài giây', note: 'Nhiều mặt sổ thì xếp hàng chạy lần lượt' },
       ],
       notDoTitle: 'Những việc nó KHÔNG làm',
@@ -559,7 +555,6 @@ const DICT = {
         'Nắn phối cảnh · cắt · xoay · chỉnh sáng',
         'Tự tách PDF nhiều trang thành từng mặt',
         'Tách theo mặt sổ hoặc gộp một bảng',
-        '日本語 · English · Tiếng Việt',
       ],
       ask: 'Nếu số mặt sổ không đủ dùng, hoặc anh chị cần khối lượng lớn hơn, cứ trao đổi với chúng tôi.',
     },
@@ -618,7 +613,6 @@ const DICT = {
       title: 'Thử đúng một mặt sổ đang có trên bàn',
       lead: 'Sổ mẫu không tốn phí. Xem nó chạy thế nào rồi hãy quyết có đưa sổ thật lên hay không.',
       button: 'Bắt đầu quét',
-      note: 'Dùng được bằng Tiếng Việt, English và 日本語',
     },
     footer: {
       tagline: 'Sổ ngân hàng Nhật, thành bảng đã kiểm chứng.',
@@ -769,13 +763,12 @@ const DICT = {
       ],
     },
     limits: {
-      title: 'Accuracy and cost, stated up front',
+      title: 'Accuracy, stated up front',
       lead:
         'No promise of 100%. These are measured figures. Known in advance they make this a usable tool; discovered later they would be a defect.',
       rows: [
         { metric: 'Amounts and balances', value: '93–100%', note: 'The part the balance chain backs up' },
         { metric: 'Katakana payee names', value: '60–95%', note: 'The chain cannot protect this. Eyes required' },
-        { metric: 'Cost per page', value: '~$0.004–0.006', note: 'Measured. $0 inside the free allowance' },
         { metric: 'Time per page', value: 'A few seconds', note: 'Pages queue and run one after another' },
       ],
       notDoTitle: 'What it does not do',
@@ -856,7 +849,6 @@ const DICT = {
         'Keystone, crop, rotate, brightness',
         'Multi-page PDFs split automatically',
         'One sheet per page, or all in one table',
-        '日本語 · English · Tiếng Việt',
       ],
       ask: 'If the page count does not fit, or you need a much larger volume, get in touch.',
     },
@@ -915,7 +907,6 @@ const DICT = {
       title: 'Try one page from the passbook on your desk',
       lead: 'The sample costs nothing. Watch it work, then decide whether to upload a real book.',
       button: 'Start scanning',
-      note: 'Available in English, 日本語 and Tiếng Việt',
     },
     footer: {
       tagline: 'Japanese passbooks, as a checked spreadsheet.',

@@ -648,7 +648,6 @@ export function Cta() {
           >
             {c.button}
           </motion.a>
-          <p className="mt-3.5 text-[12.5px] text-paper/55">{c.note}</p>
         </Reveal>
       </div>
     </section>
