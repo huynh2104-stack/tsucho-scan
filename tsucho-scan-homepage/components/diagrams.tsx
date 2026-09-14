@@ -46,7 +46,8 @@ function Giay() {
   )
 }
 
-const keO = { duration: 0.7, ease: [0.22, 1, 0.36, 1] } as const
+/* 1 giây: chậm lại theo góp ý "hiện quá nhanh" */
+const keO = { duration: 1, ease: [0.22, 1, 0.36, 1] } as const
 
 /* 1 ── Cột お預り／お支払 đảo chỗ. Hai chữ đổi chỗ ngay trước mắt. */
 export function DiaColumns() {
@@ -416,180 +417,8 @@ export function DiaFold() {
   )
 }
 
-/* ── Bốn công cụ chỉnh ảnh ─────────────────────────────────── */
-
-/* 9 ── Nắn phối cảnh: bốn góc kéo về đúng khung chữ nhật. */
-export function DiaKeystone() {
-  const goc = [
-    { an: { cx: 22, cy: 22 }, hien: { cx: 14, cy: 14 } },
-    { an: { cx: 100, cy: 15 }, hien: { cx: 106, cy: 14 } },
-    { an: { cx: 104, cy: 66 }, hien: { cx: 106, cy: 70 } },
-    { an: { cx: 18, cy: 72 }, hien: { cx: 14, cy: 70 } },
-  ]
-  return (
-    <Svg label="台形補正で四隅を合わせる">
-      <motion.polygon
-        points="22,22 100,15 104,66 18,72"
-        fill="var(--paper-2)"
-        stroke="var(--rule)"
-        variants={{ an: { opacity: 1 }, hien: { opacity: 0, transition: { ...keO, delay: 0.3 } } }}
-      />
-      <motion.rect
-        x="14"
-        y="14"
-        width="92"
-        height="56"
-        rx="2"
-        fill="var(--paper-3)"
-        stroke="var(--rule)"
-        variants={{ an: { opacity: 0 }, hien: { opacity: 1, transition: { ...keO, delay: 0.3 } } }}
-      />
-      {[26, 36, 46, 56].map((y) => (
-        <motion.line
-          key={y}
-          x1="22"
-          y1={y}
-          x2="98"
-          y2={y}
-          stroke="var(--rule-soft)"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          variants={{ an: { opacity: 0 }, hien: { opacity: 1, transition: { ...keO, delay: 0.42 } } }}
-        />
-      ))}
-      {goc.map((g, k) => (
-        <motion.circle
-          key={k}
-          r="4.2"
-          fill="var(--shu)"
-          variants={{ an: g.an, hien: { ...g.hien, transition: { ...keO, delay: 0.3 } } }}
-        />
-      ))}
-    </Svg>
-  )
-}
-
-/* 10 ── Cắt bỏ bìa và tiêu đề. */
-export function DiaCrop() {
-  const nhay = { an: { opacity: 0.25 }, hien: { opacity: 1, transition: { ...keO, delay: 0.3 } } }
-  return (
-    <Svg label="切り抜きで表紙や見出しを落とす">
-      <rect
-        x="6"
-        y="8"
-        width="108"
-        height="68"
-        rx="2"
-        fill="var(--paper-2)"
-        stroke="var(--rule-soft)"
-        strokeDasharray="3 3"
-      />
-      <motion.rect
-        rx="1.5"
-        fill="var(--paper-3)"
-        stroke="var(--shu)"
-        strokeWidth="1.4"
-        variants={{
-          an: { x: 6, y: 8, width: 108, height: 68 },
-          hien: { x: 22, y: 22, width: 76, height: 44, transition: { ...keO, delay: 0.25 } },
-        }}
-      />
-      {[32, 42, 52].map((y) => (
-        <motion.line
-          key={y}
-          x1="28"
-          y1={y}
-          x2="92"
-          y2={y}
-          stroke="var(--rule-soft)"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          variants={nhay}
-        />
-      ))}
-    </Svg>
-  )
-}
-
-/* 11 ── Xoay 90° và chỉnh nghiêng từng độ. */
-export function DiaRotate() {
-  return (
-    <Svg label="回転と傾きの微調整">
-      <motion.g
-        style={{ transformOrigin: '60px 42px' }}
-        variants={{ an: { rotate: -14 }, hien: { rotate: 0, transition: { ...keO, delay: 0.25 } } }}
-      >
-        <rect x="26" y="14" width="68" height="56" rx="2" fill="var(--paper-3)" stroke="var(--rule)" />
-        {[26, 36, 46, 56].map((y) => (
-          <line
-            key={y}
-            x1="33"
-            y1={y}
-            x2="87"
-            y2={y}
-            stroke="var(--rule-soft)"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-          />
-        ))}
-      </motion.g>
-      <motion.path
-        d="M14 54 A 30 30 0 0 1 26 26"
-        fill="none"
-        stroke="var(--shu)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        variants={{
-          an: { pathLength: 0 },
-          hien: { pathLength: 1, transition: { ...keO, delay: 0.4 } },
-        }}
-      />
-      <text x="103" y="70" textAnchor="middle" fontSize="8" fill="var(--sumi-3)" fontFamily="var(--font-mono)">
-        1°
-      </text>
-    </Svg>
-  )
-}
-
-/* 12 ── Sáng và tương phản: chữ in mờ rõ hẳn lên. */
-export function DiaLevels() {
-  return (
-    <Svg label="明るさとコントラストの調整">
-      <Giay />
-      {[22, 32, 42, 52, 62].map((y, k) => (
-        <motion.line
-          key={y}
-          x1="12"
-          y1={y}
-          x2="108"
-          y2={y}
-          stroke="var(--sumi)"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          variants={{
-            an: { opacity: 0.14 },
-            hien: { opacity: 0.14 + k * 0.16, transition: { ...keO, delay: 0.22 + k * 0.06 } },
-          }}
-        />
-      ))}
-      <motion.line
-        x1="12"
-        y1="74"
-        x2="108"
-        y2="74"
-        stroke="var(--shu)"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        variants={{
-          an: { pathLength: 0 },
-          hien: { pathLength: 1, transition: { ...keO, delay: 0.3 } },
-        }}
-      />
-    </Svg>
-  )
-}
-
-/** Thứ tự khớp đúng với `reads.items` và `tools.items` trong lib/i18n.tsx. */
+/** Thứ tự khớp đúng với `reads.items` trong lib/i18n.tsx.
+ *  Hình của bốn công cụ chỉnh ảnh nằm ở components/tool-motion.tsx. */
 export const HINH_READS = [
   DiaColumns,
   DiaLegend,
@@ -601,4 +430,3 @@ export const HINH_READS = [
   DiaFold,
 ]
 
-export const HINH_TOOLS = [DiaKeystone, DiaCrop, DiaRotate, DiaLevels]

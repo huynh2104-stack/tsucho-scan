@@ -10,7 +10,12 @@ import type { ReactNode } from 'react'
    (--ease-out, --t-base, --t-slow). Motion không đọc được biến CSS
    nên phải chép lại; đổi một bên thì đổi cả bên kia.
 
-   Nhịp hiện dần: dịch 10px + mờ-tỏ, không phóng to thu nhỏ. Mỗi mục
+   Nhịp hiện dần: dịch 8px + mờ-tỏ trong --t-slow (720ms), mỗi mục cách
+   nhau 80ms, chạy MỘT LẦN khi lọt ~20% vào khung nhìn. Chủ sản phẩm thấy
+   bản 520ms / 50ms "quá nhanh, không đắt".
+
+   KHÔNG dùng cho tiêu đề lớn — tiêu đề hiện ngay; chỉ phụ kiện (thẻ, dòng
+   số, con dấu) mới chuyển động. Mỗi mục
    TỰ theo dõi khi nào nó lọt vào khung nhìn — không để cha điều
    khiển cả danh sách, vì trên điện thoại danh sách dài hơn màn hình
    và các mục cuối sẽ chạy xong khi chưa ai cuộn tới.
@@ -20,16 +25,16 @@ import type { ReactNode } from 'react'
    ───────────────────────────────────────────────────────────── */
 
 export const EASE_OUT = [0.22, 1, 0.36, 1] as const
-export const T_BASE = 0.32
-export const T_SLOW = 0.52
-/** Khoảng cách giữa hai mục khi hiện lần lượt (40–60ms). */
-export const NHIP = 0.05
+export const T_BASE = 0.48
+export const T_SLOW = 0.72
+/** Khoảng cách giữa hai mục khi hiện lần lượt (70–90ms). */
+export const NHIP = 0.08
 
-/** Hiện khi 12% phần tử lọt vào, và chỉ một lần. */
-export const TAM_NHIN = { once: true, amount: 0.12 } as const
+/** Hiện khi ~20% phần tử lọt vào, và chỉ một lần. */
+export const TAM_NHIN = { once: true, amount: 0.2 } as const
 
 export const len: Variants = {
-  an: { opacity: 0, y: 10 },
+  an: { opacity: 0, y: 8 },
   hien: (tre: number = 0) => ({
     opacity: 1,
     y: 0,

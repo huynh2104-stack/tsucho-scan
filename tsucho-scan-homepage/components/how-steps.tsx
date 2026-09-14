@@ -3,136 +3,108 @@
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
+import { Reveal } from '@/lib/motion'
 
-/** Ảnh chụp thật cho từng bước, cùng tỉ lệ 4:3. Thứ tự khớp `how.steps`. */
+/** Ảnh chụp thật, ĐỘ PHÂN GIẢI GỐC (ảnh chụp gấp đôi). Thứ tự khớp `how.steps`.
+ *  w/h là kích thước điểm ảnh thật của file — khung giữ đúng tỉ lệ đó. */
 const ANH = [
-  '/shots/step-1-import.webp',
-  '/shots/step-2-straighten.webp',
-  '/shots/step-3-scan.webp',
-  '/shots/step-4-fix.webp',
-  '/shots/step-5-export.webp',
+  { src: '/shots/step-1-import.webp', w: 1120, h: 700 },
+  { src: '/shots/step-2-straighten.webp', w: 1120, h: 700 },
+  { src: '/shots/step-3-scan.webp', w: 1200, h: 750 },
+  { src: '/shots/step-4-fix.webp', w: 1120, h: 700 },
+  /* Bước 05 là TRỌN hộp thoại xuất file (khổ dọc). Hiện hẹp hơn một chút
+     để hàng không quá cao — vẫn ≈0,9 lần cỡ chữ thật trên màn QHD. */
+  { src: '/shots/step-5-export.webp', w: 1060, h: 1264, hep: true },
 ]
 
-/* 進め方 — MỘT khung ảnh đứng yên, năm bước chạy qua bên cạnh.
+/* 進め方 — năm bước xếp dọc, mỗi bước TỰ ĐỦ NGHĨA.
  *
- * Bản trước mỗi bước một ảnh to, xếp so le: section cao ~2.250px, cuộn
- * qua thấy từng mảng trống như trang lỗi. Nay trên máy tính ảnh DÍNH ở
- * cột phải (top = header + 16px), cột trái là danh sách 01–05; bước nào
- * đang nằm ngang giữa khung nhìn thì sáng lên và ảnh đổi theo.
+ * Bản trước là "cuộn thì khung ảnh dính đổi ảnh": chủ sản phẩm thấy người
+ * vào lần đầu không hiểu mình đang ở bước nào. Còn có lỗi thật: năm ảnh nằm
+ * trong từng bước (ẩn trên máy tính) CỘNG năm ảnh nữa trong khung dính —
+ * mười ảnh, phần lớn không tải. Nay chỉ còn một bộ ảnh, mỗi ảnh nằm ngay
+ * cạnh chữ của bước đó; lướt qua là hiểu "bước 1, 2, 3…".
  *
- * Cả năm ảnh luôn nằm trong DOM, chồng lên nhau; chỉ đổi mờ-tỏ + trượt
- * 12px. Không gỡ ra gắn vào nên khung không bao giờ nhảy.
+ * Bước nào đang ở giữa khung nhìn thì sáng lên: lằn son trái, số màu son,
+ * và một lớp son rất nhạt loang từ trái sang phải rồi tan (CSS `.how-row`).
+ * Đây chỉ là dấu định vị — không có gì đổi chỗ, không có gì phải học.
  *
- * Dưới 1024px bỏ dính: mỗi bước chữ + ảnh xếp dọc như bình thường.
+ * Ảnh: `object-contain` trong khung đúng tỉ lệ file, không cắt chữ. Cấu
+ * hình để `images.unoptimized` nên trình duyệt nhận nguyên file gốc.
  */
 export function HowSteps() {
   const { t } = useI18n()
   const buoc = t.how.steps
-  const [dang, setDang] = useState(0)
+  const [dang, setDang] = useState(-1)
   const refs = useRef<(HTMLLIElement | null)[]>([])
 
-  /* Bước đang đọc = bước CUỐI CÙNG có mép trên đã vượt qua đường 40% chiều
-     cao khung nhìn. Dùng một đường thay vì dải + IntersectionObserver: dải
-     có thể chạm hai bước cùng lúc và nhảy cóc qua bước 1; còn "bước cuối
-     đã qua đường" thì luôn tăng dần đều 0 → 1 → … → 4 khi cuộn xuống. */
   useEffect(() => {
-    let khung = 0
-    const tinh = () => {
-      khung = 0
-      const duong = window.innerHeight * 0.4
-      let i = 0
-      refs.current.forEach((el, k) => {
-        if (el && el.getBoundingClientRect().top <= duong) i = k
-      })
-      setDang((cu) => (cu === i ? cu : i))
-    }
-    const hen = () => {
-      if (!khung) khung = requestAnimationFrame(tinh)
-    }
-    tinh()
-    window.addEventListener('scroll', hen, { passive: true })
-    window.addEventListener('resize', hen)
-    return () => {
-      window.removeEventListener('scroll', hen)
-      window.removeEventListener('resize', hen)
-      cancelAnimationFrame(khung)
-    }
+    if (!('IntersectionObserver' in window)) return
+    /* Dải hẹp 10% ngang giữa khung nhìn. Bước nào chạm dải là bước đang xem.
+       Nằm giữa hai bước (không bước nào chạm) thì GIỮ bước cũ — không nháy. */
+    const io = new IntersectionObserver(
+      (muc) => {
+        for (const m of muc) {
+          if (!m.isIntersecting) continue
+          const i = refs.current.indexOf(m.target as HTMLLIElement)
+          if (i >= 0) setDang(i)
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
+    )
+    refs.current.forEach((el) => el && io.observe(el))
+    return () => io.disconnect()
   }, [])
 
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-14">
-      <ol className="m-0 list-none border-t border-rule p-0">
-        {buoc.map((s, i) => {
-          const sang = dang === i
-          return (
-            <li
-              key={s.title}
-              ref={(el) => {
-                refs.current[i] = el
-              }}
-              aria-current={sang ? 'step' : undefined}
-              className={`how-step border-b border-rule py-6 lg:flex lg:min-h-[11.5rem] lg:flex-col lg:justify-center lg:border-l-2 lg:py-7 lg:pl-5 ${
-                sang ? 'lg:border-l-shu' : 'lg:border-l-transparent'
-              }`}
-            >
+    <ol className="m-0 list-none border-t border-rule p-0">
+      {buoc.map((s, i) => {
+        const sang = dang === i
+        const a = ANH[i]
+        return (
+          <li
+            key={s.title}
+            ref={(el) => {
+              refs.current[i] = el
+            }}
+            data-active={sang}
+            aria-current={sang ? 'step' : undefined}
+            className="how-row grid gap-6 border-b border-rule py-8 pr-1 pl-4 sm:pl-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,560px)] lg:items-center lg:gap-12 lg:py-9"
+          >
+            <div className="min-w-0">
               <div className="flex items-baseline gap-3">
                 <span
-                  className={`how-step tnum shrink-0 text-[12px] ${
-                    sang ? 'lg:text-shu' : 'lg:text-sumi-2'
-                  } text-beni`}
+                  className={`how-num tnum shrink-0 text-[13px] font-medium ${
+                    sang ? 'text-shu' : 'text-sumi-2'
+                  }`}
                 >
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <h3 className="font-display text-[17px] font-semibold text-sumi">{s.title}</h3>
+                <h3 className="font-display text-[19px] leading-snug font-semibold text-sumi">
+                  {s.title}
+                </h3>
               </div>
-              <p className="m-0 mt-2 max-w-[44ch] pl-[2.1rem] text-[14px] leading-[1.8] text-sumi-2">
+              <p className="m-0 mt-2.5 max-w-[40ch] pl-[2.15rem] text-[14.5px] leading-[1.85] text-sumi-2">
                 {s.body}
               </p>
+            </div>
 
-              {/* Dưới 1024px: ảnh nằm ngay dưới chữ của bước đó */}
-              <figure className="khung-anh m-0 mt-5 lg:hidden">
+            <Reveal className={a.hep ? 'w-full lg:max-w-[480px] lg:justify-self-end' : 'w-full'}>
+              <figure className="khung-anh m-0">
                 <Image
-                  src={ANH[i]}
+                  src={a.src}
                   alt={s.title}
-                  width={880}
-                  height={660}
-                  sizes="(max-width: 1024px) 92vw, 1px"
-                  className="block h-auto w-full rounded-[4px]"
+                  width={a.w}
+                  height={a.h}
+                  quality={90}
+                  sizes="(min-width:1024px) 560px, 100vw"
+                  className="block h-auto w-full rounded-[4px] object-contain"
                 />
               </figure>
-            </li>
-          )
-        })}
-      </ol>
-
-      {/* Máy tính: một khung dính, năm ảnh chồng lên nhau */}
-      <div className="hidden lg:block">
-        <div className="sticky top-[calc(var(--header-h)+16px)]">
-          <figure className="khung-anh m-0">
-            <div className="relative aspect-[4/3] overflow-hidden rounded-[4px] bg-paper-3">
-              {buoc.map((s, i) => (
-                <Image
-                  key={s.title}
-                  src={ANH[i]}
-                  alt={dang === i ? s.title : ''}
-                  aria-hidden={dang !== i}
-                  data-active={dang === i}
-                  fill
-                  sizes="(min-width: 1024px) 600px, 1px"
-                  className="how-shot object-cover"
-                  priority={i === 0}
-                />
-              ))}
-            </div>
-            <figcaption className="flex items-baseline gap-2 px-1 pt-2.5 text-[12.5px] text-sumi-2">
-              <span className="tnum text-shu">
-                {String(dang + 1).padStart(2, '0')} / {String(buoc.length).padStart(2, '0')}
-              </span>
-              <span className="truncate">{buoc[dang].title}</span>
-            </figcaption>
-          </figure>
-        </div>
-      </div>
-    </div>
+            </Reveal>
+          </li>
+        )
+      })}
+    </ol>
   )
 }

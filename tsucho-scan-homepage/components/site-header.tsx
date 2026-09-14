@@ -1,18 +1,23 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Brand } from '@/components/brand'
 import { DASHBOARD_URL } from '@/lib/constants'
 import { LANGS, useI18n } from '@/lib/i18n'
 
 /* THANH TRÊN CÙNG — một đường kẻ của tờ sổ, không phải thẻ kính nổi.
  *
- * Chiều cao CỐ ĐỊNH 56px (= --header-h trong globals.css). Neo menu, cột
- * ảnh dính của #how và thanh CTA đáy đều tính từ con số này, nên nó không
- * được co giãn theo nội dung.
+ * --header-h được ĐO từ header thật bằng ResizeObserver và ghi vào :root —
+ * neo menu (scroll-margin-top) tính từ đó.
  *
- * Ở đầu trang: không viền, nền giấy hơi trong. Cuộn quá 8px: hiện đường
- * kẻ và nền giấy đặc lại. Chiều cao không đổi.
+ * Ở đầu trang: không viền, nền giấy hơi trong. Cuộn quá 8px: nền giấy +
+ * đường kẻ 1px + làm mờ nhẹ phía sau. Chiều cao không đổi.
+ *
+ * MENU ĐIỆN THOẠI LÀ LỚP PHỦ (absolute), không nằm trong luồng trang.
+ * Bản trước nó nằm trong luồng: mở ra là đẩy cả trang xuống ~375px, trình
+ * duyệt tính điểm dừng lúc menu còn mở, menu đóng thì trang dịch ngược lên
+ * — đo được heading bị che -298px ở MỌI mục. Nay bấm một mục: chặn nhảy
+ * mặc định → đóng menu → đợi đóng xong → mới cuộn tới section.
  *
  * Menu máy tính có bảy mục, ở bề ngang 1120px thì chật. Hai mục ít dùng
  * nhất (出力ファイル, 精度) ẩn dưới 1200px thay vì cắt chữ; nút son luôn còn.
@@ -26,6 +31,44 @@ export function SiteHeader() {
   const [mo, setMo] = useState(false)
   const [daCuon, setDaCuon] = useState(false)
   const [hienDock, setHienDock] = useState(false)
+  const khung = useRef<HTMLElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+
+  // Đo chiều cao header thật → --header-h (khác nhau giữa điện thoại / máy tính)
+  useEffect(() => {
+    const el = khung.current
+    if (!el) return
+    const ghi = () =>
+      document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`)
+    ghi()
+    if (!('ResizeObserver' in window)) return
+    const ro = new ResizeObserver(ghi)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  /* Bấm một mục trong menu điện thoại: đóng trước, cuộn sau. */
+  const toiMuc = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    const dich = document.getElementById(href.slice(1))
+    if (!dich) return
+    e.preventDefault()
+    setMo(false)
+    const it = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let daCuon = false
+    const cuon = () => {
+      if (daCuon) return
+      daCuon = true
+      dich.scrollIntoView({ behavior: it ? 'auto' : 'smooth', block: 'start' })
+      history.replaceState(null, '', href)
+    }
+    const p = panel.current
+    if (p && !it) {
+      p.addEventListener('transitionend', cuon, { once: true })
+      setTimeout(cuon, 260) // phòng khi transitionend không tới
+    } else {
+      cuon()
+    }
+  }
 
   useEffect(() => {
     const doi = () => setDaCuon(window.scrollY > 8)
@@ -81,8 +124,11 @@ export function SiteHeader() {
   return (
     <>
       <header
-        className={`sticky top-0 z-50 border-b transition-[background-color,border-color] duration-200 ${
-          daCuon || mo ? 'border-rule bg-paper' : 'border-transparent bg-paper/90'
+        ref={khung}
+        className={`sticky top-0 z-[60] border-b transition-[background-color,border-color] duration-200 ${
+          daCuon || mo
+            ? 'border-rule bg-paper/92 backdrop-blur-[6px]'
+            : 'border-transparent bg-paper/90'
         }`}
       >
         <div className="mx-auto flex h-14 max-w-[1120px] items-center gap-4 px-4 sm:px-6">
@@ -165,14 +211,22 @@ export function SiteHeader() {
           </div>
         </div>
 
-        <div id="menu-dien-thoai" className="menu-panel lg:hidden" data-open={mo}>
+        <div
+          id="menu-dien-thoai"
+          ref={panel}
+          className="menu-panel absolute inset-x-0 top-full lg:hidden"
+          data-open={mo}
+        >
           <div inert={!mo}>
-            <nav aria-label={t.nav.menu} className="border-t border-rule bg-paper-3">
+            <nav
+              aria-label={t.nav.menu}
+              className="max-h-[calc(100dvh-var(--header-h))] overflow-y-auto border-y border-rule bg-paper-3 shadow-[0_18px_30px_-22px_rgba(24,32,26,0.45)]"
+            >
               {muc.map((m) => (
                 <a
                   key={m.href}
                   href={m.href}
-                  onClick={() => setMo(false)}
+                  onClick={(e) => toiMuc(e, m.href)}
                   className="nav-link block border-b border-rule-soft px-4 py-3 text-[14px] hover:bg-paper-2 sm:px-6"
                 >
                   {m.label}

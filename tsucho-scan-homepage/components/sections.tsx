@@ -1,24 +1,25 @@
 'use client'
 
 import { useRef } from 'react'
-import { motion, useInView } from 'motion/react'
+import { useInView } from 'motion/react'
 import { ExcelPreview } from '@/components/excel-preview'
 import { Explain } from '@/components/explain'
-import { HINH_READS, HINH_TOOLS } from '@/components/diagrams'
+import { HINH_READS } from '@/components/diagrams'
 import { Faq as DanhSachHoiDap } from '@/components/faq'
 import { HowSteps } from '@/components/how-steps'
 import { ManHinh } from '@/components/man-hinh'
 import { PassbookSpread } from '@/components/passbook-spread'
+import { MOTION_TOOLS } from '@/components/tool-motion'
 import { DASHBOARD_URL } from '@/lib/constants'
 import { useI18n } from '@/lib/i18n'
-import { EASE_OUT, Item, NHIP, Reveal, TAM_NHIN, T_SLOW, len } from '@/lib/motion'
+import { Item, NHIP, Reveal } from '@/lib/motion'
 
 /* Khung chung cho mọi phần.
  *
  *   1. NỀN đổi theo nhịp bốn mức (giấy → giấy đậm → giấy sáng → mặt bàn
  *      tối), nên hai phần cạnh nhau không bao giờ cùng một sắc độ.
  *   2. Mỗi tiêu đề có một VẠCH MỰC HỒNG dựng đứng bên trái — màu mực biểu
- *      mẫu của cuốn sổ — tự kẻ xuống khi cuộn tới, rồi tiêu đề hiện ra.
+ *      mẫu của cuốn sổ. Tiêu đề hiện ngay, không chuyển động.
  *
  * Neo menu không bị header che: `section[id]` có scroll-margin-top trong
  * globals.css, tính từ --header-h.
@@ -49,45 +50,26 @@ function Section({
   return (
     <section id={id} className={`border-t border-rule ${NEN[nen]}`}>
       <div className="relative mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
-        <motion.div
-          initial="an"
-          whileInView="hien"
-          viewport={TAM_NHIN}
-          className="relative pl-4 sm:pl-6"
-        >
-          <motion.span
-            data-motion
-            aria-hidden
-            className="absolute top-0 left-0 h-full w-[2px] bg-beni"
-            style={{ originY: 0 }}
-            variants={{
-              an: { scaleY: 0 },
-              hien: { scaleY: 1, transition: { duration: T_SLOW, ease: EASE_OUT } },
-            }}
-          />
-          <motion.h2
-            data-motion
-            custom={0.06}
-            variants={len}
+        {/* Tiêu đề hiện NGAY, không chuyển động — chỉ phụ kiện bên dưới
+            (thẻ, dòng số, con dấu) mới hiện dần. */}
+        <div className="relative border-l-2 border-beni pl-4 sm:pl-6">
+          <h2
             className={`max-w-[26ch] font-display text-[26px] leading-[1.3] font-semibold sm:text-[34px] ${
               toi ? 'text-paper' : 'text-sumi'
             }`}
           >
             {title}
-          </motion.h2>
+          </h2>
           {lead && (
-            <motion.p
-              data-motion
-              custom={0.06 + NHIP}
-              variants={len}
+            <p
               className={`mt-3 max-w-[62ch] text-[14.5px] leading-[1.75] ${
                 toi ? 'text-paper/75' : 'text-sumi-2'
               }`}
             >
               {lead}
-            </motion.p>
+            </p>
           )}
-        </motion.div>
+        </div>
         <div className="mt-10 sm:mt-12">{children}</div>
       </div>
     </section>
@@ -104,7 +86,7 @@ export function Hero() {
        1440×900; chỉ dòng chú thích dưới bảng được phép tràn. */
     <section id="top" className="grain relative overflow-hidden bg-desk">
       <div className="relative mx-auto grid max-w-[1120px] gap-10 px-4 pt-12 pb-14 sm:px-6 sm:pt-16 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-14 lg:pt-14 lg:pb-12">
-        <div className="settle min-w-0">
+        <div className="min-w-0">
           <h1 className="font-display text-[38px] leading-[1.14] font-semibold tracking-[-0.015em] text-paper sm:text-[52px] lg:text-[58px]">
             {h.title.split('\n').map((d, i) => (
               <span key={i} className="block">
@@ -198,7 +180,7 @@ export function Reads() {
 /* 残高チェーン — chạy ĐÚNG MỘT LẦN khi khối này vào khung nhìn ~40%.
  *
  * Thứ tự là câu chuyện của sản phẩm: công thức hiện → ba dòng tính lần
- * lượt (cách nhau 80ms) → kết quả mỗi dòng "đáp xuống" (landed) → son
+ * lượt (cách nhau 90ms) → kết quả mỗi dòng "đáp xuống" (landed) → son
  * đóng「一致」nhỏ (stamp). Cuộn lên xuống không chạy lại.
  *
  * Dùng lại hai lớp CSS đã có: `.landed` và `.stamp`. Trước khi chạy, các
@@ -210,7 +192,7 @@ function useChayMotLan<T extends Element>(amount: number) {
   return [ref, chay] as const
 }
 
-const BUOC_CHUOI = 0.08
+const BUOC_CHUOI = 0.09
 
 function ChuoiSoDu({ chay }: { chay: boolean }) {
   const { t } = useI18n()
@@ -403,21 +385,23 @@ export function Tools() {
 
   return (
     <Section title={w.title} lead={w.lead}>
-      <ul className="m-0 grid list-none gap-x-8 gap-y-0 border-t border-rule p-0 sm:grid-cols-2">
+      {/* Mỗi thẻ một cảnh nhỏ diễn đúng thao tác của công cụ (tool-motion.tsx).
+          Bốn cảnh lệch pha nhau 1,1 giây để không cùng lúc nhúc nhích. */}
+      <ul className="m-0 grid list-none gap-x-10 gap-y-0 border-t border-rule p-0 md:grid-cols-2">
         {w.items.map((it, i) => {
-          const Hinh = HINH_TOOLS[i]
+          const Canh = MOTION_TOOLS[i]
           return (
             <Item
               key={it.title}
               tre={(i % 2) * NHIP}
-              className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-4 border-b border-rule py-5 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-5"
+              className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-5 border-b border-rule py-6 sm:grid-cols-[10.5rem_minmax(0,1fr)] sm:gap-x-6"
             >
-              <figure className="m-0 self-start overflow-hidden rounded-sm">
-                {Hinh && <Hinh />}
+              <figure className="m-0 overflow-hidden rounded-[4px] ring-1 ring-rule-soft">
+                {Canh && <Canh pha={i * 1.1} label={it.title} />}
               </figure>
               <div className="min-w-0">
-                <h3 className="font-display text-[16px] font-semibold text-sumi">{it.title}</h3>
-                <p className="mt-1 max-w-[50ch] text-[13.5px] leading-[1.7] text-sumi-2">
+                <h3 className="font-display text-[16.5px] font-semibold text-sumi">{it.title}</h3>
+                <p className="mt-1.5 max-w-[46ch] text-[13.5px] leading-[1.75] text-sumi-2">
                   {it.body}
                 </p>
               </div>
@@ -556,7 +540,7 @@ export function Cta() {
   return (
     <section id="start" className="border-t border-rule bg-sumi text-paper">
       <div className="mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
-        <Reveal>
+        <div>
           <h2 className="max-w-[24ch] font-display text-[26px] leading-[1.3] font-semibold sm:text-[34px]">
             {c.title}
           </h2>
@@ -567,7 +551,7 @@ export function Cta() {
           >
             {c.button}
           </a>
-        </Reveal>
+        </div>
       </div>
     </section>
   )

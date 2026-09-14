@@ -40,6 +40,16 @@ export function PassbookSpread() {
   const [xong, setXong] = useState(false)
   const [chon, setChon] = useState<number | null>(null)
 
+  /* Giữ mã các bộ hẹn giờ để BẤM SỚM thì dừng được màn "đang đọc". */
+  const hen = useRef<number[]>([])
+  const dungDoc = () => {
+    hen.current.forEach((id) => {
+      clearTimeout(id)
+      clearInterval(id)
+    })
+    hen.current = []
+  }
+
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setDaDoc(SAMPLE_ROWS.length)
@@ -48,24 +58,49 @@ export function PassbookSpread() {
       return
     }
     let i = 0
-    const batDau = setTimeout(() => {
-      const nhip = setInterval(() => {
+    const batDau = window.setTimeout(() => {
+      const nhip = window.setInterval(() => {
         i += 1
         setDaDoc(i)
         if (i >= SAMPLE_ROWS.length) {
           clearInterval(nhip)
-          setTimeout(() => {
-            setXong(true)
-            setChon(2)
-          }, 260)
+          hen.current.push(
+            window.setTimeout(() => {
+              setXong(true)
+              setChon((c) => c ?? 2)
+            }, 260),
+          )
         }
       }, NHIP)
+      hen.current.push(nhip)
     }, DELAY_DAU)
-    return () => clearTimeout(batDau)
+    hen.current.push(batDau)
+    return dungDoc
   }, [])
 
-  /* Rê chuột (hoặc dùng phím Tab) lên một hàng thì xem trước hàng đó; bấm
-     thì chọn hẳn. Chỉ có hiệu lực sau khi máy đã đọc xong. */
+  /* Chọn một hàng — dùng được CẢ KHI máy còn đang đọc: bấm sớm thì dừng
+     màn đọc, hiện đủ kết quả ngay và chọn đúng hàng vừa bấm. Bản trước
+     phớt lờ cú bấm trong ~1,8 giây đầu nên trông như nút hỏng. */
+  const chonHang = (i: number) => {
+    if (!xong) {
+      dungDoc()
+      setDaDoc(SAMPLE_ROWS.length)
+      setXong(true)
+    }
+    setChon(i)
+  }
+
+  /* Mũi tên lên/xuống chuyển hàng khi đang đứng ở một hàng. */
+  const phim = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const k = Math.min(SAMPLE_ROWS.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)))
+    chonHang(k)
+    hangRefs.current[k]?.focus()
+  }
+
+  /* Rê chuột lên một hàng thì xem trước hàng đó; bấm (hoặc Enter/Space,
+     mũi tên lên/xuống) thì chọn hẳn. aria-pressed chỉ theo hàng đã CHỌN. */
   const [ro, setRo] = useState<number | null>(null)
   const dongTo = xong ? (ro ?? chon) : daDoc - 1
 
@@ -121,15 +156,12 @@ export function PassbookSpread() {
                   hangRefs.current[i] = el
                 }}
                 type="button"
-                onClick={() => xong && setChon(i)}
+                onClick={() => chonHang(i)}
+                onKeyDown={(e) => phim(e, i)}
                 onPointerEnter={(e) => xong && e.pointerType === 'mouse' && setRo(i)}
                 onPointerLeave={() => setRo(null)}
-                onFocus={() => xong && setRo(i)}
-                onBlur={() => setRo(null)}
                 aria-pressed={xong && chon === i}
-                className={`relative z-[1] grid w-full grid-cols-[1.9rem_4.4rem_minmax(0,1fr)] items-center border-b border-beni-soft/70 px-3.5 py-[9px] text-left last:border-0 focus-visible:outline-offset-[-2px] ${
-                  xong ? 'cursor-pointer' : 'cursor-default'
-                }`}
+                className="relative z-[1] grid w-full cursor-pointer grid-cols-[1.9rem_4.4rem_minmax(0,1fr)] items-center border-b border-beni-soft/70 px-3.5 py-[9px] text-left last:border-0 focus-visible:outline-offset-[-2px]"
               >
                 <span className="tnum text-[10.5px] text-beni/80">{r.no}</span>
                 {r.hand ? (
@@ -197,7 +229,7 @@ export function PassbookSpread() {
                   key={r.no}
                   onPointerEnter={(e) => xong && e.pointerType === 'mouse' && setRo(i)}
                   onPointerLeave={() => setRo(null)}
-                  onClick={() => xong && setChon(i)}
+                  onClick={() => chonHang(i)}
                   className={`grid grid-cols-3 items-center border-b border-rule-soft px-3.5 py-[9px] transition-colors duration-200 last:border-0 ${
                     dongTo === i ? 'rowmark' : ''
                   } ${xong ? 'cursor-pointer' : ''}`}

@@ -37,7 +37,7 @@ export function Pricing() {
   return (
     <section id="pricing" className="border-t border-rule bg-paper-3">
       <div className="mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
-        <Reveal className="border-l-2 border-beni pl-4 sm:pl-6">
+        <div className="border-l-2 border-beni pl-4 sm:pl-6">
           <h2 className="max-w-[26ch] font-display text-[26px] leading-[1.3] font-semibold text-sumi sm:text-[34px]">
             {p.title}
           </h2>
@@ -45,7 +45,7 @@ export function Pricing() {
             {p.badge}
           </span>
           <p className="mt-3 max-w-[62ch] text-[14.5px] leading-[1.75] text-sumi-2">{p.lead}</p>
-        </Reveal>
+        </div>
 
         {/* ── Màn hình rộng: một bảng kẻ dòng ── */}
         <Reveal className="mt-12 hidden md:block">

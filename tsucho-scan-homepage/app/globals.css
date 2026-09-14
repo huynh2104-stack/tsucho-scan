@@ -87,12 +87,13 @@
   --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
   --t-instant: 120ms;
   --t-fast: 200ms;
-  --t-base: 320ms;
-  --t-slow: 520ms;
+  /* Chủ sản phẩm: bản 320/520ms hiện "quá nhanh, không đắt" — tăng lên. */
+  --t-base: 480ms;
+  --t-slow: 720ms;
 
-  /* Header CỐ ĐỊNH chiều cao (không đo bằng JS rồi mới biết): neo menu,
-     cột ảnh dính của #how và thanh CTA đáy đều tính từ con số này.
-     = 56px hàng nội dung (h-14) + 1px đường kẻ đáy. Đã đo: 57px. */
+  /* Chiều cao header. Giá trị này chỉ là mặc định lúc chưa chạy JS;
+     site-header.tsx ĐO header thật bằng ResizeObserver rồi ghi đè, vì
+     điện thoại và máy tính khác nhau. Neo menu tính từ con số này. */
   --header-h: 57px;
 }
 
@@ -358,30 +359,71 @@
     transform: rotate(45deg);
   }
 
-  /* #how: ảnh các bước chồng lên nhau, đổi bằng mờ-tỏ + trượt 12px.
-     Không gỡ thẻ ra khỏi DOM nên khung không nhảy. */
-  .how-shot {
+  /* #how — BƯỚC ĐANG XEM.
+     Không chỉ lằn son bên trái: một lớp son rất nhạt LOANG từ trái sang
+     phải rồi TAN (::before, chạy một lần mỗi khi bước sáng lên), để lại
+     một lớp nền mờ hơn (::after) cho tới khi sang bước khác. Lớp còn lại
+     tắt bằng transition nên không bao giờ nháy. */
+  .how-row {
+    position: relative;
+    isolation: isolate;
+    border-left: 3px solid transparent;
+    transition: border-color var(--t-base) var(--ease-out);
+  }
+  .how-row::before,
+  .how-row::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--shu) 10%, transparent) 0%,
+      transparent 70%
+    );
+  }
+  .how-row::before {
     opacity: 0;
-    transform: translateY(12px);
-    transition:
-      opacity var(--t-base) var(--ease-out),
-      transform var(--t-base) var(--ease-out);
+    transform-origin: left center;
   }
-  .how-shot[data-active='true'] {
-    opacity: 1;
-    transform: none;
+  .how-row::after {
+    opacity: 0;
+    transition: opacity var(--t-base) var(--ease-out);
   }
-  .how-step {
-    transition:
-      border-color var(--t-fast) var(--ease-out),
-      color var(--t-fast) var(--ease-out);
+  .how-row[data-active='true'] {
+    border-left-color: var(--shu);
+  }
+  .how-row[data-active='true']::before {
+    animation: washLoang 1600ms var(--ease-out) forwards;
+  }
+  .how-row[data-active='true']::after {
+    opacity: 0.55;
+    transition-delay: 900ms;
+  }
+  @keyframes washLoang {
+    0% {
+      opacity: 1;
+      transform: scaleX(0);
+    }
+    45% {
+      opacity: 1;
+      transform: scaleX(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scaleX(1);
+    }
+  }
+  .how-num {
+    transition: color var(--t-base) var(--ease-out);
   }
 
   /* Vệt son trượt tới đúng hàng trên trang sổ của màn mở đầu */
   .band-slide {
     transition:
-      transform var(--t-base) var(--ease-out),
-      height var(--t-base) var(--ease-out),
+      transform var(--t-fast) var(--ease-out),
+      height var(--t-fast) var(--ease-out),
       opacity var(--t-fast) var(--ease-out);
   }
 
@@ -395,7 +437,7 @@
   .menu-panel {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows var(--t-base) var(--ease-out);
+    transition: grid-template-rows var(--t-fast) var(--ease-out);
   }
   .menu-panel[data-open='true'] {
     grid-template-rows: 1fr;
@@ -428,22 +470,21 @@
     .settle,
     .stamp,
     .landed,
-    .kin-pulse {
+    .kin-pulse,
+    .how-row::before {
       animation: none !important;
     }
     .faq-panel,
     .faq-mark,
-    .how-shot,
-    .how-step,
+    .how-row,
+    .how-row::after,
+    .how-num,
     .band-slide,
     .cta-dock,
     .menu-panel,
     .btn-shu,
     .nav-link {
       transition: none !important;
-    }
-    .how-shot {
-      transform: none !important;
     }
     .btn-shu:hover,
     .btn-shu:active {

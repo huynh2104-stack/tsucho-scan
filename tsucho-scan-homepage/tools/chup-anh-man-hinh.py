@@ -104,9 +104,17 @@ def mo_mat_so(pg) -> None:
         time.sleep(2)
 
 
-def cat(nguon: str, hop: tuple[int, int, int, int], ten: str, rong: int, chat=84) -> None:
+def cat(nguon: str, hop: tuple[int, int, int, int], ten: str, rong: int | None = None, chat=90) -> None:
+    """Cắt một vùng. `rong=None` = GIỮ NGUYÊN độ phân giải gốc (ảnh chụp gấp đôi).
+
+    Ảnh các bước ở #how phải để nguyên: bản trước thu nhỏ còn ~0,6 lần rồi
+    còn bị `object-cover` trong khung 541px, nên chữ trong ảnh bước 05 mờ
+    hẳn trên màn 24" QHD. Vùng cắt rộng ~1120px ảnh gấp đôi = 560px giao
+    diện thật; hiển thị ở ≤560px thì chữ đúng cỡ chữ thật của ứng dụng.
+    """
     anh = Image.open(os.path.join(TAM, nguon + ".png")).crop(hop)
-    anh = anh.resize((rong, round(anh.height * rong / anh.width)), Image.LANCZOS)
+    if rong:
+        anh = anh.resize((rong, round(anh.height * rong / anh.width)), Image.LANCZOS)
     duong = os.path.join(RA, ten + ".webp")
     anh.save(duong, "WEBP", quality=chat, method=6)
     print(f"  {ten:<18} {anh.width}×{anh.height}  {os.path.getsize(duong) // 1024} KB")
@@ -170,13 +178,14 @@ def main() -> int:
 
     print("Cắt ảnh cho web…")
     # Ảnh màn hình đầy đủ: bản SÁNG hợp tông giấy của trang hơn bản tối
-    cat("nen-sang", (0, 0, 3840, 2400), "app-light", 2200, 80)
-    # Năm bước đều 4:3 — chúng chồng lên nhau trong một khung ở #how
-    cat("nen-sang", (10, 90, 570, 510), "step-1-import", 880)
-    cat("nan-phoi-canh", (600, 596, 2080, 1706), "step-2-straighten", 880)
-    cat("nen-sang", (2085, 100, 3245, 970), "step-3-scan", 880)
-    cat("nen-sang", (820, 700, 1820, 1450), "step-4-fix", 1000)
-    cat("xuat-file", (1053, 553, 2787, 1853), "step-5-export", 1100)
+    cat("nen-sang", (0, 0, 3840, 2400), "app-light", 2200, chat=80)
+    # Năm bước, độ phân giải gốc. 1–4 là 16:10; bước 05 lấy TRỌN hộp thoại
+    # xuất file (dọc) — cắt bớt là mất chữ.
+    cat("nen-sang", (0, 88, 1120, 788), "step-1-import")
+    cat("nan-phoi-canh", (749, 600, 1869, 1300), "step-2-straighten")
+    cat("nen-sang", (2085, 160, 3285, 910), "step-3-scan")
+    cat("nen-sang", (760, 700, 1880, 1400), "step-4-fix")
+    cat("xuat-file", (1390, 571, 2450, 1835), "step-5-export")
 
     print(f"\nXong. Ảnh nằm ở {RA}")
     print("Nhớ mở từng tấm xem bằng mắt trước khi commit — không còn tên thật nào.")
