@@ -130,7 +130,9 @@ export default function LoginPage() {
                       <span className="block truncate text-[14px] font-semibold text-ink">
                         {tk.label}
                       </span>
-                      <span className="block truncate font-mono text-[11.5px] text-ink2">
+                      {/* KHÔNG cắt cụt: có người muốn tự gõ tay chứ không bấm
+                          nút, mà mật khẩu bị "…" thì chịu. Cho xuống dòng. */}
+                      <span className="block font-mono text-[11.5px] break-all text-ink2">
                         {tk.email} · {tk.password}
                       </span>
                     </span>
