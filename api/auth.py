@@ -44,6 +44,21 @@ _SCRYPT = dict(n=2**14, r=8, p=1)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+
+class AuthError(ValueError):
+    """Lỗi tài khoản KÈM MÃ để giao diện tự dịch.
+
+    Máy chủ không biết người dùng đang xem tiếng Nhật, Việt hay Anh, nên câu
+    chữ phải ghép ở trình duyệt. Trước đây chỗ này chỉ ném chuỗi tiếng Việt:
+    người Nhật đăng ký trùng email vẫn thấy「Email này đã có tài khoản」.
+    Câu tiếng Việt trong `args[0]` giữ lại làm bản dự phòng.
+    """
+
+    def __init__(self, code: str, message: str, **info: object) -> None:
+        super().__init__(message)
+        self.code = code
+        self.info = info
+
 # ── Ngưỡng chống dò mật khẩu ─────────────────────────────────────────
 # Đếm theo HAI khoá cùng lúc:
 #   e:<email> — chặn dò một tài khoản cụ thể (ngưỡng thấp)
@@ -75,6 +90,12 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL DEFAULT 'user',
     created_at    REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS demo_usage (
+    user_id TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    faces   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -288,9 +309,13 @@ def create_user(email: str, password: str) -> User:
     """Tạo tài khoản. Người ĐẦU TIÊN đăng ký thành admin."""
     email = normalize_email(email)
     if not EMAIL_RE.match(email):
-        raise ValueError("Email không hợp lệ")
+        raise AuthError("bad_email", "Email không hợp lệ")
     if len(password) < MIN_PASSWORD:
-        raise ValueError(f"Mật khẩu phải từ {MIN_PASSWORD} ký tự trở lên")
+        raise AuthError(
+            "weak_password",
+            f"Mật khẩu phải từ {MIN_PASSWORD} ký tự trở lên",
+            min=MIN_PASSWORD,
+        )
 
     user = User(
         id=uuid.uuid4().hex[:12],
@@ -306,7 +331,7 @@ def create_user(email: str, password: str) -> User:
                 (user.id, user.email, hash_password(password), user.role, user.created_at),
             )
     except sqlite3.IntegrityError as e:
-        raise ValueError("Email này đã có tài khoản") from e
+        raise AuthError("email_taken", "Email này đã có tài khoản") from e
     return user
 
 

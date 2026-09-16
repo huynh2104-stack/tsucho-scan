@@ -10,7 +10,11 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from api import auth, main, workspace
+import io
+
+from PIL import Image
+
+from api import auth, demo, main, workspace
 
 # Route ai cũng gọi được — số còn lại bắt buộc phải đăng nhập
 PUBLIC = {
@@ -18,6 +22,9 @@ PUBLIC = {
     "/api/auth/register",
     "/api/auth/login",
     "/api/auth/logout",
+    # Danh sách tài khoản dùng thử: cố ý công khai — người chưa đăng nhập phải
+    # đọc được thì mới có cái để bấm. Máy chủ không khai báo thì trả rỗng.
+    "/api/auth/demo",
     "/docs",
     "/docs/oauth2-redirect",
     "/openapi.json",
@@ -257,3 +264,82 @@ def test_nguoi_dau_tien_la_admin_va_nhan_du_lieu_cu(client):
     assert sau["role"] == "user"
     assert sau["claimed_workspaces"] == 0
     assert client.get(f"/api/ws/{cu.id}").status_code == 404
+
+
+# ── Tài khoản dùng thử ───────────────────────────────────────────────
+
+def test_khong_khai_bao_thi_khong_co_tai_khoan_dung_thu(client, monkeypatch):
+    """Máy chủ không đặt biến môi trường thì im lặng, không tự tạo gì."""
+    monkeypatch.delenv("TSUCHO_DEMO_ACCOUNTS", raising=False)
+    r = client.get("/api/auth/demo")
+    assert r.status_code == 200
+    assert r.json()["accounts"] == []
+    assert demo.tao_neu_thieu() == 0
+
+
+def test_tai_khoan_dung_thu_dang_nhap_duoc_va_khong_thanh_admin(client, monkeypatch):
+    """Tài khoản dùng thử là tài khoản công khai — tuyệt đối không được là admin.
+
+    `auth.create_user` phong người ĐẦU TIÊN làm admin, nên nếu tạo tài khoản
+    dùng thử bằng hàm đó trên một máy chủ mới tinh thì cả thiên hạ thành admin.
+    """
+    monkeypatch.setenv("TSUCHO_DEMO_ACCOUNTS", "demo@x.test:matkhau-demo:Dùng thử")
+    assert demo.tao_neu_thieu() == 1
+
+    r = client.get("/api/auth/demo")
+    assert r.json()["accounts"] == [
+        {"email": "demo@x.test", "password": "matkhau-demo", "label": "Dùng thử"}
+    ]
+
+    r = client.post(
+        "/api/auth/login", json={"email": "demo@x.test", "password": "matkhau-demo"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "user"
+
+
+def test_tai_khoan_dung_thu_bi_chan_khi_quet_qua_han_muc(client, monkeypatch):
+    """Quét quá hạn mức trong ngày thì trả 429 kèm mã để giao diện dịch."""
+    monkeypatch.setenv("TSUCHO_DEMO_ACCOUNTS", "demo@x.test:matkhau-demo")
+    monkeypatch.setenv("TSUCHO_DEMO_SCAN_LIMIT", "0")
+    demo.tao_neu_thieu()
+    client.post("/api/auth/login", json={"email": "demo@x.test", "password": "matkhau-demo"})
+
+    ws = client.post("/api/ws").json()
+    anh = io.BytesIO()
+    Image.new("RGB", (60, 40), "white").save(anh, format="PNG")
+    anh.seek(0)
+    sheet = client.post(
+        f"/api/ws/{ws['id']}/sheets", files={"files": ("so.png", anh, "image/png")}
+    ).json()["sheets"][0]
+
+    r = client.post(f"/api/ws/{ws['id']}/scan", json={"sheet_ids": [sheet["id"]]})
+    assert r.status_code == 429, r.text
+    assert r.json()["detail"]["kind"] == "demo_quota"
+
+
+def test_tai_khoan_thuong_khong_bi_han_muc(client, monkeypatch):
+    monkeypatch.setenv("TSUCHO_DEMO_ACCOUNTS", "demo@x.test:matkhau-demo")
+    monkeypatch.setenv("TSUCHO_DEMO_SCAN_LIMIT", "0")
+    register(client, "that@nguoi.com")
+    me = client.get("/api/auth/me").json()
+    assert demo.con_lai(auth.get_by_id(me["id"])) is None
+
+
+# ── Lỗi đăng ký phải có MÃ để giao diện dịch ────────────────────────
+
+def test_loi_dang_ky_co_ma_de_dich(client):
+    """Không có mã thì người Nhật nhận câu tiếng Việt — đã từng xảy ra thật."""
+    register(client, "trung@lap.com")
+    r = client.post(
+        "/api/auth/register", json={"email": "trung@lap.com", "password": "matkhau123"}
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["kind"] == "email_taken"
+
+    r = client.post("/api/auth/register", json={"email": "khong-phai-email", "password": "matkhau123"})
+    assert r.json()["detail"]["kind"] == "bad_email"
+
+    r = client.post("/api/auth/register", json={"email": "moi@nguoi.com", "password": "ngan"})
+    assert r.json()["detail"]["kind"] == "weak_password"
+    assert r.json()["detail"]["min"] == auth.MIN_PASSWORD

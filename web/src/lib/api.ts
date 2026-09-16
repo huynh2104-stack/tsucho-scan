@@ -242,6 +242,15 @@ export const login = (email: string, password: string) =>
 
 export const logout = () => jsonPost<{ ok: true }>("/api/auth/logout", {});
 
+/** Tài khoản dùng thử dùng chung. Mật khẩu CỐ Ý nằm trong câu trả lời: đây là
+ *  tài khoản công khai cho người xem thử. Máy chủ không khai báo thì `accounts`
+ *  rỗng và trang đăng nhập không hiện khối đó. */
+export type DemoAccount = { email: string; password: string; label: string };
+export const fetchDemoAccounts = async () =>
+  asJson<{ accounts: DemoAccount[]; scan_limit: number }>(
+    await fetch(`${API}/api/auth/demo`, CRED),
+  );
+
 /** Ai đang đăng nhập — ném `Unauthorized` nếu chưa. */
 export const fetchMe = async () =>
   asJson<Me>(await fetch(`${API}/api/auth/me`, CRED));

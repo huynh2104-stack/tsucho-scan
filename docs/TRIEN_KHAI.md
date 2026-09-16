@@ -207,3 +207,42 @@ thì đó là tính năng; giấu đi rồi bị phát hiện thì đó là lỗ
 
 Sửa code trên máy → `git push` → Render **tự build và cập nhật**. Dữ liệu của
 giám đốc không bị ảnh hưởng vì nằm trên ổ đĩa riêng.
+
+## Tài khoản dùng thử (cho người xem, không phải đăng ký)
+
+Người đến xem — nhất là dân IT hoặc kế toán cẩn thận — rất ngại tạo tài khoản
+trên một trang lạ. Bật vài tài khoản dùng chung thì họ bấm một cái là vào xem
+được ngay. Cách tự đăng ký vẫn còn nguyên, không bỏ.
+
+### Bật lên
+
+Vào Render → dịch vụ của mình → **Environment** → thêm hai biến:
+
+| Biến | Giá trị ví dụ |
+|---|---|
+| `TSUCHO_DEMO_ACCOUNTS` | `demo01@tsucho.test:xem-thu-2026:見学用アカウント 1\|demo02@tsucho.test:xem-thu-2026:見学用アカウント 2` |
+| `TSUCHO_DEMO_SCAN_LIMIT` | `6` |
+
+Dạng của mỗi tài khoản là `email:mật_khẩu:nhãn`, nhiều tài khoản ngăn nhau bằng
+dấu `|`. Nhãn là chữ hiện trên nút, bỏ trống cũng được.
+
+Bấm **Save** là Render khởi động lại và tự tạo những tài khoản còn thiếu. Vào
+trang đăng nhập sẽ thấy khối「登録なしで、すぐ試せます」với nút bấm là vào thẳng.
+
+**Không đặt biến này thì mọi thứ im lặng:** không tài khoản nào được tạo, trang
+đăng nhập không hiện khối đó. Máy phát triển và máy thật vì vậy tự do khác nhau,
+và mật khẩu dùng thử không nằm trong kho mã nguồn công khai.
+
+### Ba điều phải biết trước khi bật
+
+1. **Đây là tài khoản CÔNG KHAI.** Ai có link cũng vào được và tất cả cùng thấy
+   một dữ liệu. Đừng bao giờ tải sổ thật của khách hàng lên tài khoản này.
+   Chính trang đăng nhập cũng nói rõ điều đó cho người xem.
+2. **Hạn mức quét là để giữ tiền của mình.** Mỗi mặt sổ quét thật là một lượt
+   gọi Gemini. `TSUCHO_DEMO_SCAN_LIMIT` giới hạn số mặt mỗi tài khoản dùng thử
+   được quét trong một ngày (mặc định 6). Hết lượt, người dùng nhận một câu giải
+   thích và lời mời tạo tài khoản riêng, chứ không phải lỗi kỹ thuật.
+   Sổ MẪU không bị tính vì nó không gọi model.
+3. **Muốn dọn dữ liệu người lạ để lại** thì đổi email trong
+   `TSUCHO_DEMO_ACCOUNTS` sang email khác: tài khoản mới sẽ trắng tinh. Tài
+   khoản cũ vẫn nằm trong CSDL nhưng không còn hiện trên trang đăng nhập.

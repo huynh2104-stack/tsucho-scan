@@ -209,6 +209,21 @@ const DICT = {
     authLocked: (phut: number) =>
       `Sai quá nhiều lần. Hãy thử lại sau ${phut} phút — đây là cách chặn người ngoài dò mật khẩu.`,
 
+    // ── Tài khoản dùng thử (máy chủ khai báo qua TSUCHO_DEMO_ACCOUNTS) ──
+    demoHead: "Xem thử ngay, không cần đăng ký",
+    demoNote: (n: number) =>
+      `Đây là tài khoản dùng chung cho người xem thử: ai cũng đăng nhập được và cùng thấy một dữ liệu, nên đừng tải sổ thật lên. Mỗi ngày quét được tối đa ${n} mặt sổ.`,
+    demoUse: "Vào bằng tài khoản này",
+    demoOr: "Hoặc dùng tài khoản của riêng anh/chị",
+    authShowPw: "Hiện mật khẩu",
+    authHidePw: "Ẩn mật khẩu",
+    authEmailTaken: "Email này đã có tài khoản. Hãy đăng nhập.",
+    authBadEmail: "Email chưa đúng định dạng.",
+    authWeakPassword: (n: number) => `Mật khẩu phải từ ${n} ký tự trở lên.`,
+    authBackHome: "Trang giới thiệu",
+    scanDemoQuota: (n: number) =>
+      `Tài khoản dùng thử chỉ quét được ${n} mặt sổ mỗi ngày. Hãy tạo tài khoản riêng để quét thoải mái.`,
+
     saveSaving: "Đang lưu...",
     saveSaved: "Đã lưu",
     saveFailed: "Chưa lưu được",
@@ -469,6 +484,21 @@ const DICT = {
     authLocked: (min: number) =>
       `Too many failed attempts. Try again in ${min} minute(s) — this is what stops outsiders guessing your password.`,
 
+    // ── Shared demo accounts (server declares them via TSUCHO_DEMO_ACCOUNTS) ──
+    demoHead: "Try it now, no sign-up",
+    demoNote: (n: number) =>
+      `A shared account for visitors: anyone can sign in and everyone sees the same data, so please do not upload a real passbook. Up to ${n} pages can be read per day.`,
+    demoUse: "Use this account",
+    demoOr: "Or use your own account",
+    authShowPw: "Show password",
+    authHidePw: "Hide password",
+    authEmailTaken: "That email already has an account. Please sign in.",
+    authBadEmail: "That email address is not valid.",
+    authWeakPassword: (n: number) => `Password must be at least ${n} characters.`,
+    authBackHome: "About page",
+    scanDemoQuota: (n: number) =>
+      `The shared account reads ${n} pages a day. Create your own account to keep going.`,
+
     saveSaving: "Saving...",
     saveSaved: "Saved",
     saveFailed: "Not saved",
@@ -727,6 +757,21 @@ const DICT = {
     authBadLogin: "メールアドレスまたはパスワードが正しくありません。",
     authLocked: (min: number) =>
       `失敗が続いたため、一時的にロックしました。${min}分後にもう一度お試しください（パスワードの総当たりを防ぐためです）。`,
+
+    // ── 見学用の共有アカウント（TSUCHO_DEMO_ACCOUNTS で宣言） ──
+    demoHead: "登録なしで、すぐ試せます",
+    demoNote: (n: number) =>
+      `見学用の共有アカウントです。誰でも入れて同じデータが見えるので、実際の通帳は入れないでください。読み取りは1日${n}面までです。`,
+    demoUse: "このアカウントで入る",
+    demoOr: "ご自分のアカウントで入る場合",
+    authShowPw: "パスワードを表示",
+    authHidePw: "パスワードを隠す",
+    authEmailTaken: "このメールアドレスはすでに登録されています。ログインしてください。",
+    authBadEmail: "メールアドレスの形式が正しくありません。",
+    authWeakPassword: (n: number) => `パスワードは${n}文字以上にしてください。`,
+    authBackHome: "紹介ページ",
+    scanDemoQuota: (n: number) =>
+      `見学用アカウントは1日${n}面までです。続けるにはご自分のアカウントを作成してください。`,
 
     saveSaving: "保存中...",
     saveSaved: "保存しました",

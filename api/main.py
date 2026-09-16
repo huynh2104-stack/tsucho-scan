@@ -21,11 +21,13 @@ from fastapi.staticfiles import StaticFiles
 
 from export import export_accounts
 
-from . import auth, autofix, export_csv, jobs, results, rowmap, sample, workspace
+from . import auth, autofix, demo, export_csv, jobs, results, rowmap, sample, workspace
 
 app = FastAPI(title="tsucho-scan API", version="0.3.0")
 
 auth.init_db()
+# Tài khoản dùng thử (nếu máy chủ có khai báo TSUCHO_DEMO_ACCOUNTS)
+demo.tao_neu_thieu()
 
 # Trang web nào được phép gọi API này. Mặc định là Next.js chạy máy mình lúc
 # phát triển; khi triển khai thì đặt biến môi trường:
@@ -89,6 +91,9 @@ def register(response: Response, body: dict = Body(...)) -> dict:
     """Tự đăng ký. Người ĐẦU TIÊN thành admin và nhận các workspace cũ."""
     try:
         user = auth.create_user(str(body.get("email", "")), str(body.get("password", "")))
+    except auth.AuthError as e:
+        # Trả MÃ lỗi để giao diện dịch sang đúng thứ tiếng người dùng đang xem.
+        raise HTTPException(400, {"kind": e.code, **e.info}) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -123,6 +128,21 @@ def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
     user = found[0]
     auth.set_cookie(response, auth.start_session(user))
     return user.to_json()
+
+
+@app.get("/api/auth/demo")
+def demo_accounts() -> dict:
+    """Tài khoản dùng thử dùng chung, kèm mật khẩu — CỐ Ý công khai.
+
+    Máy chủ không khai báo thì trả danh sách rỗng và giao diện không hiện gì.
+    """
+    return {
+        "accounts": [
+            {"email": t.email, "password": t.password, "label": t.label}
+            for t in demo.danh_sach()
+        ],
+        "scan_limit": demo.han_muc(),
+    }
 
 
 @app.post("/api/auth/logout")
@@ -518,10 +538,22 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
 
     sheets = [_sheet(ws, sid) for sid in ids]
+
+    # Tài khoản dùng thử là tài khoản CÔNG KHAI — chặn một người quét hết hạn
+    # mức gọi mô hình của cả ngày. Sổ mẫu không đi qua đây nên không bị tính.
+    con = demo.con_lai(user)
+    if con is not None and len(sheets) > con:
+        raise HTTPException(
+            429,
+            {"kind": "demo_quota", "limit": demo.han_muc(), "left": con},
+        )
+
     paths = [str(s.scan_path(ws.id)) for s in sheets]
 
     job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
     jobs.start(job, use_cache=not bool(body.get("no_cache")))
+    if con is not None:
+        demo.ghi_nhan(user.id, len(sheets))
     for s in sheets:
         s.scanned = True
     ws.save()

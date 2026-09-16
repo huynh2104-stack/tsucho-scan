@@ -14,6 +14,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   addSample,
   addSheets,
   adjustSheets,
@@ -67,7 +68,7 @@ const WS_KEY = "tsucho.ws";
 type ErrInfo = {
   code?: string;
   sheet?: string;
-  info?: { size_mb?: number; limit_mb?: number };
+  info?: { size_mb?: number; limit_mb?: number; limit?: number };
   text: string;
 } | null;
 
@@ -105,6 +106,9 @@ export default function Workbench() {
     if (e.code === "too_large") {
       return t.errTooLarge(name, e.info?.size_mb ?? 0, e.info?.limit_mb ?? 0);
     }
+    // Tài khoản dùng thử hết lượt quét trong ngày — nói rõ vì sao và lối ra,
+    // đừng để người xem tưởng ứng dụng hỏng.
+    if (e.code === "demo_quota") return t.scanDemoQuota(e.info?.limit ?? 0);
     return e.text;
   }, [t]);
   const { user, ready } = useAuth();
@@ -569,7 +573,11 @@ export default function Workbench() {
         },
       );
     } catch (e) {
-      setErr({ text: e instanceof Error ? e.message : String(e) });
+      setErr(
+        e instanceof ApiError
+          ? { code: e.code, info: e.info as NonNullable<ErrInfo>["info"], text: e.message }
+          : { text: e instanceof Error ? e.message : String(e) },
+      );
       setScanning(false);
     }
   };
@@ -870,7 +878,13 @@ export default function Workbench() {
       onDragEnd={() => setDragging(false)}
     >
       {err && (
-        <p className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger">
+        // role=alert: trình đọc màn hình phải ĐỌC LÊN thanh lỗi này, nếu không
+        // người khiếm thị bấm quét xong chỉ thấy im lặng, tưởng không có gì xảy ra.
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger"
+        >
           {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
           <span>{errText(err)}</span>
           <button
