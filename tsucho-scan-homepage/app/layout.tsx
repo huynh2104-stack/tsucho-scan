@@ -73,7 +73,7 @@ const plexMono = IBM_Plex_Mono({
  * "tự động仕訳・分類" và "月次レポート" — hai thứ ứng dụng không có. */
 export const metadata: Metadata = {
   metadataBase: new URL('https://tsucho-scan.vercel.app'),
-  title: '通帳スキャン — 通帳の明細を、検算済みのExcelへ',
+  title: '通帳スキャン｜通帳の明細を、検算済みのExcelへ',
   description:
     '日本の銀行通帳（ゆうちょ・普通預金など）の画像やPDFを読み取り、Excel／CSVに書き出します。残高チェーンで全行を検算し、機械が迷った箇所だけ黄色で示すので、人が直すのは数行だけです。',
   keywords: [
@@ -85,7 +85,7 @@ export const metadata: Metadata = {
     '残高チェーン',
   ],
   openGraph: {
-    title: '通帳スキャン — 通帳の明細を、検算済みのExcelへ',
+    title: '通帳スキャン｜通帳の明細を、検算済みのExcelへ',
     description:
       '通帳の画像・PDFを読み取り、残高チェーンで全行を検算してExcel／CSVへ。迷った箇所は黄色で示します。',
     type: 'website',
