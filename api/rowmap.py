@@ -251,7 +251,7 @@ def _black_ink(rgb: Image.Image, ink: np.ndarray) -> np.ndarray:
 
 # ── Khử nghiêng ──────────────────────────────────────────────────────
 
-def _profile_at(mask: np.ndarray, tan: float) -> np.ndarray:
+def _profile_at(mask: np.ndarray, tan: float, *, x_origin: float = 0, center_x: float | None = None) -> np.ndarray:
     """Biểu đồ mực khi coi các dòng nghiêng đi một góc có tang = `tan`.
 
     Dồn từng điểm mực về hàng y − (x − w/2)·tan rồi đếm theo hàng.
@@ -268,7 +268,10 @@ def _profile_at(mask: np.ndarray, tan: float) -> np.ndarray:
     ys, xs = np.nonzero(mask)
     if len(ys) == 0:
         return np.zeros(h, dtype=np.float32)
-    shifted = ys - ((xs - w / 2) * tan).astype(np.int32)
+    # Cropped columns must use the same origin as the full-page profile.
+    # Otherwise the balance signal shifts vertically on skewed photographs.
+    center_x = w / 2 if center_x is None else center_x
+    shifted = ys - ((xs + x_origin - center_x) * tan).astype(np.int32)
     keep = (shifted >= 0) & (shifted < h)
     return np.bincount(shifted[keep], minlength=h).astype(np.float32) / w
 
@@ -857,7 +860,8 @@ def bands_for(img: Image.Image, n_rows: int) -> dict:
     # không. Chừa mép ngoài cùng vì ゆうちょ in số thứ tự dòng ở đó.
     mw = mask.shape[1]
     right = _smooth(
-        _profile_at(mask[:, int(mw * 0.76) : int(mw * 0.96)], tan), pitch / 3
+        _profile_at(mask[:, int(mw * 0.76) : int(mw * 0.96)], tan,
+                    x_origin=int(mw * 0.76), center_x=mw / 2), pitch / 3
     )
     black = _smooth(_profile_at(_black_ink(rgb, mask), tan), pitch / 3)
     chosen = _select_rows(

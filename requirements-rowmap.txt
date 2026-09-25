@@ -1,0 +1,3 @@
+# Optional local OCR for matching transaction amounts to image coordinates.
+# Models are bundled with the wheel; no passbook data is sent to a service.
+rapidocr_onnxruntime==1.4.4

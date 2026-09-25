@@ -18,10 +18,11 @@ from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from export import export_accounts
 
-from . import auth, autofix, demo, export_csv, jobs, results, rowmap, sample, workspace
+from . import auth, autofix, demo, export_csv, jobs, results, rowmap, rowanchors, sample, workspace
 
 app = FastAPI(title="tsucho-scan API", version="0.3.0")
 
@@ -417,6 +418,29 @@ def sheet_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, rows: int = 0) ->
     img = Image.open(sheet.dir(ws.id) / "current.png")
     img.load()
     return rowmap.bands_for(img, rows)
+
+
+class RowAnchorRequest(BaseModel):
+    image_revision: str = Field(max_length=128)
+    rows: list[dict] = Field(max_length=500)
+
+
+@app.post("/api/ws/{ws_id}/sheets/{sheet_id}/rowmap")
+def anchored_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, body: RowAnchorRequest) -> dict:
+    """Match current review rows to local OCR; no model call or scan-cache change."""
+    from PIL import Image
+
+    ws = _ws(ws_id, user)
+    sheet = _sheet(ws, sheet_id)
+    if body.image_revision != sheet.sha256:
+        raise HTTPException(409, "Image changed; reload row positions")
+    path = sheet.dir(ws.id) / "current.png"
+    with Image.open(path) as image:
+        geometry = rowmap.bands_for(image, len(body.rows))
+    located = rowanchors.locate(path, sheet.sha256, body.rows, geometry)
+    if body.image_revision != sheet.sha256:
+        raise HTTPException(409, "Image changed; reload row positions")
+    return {**located, "image_revision": body.image_revision}
 
 
 @app.put("/api/ws/{ws_id}/results/{sheet_id}")

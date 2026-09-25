@@ -666,7 +666,7 @@ export default function SheetViewer({
             crossOrigin="use-credentials"
             alt={sheet.name}
             draggable={false}
-            className="block h-full w-full rounded-lg border border-rule bg-white shadow-[var(--shadow)]"
+            className="block h-full w-full rounded-lg bg-white shadow-[var(--shadow)] ring-1 ring-rule"
             style={{
               transform: fine ? `rotate(${fine}deg)` : undefined,
               filter:
@@ -676,19 +676,15 @@ export default function SheetViewer({
             }}
           />
 
-          {/* Dòng đang chọn ở bảng kết quả — đối chiếu ảnh ↔ dòng.
-              CHỈ TÔ NỀN, không kẻ viền trên/dưới và không gắn nhãn nổi: dải này
-              là ƯỚC LƯỢNG từ ảnh (xem api/rowmap.py), lệch một chút là chuyện
-              thường, mà viền đậm + nhãn thì che mất chữ của dòng bên cạnh —
-              đúng thứ người dùng đang cần đọc.
-              Dò được đúng dòng thì đậm hơn, phải chia đều thì nhạt hẳn: nhìn là
-              biết chỗ nào tin được, không phải đoán. */}
-          {highlight && !cropping && (
+          {/* Solid = amount AND balance matched in local OCR; dashed = geometry
+              only. No sliding animation across neighboring transactions. Hide
+              while editing geometry because the preview coordinate space differs. */}
+          {highlight && !cropping && !warping && fine === 0 && (
             <div
-              className="pointer-events-none absolute transition-all duration-200"
+              className="pointer-events-none absolute"
               style={{
                 top: `${highlight.y0 * 100}%`,
-                height: `${Math.max(0.006, highlight.y1 - highlight.y0) * 100}%`,
+                height: `${Math.max(0, highlight.y1 - highlight.y0) * 100}%`,
                 /* Chỉ kéo hết bề ngang TỜ GIẤY, không kéo hết bề ngang ẢNH.
                    Hai lý do, lý do sau mới là lý do thật:
                    1. Ảnh chụp còn cả mặt bàn hai bên — vệt quét qua đó thừa.
@@ -700,8 +696,9 @@ export default function SheetViewer({
                 left: `${(highlightSpan?.x0 ?? 0) * 100}%`,
                 width: `${((highlightSpan?.x1 ?? 1) - (highlightSpan?.x0 ?? 0)) * 100}%`,
                 background: `color-mix(in srgb, var(--danger) ${
-                  highlightExact ? 13 : 7
+                  highlightExact ? 8 : 4
                 }%, transparent)`,
+                border: `1px ${highlightExact ? "solid" : "dashed"} var(--danger)`,
                 // Sổ chụp nghiêng thì dòng chữ cũng nghiêng — vệt thẳng băng
                 // sẽ cắt ngang hai dòng khác nhau ở hai đầu trang.
                 transform: highlightSkew ? `skewY(${highlightSkew}deg)` : undefined,

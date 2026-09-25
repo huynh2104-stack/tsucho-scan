@@ -382,8 +382,11 @@ export const splitSheet = (wsId: string, sheetId: string, x: number) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });
 
 /** Dải ảnh của từng dòng — ước lượng từ ảnh, MIỄN PHÍ (xem api/rowmap.py). */
+export type RowBand = { y0: number; y1: number; method?: "content" | "estimated" };
 export type RowBands = {
-  bands: { y0: number; y1: number }[];
+  bands: RowBand[];
+  image_revision?: string;
+  ocr_status?: "ready" | "unavailable" | "failed";
   exact: boolean;
   /** Độ nghiêng đo được của trang — vệt đánh dấu nghiêng theo cho khớp chữ. */
   skew_deg: number;
@@ -394,10 +397,22 @@ export type RowBands = {
   x1: number;
 };
 
-export const rowMap = async (wsId: string, sheetId: string, rows: number) =>
+export const rowMap = async (wsId: string, sheetId: string, rows: Pick<Tx, "balance" | "amount_in" | "amount_out" | "is_note">[], revision: string, signal?: AbortSignal) =>
   asJson<RowBands>(
-    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap?rows=${rows}`, CRED),
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap`, {
+      ...CRED, method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows, image_revision: revision }), signal,
+    }),
   );
+
+/** Fast geometry while local OCR is still working. Every band is estimated. */
+export const rowMapEstimate = async (wsId: string, sheetId: string, count: number, signal?: AbortSignal) => {
+  const geometry = await asJson<RowBands>(
+    await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap?rows=${count}`, { ...CRED, signal }),
+  );
+  return { ...geometry, exact: false,
+    bands: geometry.bands.map(band => ({ ...band, method: "estimated" as const })) };
+};
 
 /** Thêm sổ MẪU (dữ liệu giả lập) — chạy hết luồng mà không gọi model. */
 export const addSample = (wsId: string) =>

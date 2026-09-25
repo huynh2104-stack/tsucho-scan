@@ -33,6 +33,7 @@ import {
   resetSheets,
   rotateSheets,
   rowMap,
+  rowMapEstimate,
   saveBlob,
   saveSheetResult,
   startScan,
@@ -137,7 +138,7 @@ export default function Workbench() {
 
   /** Dòng đang chọn ở bảng kết quả — khung ảnh khoanh đúng dải của dòng này. */
   const [selRow, setSelRow] = useState<TxRef | null>(null);
-  const [bands, setBands] = useState<RowBands | null>(null);
+  const [mappedRows, setMappedRows] = useState<{ key: string; data: RowBands | null } | null>(null);
   const [pendingFocus, setPendingFocus] = useState<{
     ref: TxRef;
     field: "balance" | "description";
@@ -247,6 +248,14 @@ export default function Workbench() {
 
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
+
+  // Include content as well as row count: deleting/inserting/reordering rows
+  // must never reuse another transaction's coordinates, even at equal length.
+  const anchorRows = JSON.stringify((active ? store[active]?.blocks ?? [] : []).flatMap(b =>
+    b.rows.map(tx => ({ balance: tx.balance, amount_in: tx.amount_in, amount_out: tx.amount_out, is_note: !!tx.is_note })),
+  ));
+  const rowMapKey = JSON.stringify([ws?.id, active, activeSheet?.sha256, anchorRows]);
+  const bands = mappedRows?.key === rowMapKey ? mappedRows.data : null;
 
   /** Vị trí dải ảnh của dòng đang chọn (chỉ khi dòng đó thuộc mặt đang xem). */
   const highlight = useMemo(() => {
@@ -444,22 +453,37 @@ export default function Workbench() {
     setPendingFocus(null);
   }, [pendingFocus, cols.kind]);
 
-  // Dải ảnh của từng dòng, để khoanh dòng đang chọn lên ảnh. Chạy bằng thuật
-  // toán trên ảnh có sẵn nên $0.
+  // Show the geometry band as soon as it is ready, then replace it with a
+  // content-matched band. The latter never moves an old sheet's highlight.
   useEffect(() => {
-    const rows = flatRows.length;
-    if (!ws || !activeSheet || rows === 0) {
-      setBands(null);
-      return;
-    }
+    if (!ws || !activeSheet || anchorRows === "[]") return;
     let alive = true;
-    rowMap(ws.id, activeSheet.id, rows)
-      .then((b) => alive && setBands(b))
-      .catch(() => alive && setBands(null));
+    const abort = new AbortController();
+    const rows = JSON.parse(anchorRows) as Pick<Tx, "balance" | "amount_in" | "amount_out" | "is_note">[];
+    rowMapEstimate(ws.id, activeSheet.id, rows.length, abort.signal)
+      .then(data => {
+        if (alive && data.bands.length === rows.length) setMappedRows(previous =>
+          previous?.key === rowMapKey && previous.data?.ocr_status === "ready"
+            ? previous : { key: rowMapKey, data });
+      })
+      .catch(() => { /* OCR request can still supply the result. */ });
+    // Wait only for an actual edit burst, not for a click on a result row.
+    const timer = setTimeout(() => {
+      rowMap(ws.id, activeSheet.id, rows, activeSheet.sha256, abort.signal)
+        .then(data => {
+          if (alive && data.image_revision === activeSheet.sha256) setMappedRows({ key: rowMapKey, data });
+        })
+        .catch(() => {
+          if (alive) setMappedRows(previous => previous?.key === rowMapKey
+            ? previous : { key: rowMapKey, data: null });
+        });
+    }, 120);
     return () => {
       alive = false;
+      clearTimeout(timer);
+      abort.abort();
     };
-  }, [ws?.id, activeSheet?.id, activeSheet?.sha256, flatRows.length]);
+  }, [ws?.id, activeSheet?.id, activeSheet?.sha256, anchorRows, rowMapKey]);
 
 
   /** Nhảy tới dòng cần soát kế tiếp và ĐẶT CON TRỎ vào chính ô gây lệch.
@@ -1101,7 +1125,7 @@ export default function Workbench() {
               });
             }}
             highlight={highlight}
-            highlightExact={!!bands?.exact}
+            highlightExact={highlight?.method === "content"}
             highlightSkew={bands?.skew_deg ?? 0}
             highlightSpan={bands ? { x0: bands.x0, x1: bands.x1 } : null}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
@@ -1174,7 +1198,12 @@ export default function Workbench() {
               )}
               {highlight && (
                 <span className="text-[10.5px] text-ink3">
-                  {bands?.exact ? t.rowLinkExact : t.rowLinkEstimated}
+                  {highlight.method === "content" ? t.rowLinkExact : t.rowLinkEstimated}
+                </span>
+              )}
+              {selRow?.sheet === active && !highlight && anchorRows !== "[]" && (
+                <span role="status" className="text-[10.5px] text-ink3">
+                  {mappedRows?.key === rowMapKey ? t.rowLinkUnavailable : t.rowLinkLoading}
                 </span>
               )}
             </div>
@@ -1193,7 +1222,7 @@ export default function Workbench() {
               onAddRow={addRow}
               onAutoBalance={autoBalance}
               selected={selRow}
-              onSelectRow={setSelRow}
+              onSelectRow={(ref) => { setSelRow(ref); setActive(ref.sheet); }}
             />
           </div>
 
