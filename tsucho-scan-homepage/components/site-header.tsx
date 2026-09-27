@@ -112,17 +112,19 @@ export function SiteHeader() {
   }, [])
 
   const muc = [
+    { href: '#how', label: t.nav.how, phu: false },
+    { href: '#screen', label: t.nav.screen, phu: false },
     { href: '#reads', label: t.nav.reads, phu: false },
     { href: '#verify', label: t.nav.verify, phu: false },
-    { href: '#how', label: t.nav.how, phu: false },
     { href: '#output', label: t.nav.output, phu: true },
     { href: '#limits', label: t.nav.limits, phu: true },
     { href: '#pricing', label: t.nav.pricing, phu: false },
-    { href: '#faq', label: t.nav.faq, phu: false },
+    { href: '#faq', label: t.nav.faq, phu: true },
   ]
 
   return (
     <>
+      <a href="#main-content" className="skip-link">{lang === 'jp' ? '本文へ移動' : lang === 'vn' ? 'Đến nội dung chính' : 'Skip to content'}</a>
       <header
         ref={khung}
         className={`sticky top-0 z-[60] border-b transition-[background-color,border-color] duration-200 ${
@@ -131,7 +133,7 @@ export function SiteHeader() {
             : 'border-transparent bg-paper/90'
         }`}
       >
-        <div className="mx-auto flex h-14 max-w-[1120px] items-center gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-4 px-4 sm:px-6">
           <a href="#top" className="shrink-0 text-[16px] text-sumi sm:text-[18px]">
             <Brand size={22} />
           </a>
@@ -144,7 +146,7 @@ export function SiteHeader() {
               <a
                 key={m.href}
                 href={m.href}
-                className={`nav-link text-[13.5px] ${m.phu ? 'hidden min-[1200px]:inline' : ''}`}
+                className={`nav-link text-[13.5px] ${m.phu ? 'hidden' : ''}`}
               >
                 {m.label}
               </a>

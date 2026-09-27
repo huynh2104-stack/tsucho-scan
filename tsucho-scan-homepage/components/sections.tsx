@@ -7,7 +7,7 @@ import { Explain } from '@/components/explain'
 import { HINH_READS } from '@/components/diagrams'
 import { Faq as DanhSachHoiDap } from '@/components/faq'
 import { IntroVideo } from '@/components/intro-video'
-import { HowSteps } from '@/components/how-steps'
+import { ProductTour } from '@/components/product-tour'
 import { ManHinh } from '@/components/man-hinh'
 import { PassbookSpread } from '@/components/passbook-spread'
 import { MOTION_TOOLS } from '@/components/tool-motion'
@@ -50,7 +50,7 @@ function Section({
   const toi = nen === 'toi'
   return (
     <section id={id} className={`border-t border-rule ${NEN[nen]}`}>
-      <div className="relative mx-auto max-w-[1120px] px-4 py-16 sm:px-6 sm:py-20">
+      <div className="section-inner relative mx-auto max-w-[1200px] px-4 py-16 sm:px-6 sm:py-24">
         {/* Tiêu đề hiện NGAY, không chuyển động — chỉ phụ kiện bên dưới
             (thẻ, dòng số, con dấu) mới hiện dần. */}
         <div className="relative border-l-2 border-beni pl-4 sm:pl-6">
@@ -78,17 +78,23 @@ function Section({
 }
 
 export function Hero() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const h = t.hero
+  const intro = {
+    jp: { label: '日本の通帳に、実務のための読み取りを。', demo: '操作の流れを見る', proof: ['写真・PDFから読み取り', '残高の整合性をチェック', 'Excel・CSVに書き出し'] },
+    vn: { label: 'Từ sổ ngân hàng Nhật đến dữ liệu dùng được.', demo: 'Xem quy trình thao tác', proof: ['Đọc ảnh và PDF', 'Đối chiếu số dư từng dòng', 'Xuất Excel và CSV'] },
+    en: { label: 'Japanese passbooks. Ready for real work.', demo: 'Explore the workflow', proof: ['Read photos and PDFs', 'Check running balances', 'Export Excel and CSV'] },
+  }[lang]
 
   return (
     /* MẶT BÀN TỐI: cuốn sổ là tờ giấy SÁNG nằm trên mặt bàn SẪM.
        Toàn bộ tiêu đề + mô tả + hai nút + bảng mẫu nằm gọn trong một khung
        1440×900; chỉ dòng chú thích dưới bảng được phép tràn. */
-    <section id="top" className="grain relative overflow-hidden bg-desk">
-      <div className="relative mx-auto grid max-w-[1120px] gap-10 px-4 pt-12 pb-14 sm:px-6 sm:pt-16 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] lg:items-center lg:gap-14 lg:pt-14 lg:pb-12">
+    <section id="top" className="hero-section relative overflow-hidden bg-desk">
+      <div className="hero-grid relative mx-auto grid max-w-[1200px] gap-10 px-4 pt-12 pb-14 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center lg:gap-12">
         <div className="min-w-0">
-          <h1 className="font-display text-[38px] leading-[1.14] font-semibold tracking-[-0.015em] text-paper sm:text-[52px] lg:text-[58px]">
+          <p className="hero-context">{intro.label}</p>
+          <h1 className="hero-title font-display font-semibold text-paper">
             {h.title.split('\n').map((d, i) => (
               <span key={i} className="block">
                 {d}
@@ -106,10 +112,10 @@ export function Hero() {
               {h.primary}
             </a>
             <a
-              href="#reads"
+              href="#how"
               className="rounded-sm border border-paper/25 px-5 py-2.5 text-center text-[14.5px] text-paper/85 transition-colors duration-200 hover:border-paper/55 hover:text-paper"
             >
-              {h.secondary}
+              {intro.demo}
             </a>
           </div>
 
@@ -119,6 +125,9 @@ export function Hero() {
         <div className="settle min-w-0" style={{ animationDelay: '120ms' }}>
           <PassbookSpread />
         </div>
+      </div>
+      <div className="hero-benefits">
+        {intro.proof.map((label, i) => <a key={label} href={['#how', '#verify', '#output'][i]}><span aria-hidden="true">{['↳', '✓', '↗'][i]}</span>{label}</a>)}
       </div>
     </section>
   )
@@ -224,7 +233,7 @@ function ChuoiSoDu({ chay }: { chay: boolean }) {
           <li
             key={h.ra}
             data-motion
-            className={`tnum flex items-center gap-2 border-b border-rule-soft py-2.5 text-[13px] last:border-0 sm:gap-3 sm:text-[15px] ${
+            className={`tnum flex flex-wrap items-center gap-2 border-b border-rule-soft py-2.5 text-[13px] last:border-0 sm:gap-3 sm:text-[15px] ${
               chay ? 'settle' : 'opacity-0'
             }`}
             style={chay ? { animationDelay: `${tre}s` } : undefined}
@@ -266,7 +275,7 @@ export function Verify() {
     <Section id="verify" title={v.title} lead={v.lead}>
       <div
         ref={khoiChuoi}
-        className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center"
+        className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center"
       >
         <div
           data-motion
@@ -388,7 +397,7 @@ export function How() {
 
   return (
     <Section id="how" title={h.title} lead={h.lead} nen="giayDam">
-      <HowSteps />
+      <ProductTour />
     </Section>
   )
 }
