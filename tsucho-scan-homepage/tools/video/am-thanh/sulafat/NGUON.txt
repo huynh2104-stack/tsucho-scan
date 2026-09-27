@@ -1,0 +1,6 @@
+s0–s8: gemini-3.8-flash-tts, giọng Sulafat (27/09/2026)
+s9: gemini-3.8-flash-lite-tts, giọng Sulafat — TẠM THỜI, vì 3.8-flash-tts hết hạn mức miễn phí trong ngày.
+    Đo độ giống giọng (MFCC): s9 cách 7,27; các câu s0–s8 dao động tới 7,25 → rất sát, có thể hơi cao giọng hơn.
+    Thay bằng bản chuẩn khi còn hạn mức (reset 16:00 giờ Nhật):
+      python tsucho-scan-homepage/tools/video/tao-giong.py --chi s9
+      python tsucho-scan-homepage/tools/video/quay-video.py --chi-tron

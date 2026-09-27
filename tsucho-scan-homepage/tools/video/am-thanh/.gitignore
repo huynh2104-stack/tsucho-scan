@@ -1,0 +1,5 @@
+# File âm thanh nặng, tạo lại được bằng tao-giong.py / tao-nhac.py
+*.wav
+*.pcm
+*.mp3
+*.zip

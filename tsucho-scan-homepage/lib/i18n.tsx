@@ -316,6 +316,12 @@ const DICT = {
         },
       ],
     },
+    video: {
+      title: '約1分半の動画で、全体の流れを',
+      lead: '取り込み、検算、修正、書き出しまで。ナレーションつきです。音を出せない場所でも、画面の文字だけで分かるように作ってあります。',
+      play: '動画を再生',
+      phone: 'スマートフォンでは、全画面表示にすると文字が読みやすくなります。',
+    },
     cta: {
       title: '手元の通帳で、1ページだけ試してみてください',
       lead: '見本の通帳なら費用はかかりません。動きを見てから、実際の通帳を出すか決められます。',
@@ -610,6 +616,12 @@ const DICT = {
         },
       ],
     },
+    video: {
+      title: 'Xem toàn bộ quy trình trong khoảng một phút rưỡi',
+      lead: 'Từ đưa sổ vào, kiểm tra số dư, sửa chỗ sai tới xuất Excel. Có giọng đọc và chữ trên màn hình, cả hai bằng tiếng Nhật.',
+      play: 'Phát video',
+      phone: 'Trên điện thoại, xem toàn màn hình để chữ dễ đọc hơn.',
+    },
     cta: {
       title: 'Thử đúng một mặt sổ đang có trên bàn',
       lead: 'Sổ mẫu không tốn phí. Xem nó chạy thế nào rồi hãy quyết có đưa sổ thật lên hay không.',
@@ -903,6 +915,12 @@ const DICT = {
           a: 'Not if the image is untouched: the earlier result is reused. Rotating or cropping genuinely changes the image, so it is read again.',
         },
       ],
+    },
+    video: {
+      title: 'The whole workflow in about 90 seconds',
+      lead: 'Import, balance check, fixes and export. Narration and on-screen text are in Japanese.',
+      play: 'Play video',
+      phone: 'On a phone, watch it full screen so the text is easier to read.',
     },
     cta: {
       title: 'Try one page from the passbook on your desk',

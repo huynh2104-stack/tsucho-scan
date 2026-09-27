@@ -8,6 +8,7 @@ import {
   Reads,
   Tools,
   Verify,
+  Video,
   Workspace,
 } from '@/components/sections'
 import { Pricing } from '@/components/pricing'
@@ -30,6 +31,7 @@ export default function Page() {
       <SiteHeader />
       <main>
         <Hero />
+        <Video />
         <Reads />
         <Verify />
         <Workspace />

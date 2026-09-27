@@ -1,0 +1,1143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>通帳スキャン 紹介動画</title>
+<!--
+  VIDEO GIỚI THIỆU — nguồn dựng hình.
+
+  Trang này KHÔNG chạy như một trang web bình thường. Mọi chuyển động là hàm
+  thuần của thời gian: gọi seek(t) là cả khung hình được vẽ lại đúng trạng
+  thái ở giây t. Không dùng CSS animation/transition, nên quay-video.py chụp
+  khung nào ra khung đó, chụp lại bao nhiêu lần cũng giống hệt.
+
+  Sửa chữ: sửa thẳng trong HTML bên dưới. Sửa nhịp: bảng CANH ở cuối file.
+  Xem thử: mở file này bằng trình duyệt, thêm #12.5 vào cuối địa chỉ để
+  nhảy tới giây 12.5, hoặc #play để chạy thử theo thời gian thật.
+
+  Ảnh màn hình lấy từ public/shots — ảnh thật của ứng dụng, tên pháp nhân đã
+  được che bằng tools/chup-anh-man-hinh.py. Phần nào là hình vẽ minh hoạ thì
+  có nhãn「イメージ」, phần nào là ảnh thật thì có nhãn「実際の画面」.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Shippori+Mincho:wght@600;800&family=Zen+Kaku+Gothic+New:wght@500;700&display=block">
+<style>
+:root {
+  /* Cùng hệ màu với trang giới thiệu */
+  --desk: #203b50;
+  --desk-hi: #284a62;
+  --desk-lo: #182e40;
+  --paper: #f4f7f8;
+  --paper-2: #eaf0f3;
+  --rule: #c7d3db;
+  --rule-soft: #e0e7ec;
+  --sumi: #203647;
+  --sumi-2: #526675;
+  --shu: #bd392c;
+  --kin: #e0b84a;
+  --dim: rgba(244, 247, 248, 0.74);
+
+  /* Màu lấy từ ảnh chụp app thật, để hình minh hoạ khớp với màn hình thật */
+  --app-head: #244b47;
+  --app-ok: #1f8a66;
+  --app-out: #c0392b;
+  --app-in: #16936b;
+  --app-band: #f2e0df;
+  --app-cell: #c8efcf;
+  --app-sel: #2e9e74;
+  --app-canvas: #cfdbd9;
+  --warn-bg: #fff2cc;
+  --warn-ink: #7a5400;
+  --warn-edge: #e0bc66;
+
+  --mincho: 'Shippori Mincho', serif;
+  --gothic: 'Zen Kaku Gothic New', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--desk); }
+body {
+  font-family: var(--gothic);
+  font-weight: 500;
+  color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  word-break: auto-phrase;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(1500px 1000px at 26% 16%, var(--desk-hi), var(--desk) 55%, var(--desk-lo));
+}
+/* Vạch kẻ 罫線 mờ của cuốn sổ, trôi rất chậm */
+#rules {
+  position: absolute;
+  left: 0; right: 0; top: -60px; height: 1260px;
+  background: repeating-linear-gradient(to bottom, transparent 0 59px, rgba(244, 247, 248, 0.034) 59px 60px);
+}
+
+.scene { position: absolute; inset: 0; opacity: 0; visibility: hidden; }
+[data-in] { opacity: 0; }
+
+/* ── Chữ ─────────────────────────────────────────────── */
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.mincho { font-family: var(--mincho); font-feature-settings: "palt"; }
+
+.txt {
+  position: absolute;
+  left: 130px; top: 150px; bottom: 110px;
+  width: 610px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.kicker {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 25px;
+  letter-spacing: 0.22em;
+  color: var(--kin);
+}
+.title {
+  font-family: var(--mincho);
+  font-weight: 800;
+  font-size: 70px;
+  line-height: 1.28;
+  letter-spacing: 0.03em;
+  font-feature-settings: "palt";
+  margin-top: 18px;
+}
+.body { font-size: 38px; line-height: 1.62; margin-top: 34px; }
+.sub { font-size: 29px; line-height: 1.62; margin-top: 26px; color: var(--dim); }
+
+.vis {
+  position: absolute;
+  left: 790px; top: 150px;
+  width: 1010px; height: 830px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Khung cửa sổ trình duyệt bọc ảnh thật ─────────────── */
+.win-wrap { position: relative; }
+.win {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 50px 90px -40px rgba(4, 14, 24, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.win-bar {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 18px;
+  background: #edf2f3;
+  border-bottom: 1px solid #d6dfe2;
+}
+.win-bar i { width: 13px; height: 13px; border-radius: 50%; background: #cdd6da; }
+.tag {
+  margin-left: auto;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--sumi-2);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 3px 14px;
+}
+.win-body { position: relative; overflow: hidden; background: var(--app-canvas); }
+.win-body img { display: block; }
+
+/* ── Thẻ bảng minh hoạ (giống bảng trong app) ──────────── */
+.card {
+  position: relative;
+  width: 1000px;
+  background: var(--paper);
+  color: var(--sumi);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 50px 90px -40px rgba(4, 14, 24, 0.8);
+}
+.card-head { display: flex; align-items: center; gap: 16px; padding: 24px 30px 20px; }
+.card-head b { font-family: var(--mincho); font-weight: 800; font-size: 32px; }
+.card-head .tag { margin-left: auto; }
+/* Cột cố định: khi chữ trong ô đổi (đang gõ, hiện OK) bảng không được xê dịch */
+table.lg { width: 100%; border-collapse: collapse; font-size: 29px; table-layout: fixed; }
+.lg th:nth-child(1) { width: 215px; }
+.lg th:nth-child(2) { width: 175px; }
+.lg th:nth-child(3), .lg th:nth-child(4) { width: 165px; }
+.lg th:nth-child(5) { width: 185px; }
+.lg th:nth-child(6) { width: 95px; }
+.lg th {
+  background: var(--app-head);
+  color: #fff;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  padding: 14px 18px;
+  text-align: left;
+}
+.lg td {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: #fff;
+  font-family: var(--mono);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.lg td.k { font-family: var(--gothic); font-weight: 500; }
+.lg .r { text-align: right; }
+.lg .c { text-align: center; }
+.lg .out { color: var(--app-out); }
+.lg .in { color: var(--app-in); }
+.lg .bal { font-weight: 600; }
+.lg .dash { color: #b3c0c8; }
+.lg td.chk { font-size: 22px; font-weight: 600; color: var(--app-ok); }
+.lg tr.hl td { background: #e8f4ef; }
+
+.eq {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 124px;
+  padding: 0 30px;
+  border-top: 1px solid var(--rule);
+  background: var(--paper-2);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 40px;
+  white-space: nowrap;
+}
+.eq .op { font-family: var(--gothic); font-weight: 700; color: var(--sumi-2); }
+.pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--gothic);
+  font-weight: 700;
+  font-size: 27px;
+  color: #fff;
+  background: var(--app-ok);
+  border-radius: 999px;
+  padding: 8px 22px 8px 16px;
+}
+.pill svg { width: 28px; height: 28px; }
+.pill.ng { background: var(--warn-bg); color: var(--warn-ink); border: 2px solid var(--warn-edge); padding-left: 22px; }
+
+.sum { display: flex; align-items: center; gap: 14px; font-family: var(--gothic); font-weight: 700; font-size: 34px; color: var(--app-ok); }
+.sum svg { width: 38px; height: 38px; }
+.sum.cho { color: var(--sumi-2); font-weight: 500; }
+
+/* Con dấu 検算済 — nằm gọn trong dải kết quả, không che số nào */
+.hanko {
+  position: absolute;
+  right: 40px; bottom: 4px;
+  width: 116px; height: 116px;
+  border-radius: 50%;
+  border: 5px solid var(--shu);
+  box-shadow: inset 0 0 0 4px var(--paper-2), inset 0 0 0 6px var(--shu);
+  display: grid;
+  place-items: center;
+  color: var(--shu);
+  font-family: var(--mincho);
+  font-weight: 800;
+  font-size: 30px;
+  opacity: 0;
+}
+
+/* ── Thanh bước ở trên cùng ─────────────────────────────── */
+#stepper {
+  position: absolute;
+  top: 50px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  opacity: 0;
+}
+.st { display: flex; align-items: center; gap: 12px; font-size: 25px; font-weight: 700; white-space: nowrap; }
+.st b {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 600;
+  border: 2px solid rgba(244, 247, 248, 0.5);
+}
+.st-line { width: 46px; height: 2px; background: rgba(244, 247, 248, 0.22); }
+
+#bug {
+  position: absolute;
+  left: 130px; bottom: 42px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mincho);
+  font-weight: 800;
+  font-size: 25px;
+  letter-spacing: 0.06em;
+  color: rgba(244, 247, 248, 0.85);
+  opacity: 0;
+}
+#bug svg { width: 34px; height: 34px; }
+
+/* ── S0 mở đầu ─────────────────────────────────────────── */
+#ledgerBg {
+  position: absolute;
+  left: -240px; top: -320px;
+  width: 2400px;
+  transform: rotate(-7deg);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 32%, #000 68%, transparent 100%);
+}
+#ledgerBg .row {
+  display: grid;
+  grid-template-columns: 250px 220px 300px 300px 330px 250px 220px 300px;
+  height: 64px;
+  align-items: center;
+  border-bottom: 1px solid rgba(244, 247, 248, 0.05);
+  font-family: var(--mono);
+  font-size: 30px;
+  color: rgba(244, 247, 248, 0.085);
+}
+#ledgerBg .row span:nth-child(2), #ledgerBg .row span:nth-child(7) { font-family: var(--gothic); }
+#ledgerBg .row span.r { text-align: right; padding-right: 40px; }
+/* Làm tối vùng giữa để câu hỏi không bị chữ nền chen vào */
+.hush { position: absolute; inset: 0; background: radial-gradient(1150px 430px at 50% 50%, rgba(29, 53, 72, 0.94), rgba(29, 53, 72, 0.6) 55%, transparent 82%); }
+.hook { font-family: var(--mincho); font-weight: 800; font-size: 94px; line-height: 1.34; letter-spacing: 0.05em; font-feature-settings: "palt"; }
+.hook-sub { margin-top: 48px; height: 60px; font-size: 40px; letter-spacing: 0.08em; color: var(--dim); }
+.caret { display: inline-block; width: 3px; height: 44px; background: var(--kin); margin-left: 8px; vertical-align: -7px; }
+
+/* ── S1 tên sản phẩm ───────────────────────────────────── */
+.mark-big { width: 150px; height: 150px; position: relative; }
+.mark-big svg { width: 100%; height: 100%; display: block; }
+.ring {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 150px; height: 150px;
+  margin: -75px 0 0 -75px;
+  border-radius: 34px;
+  border: 3px solid var(--shu);
+  opacity: 0;
+}
+.name-big { font-family: var(--mincho); font-weight: 800; font-size: 132px; letter-spacing: 0.08em; margin-top: 40px; font-feature-settings: "palt"; }
+.tagline { font-family: var(--mincho); font-weight: 600; font-size: 56px; margin-top: 20px; letter-spacing: 0.05em; }
+.chips { display: flex; gap: 22px; margin-top: 70px; }
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 30px;
+  padding: 14px 30px 14px 24px;
+  border: 1.5px solid rgba(244, 247, 248, 0.3);
+  border-radius: 999px;
+  background: rgba(244, 247, 248, 0.05);
+}
+.chip svg { width: 32px; height: 32px; }
+
+/* ── S2 tài liệu bay vào ô thả ─────────────────────────── */
+.doc {
+  position: absolute;
+  left: 0; top: 0;
+  width: 118px; height: 148px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 22px 34px -14px rgba(0, 0, 0, 0.55);
+  padding: 20px 16px;
+  opacity: 0;
+}
+.doc i { display: block; height: 7px; border-radius: 4px; background: #dfe6e9; margin-bottom: 11px; }
+.doc i:nth-child(2) { width: 70%; }
+.doc span {
+  position: absolute;
+  left: 14px; bottom: 16px;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 21px;
+  color: #fff;
+  background: var(--shu);
+  border-radius: 5px;
+  padding: 2px 9px;
+}
+.doc.jpg span { background: var(--app-sel); }
+.ripple { position: absolute; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; border: 4px solid var(--app-sel); opacity: 0; }
+.glow { position: absolute; border: 4px solid var(--app-sel); border-radius: 14px; opacity: 0; box-shadow: 0 0 0 8px rgba(46, 158, 116, 0.22); }
+
+/* ── S3 nắn ảnh ────────────────────────────────────────── */
+.warp { position: absolute; left: 0; top: 0; width: 1000px; height: 625px; transform-origin: 0 0; }
+.warp img { width: 1000px; height: 625px; }
+.tools { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; }
+.tool {
+  font-size: 28px;
+  font-weight: 700;
+  padding: 10px 22px;
+  border-radius: 10px;
+  background: rgba(244, 247, 248, 0.1);
+  border: 1.5px solid rgba(244, 247, 248, 0.28);
+}
+
+/* ── S4 công thức ──────────────────────────────────────── */
+.formula {
+  margin-top: 34px;
+  padding: 24px 28px;
+  border-radius: 14px;
+  background: rgba(244, 247, 248, 0.08);
+  border: 1.5px solid rgba(244, 247, 248, 0.22);
+}
+.formula small { display: block; font-size: 23px; font-weight: 700; letter-spacing: 0.1em; color: var(--kin); }
+.formula div { margin-top: 10px; font-size: 33px; line-height: 1.55; font-weight: 700; }
+.scan {
+  position: absolute;
+  left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, var(--app-sel) 20%, var(--app-sel) 80%, transparent);
+  box-shadow: 0 0 22px 6px rgba(46, 158, 116, 0.4);
+  opacity: 0;
+}
+
+/* ── S5 phóng to ảnh thật ──────────────────────────────── */
+.top-txt { position: absolute; left: 130px; top: 128px; right: 130px; }
+.top-row { display: flex; align-items: baseline; gap: 36px; margin-top: 12px; }
+.top-row .title { margin-top: 0; font-size: 62px; }
+.top-row .body { margin-top: 0; font-size: 36px; }
+.zoom { position: absolute; left: 0; top: 0; width: 2200px; height: 1375px; transform-origin: 0 0; }
+.zoom img { position: absolute; left: 0; top: 0; width: 2200px; height: 1375px; }
+.zoom svg { position: absolute; left: 0; top: 0; overflow: visible; }
+
+/* ── S6 sửa ô vàng ─────────────────────────────────────── */
+td.cell { position: relative; }
+.cursor { position: absolute; left: 0; top: 0; width: 44px; height: 44px; opacity: 0; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35)); }
+
+/* ── S7 file Excel ─────────────────────────────────────── */
+.xl {
+  position: absolute;
+  width: 640px;
+  background: #fff;
+  color: #1f2a30;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 40px 80px -30px rgba(4, 14, 24, 0.85), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  opacity: 0;
+}
+.xl-bar { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 18px; background: #217346; color: #fff; font-size: 22px; font-weight: 700; }
+.xl-bar svg { width: 28px; height: 28px; }
+.xl table { width: 100%; border-collapse: collapse; font-size: 19px; }
+.xl td, .xl th { border: 1px solid #dfe3e6; padding: 7px 10px; white-space: nowrap; }
+.xl th { background: #f3f4f1; color: #7a858c; font-weight: 500; font-size: 16px; text-align: center; }
+.xl td.n { background: #f3f4f1; color: #7a858c; text-align: center; font-size: 16px; width: 34px; }
+.xl td.m { font-family: var(--mono); font-weight: 500; text-align: right; }
+.xl td.hd { background: #eef0ea; font-weight: 700; }
+.xl td.ok { color: var(--app-ok); font-weight: 700; }
+.xl-tabs { display: flex; gap: 4px; padding: 6px 10px 0; background: #f3f4f1; border-top: 1px solid #dfe3e6; font-size: 17px; }
+.xl-tabs span { padding: 5px 14px; color: #7a858c; }
+.xl-tabs span.on { background: #fff; color: #1f2a30; font-weight: 700; border: 1px solid #dfe3e6; border-bottom: 0; border-radius: 4px 4px 0 0; }
+
+/* ── S8, S9 ────────────────────────────────────────────── */
+.honest1 { font-family: var(--mincho); font-weight: 800; font-size: 96px; letter-spacing: 0.05em; font-feature-settings: "palt"; }
+.honest2 { position: relative; font-family: var(--mincho); font-weight: 600; font-size: 64px; letter-spacing: 0.05em; margin-top: 44px; font-feature-settings: "palt"; }
+.mark-line { position: relative; display: inline-block; }
+.mark-line::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -12px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--kin);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--m, 0));
+}
+.lockup { display: flex; align-items: center; gap: 30px; }
+.lockup svg { width: 104px; height: 104px; }
+.lockup span { font-family: var(--mincho); font-weight: 800; font-size: 96px; letter-spacing: 0.08em; font-feature-settings: "palt"; }
+.cta1 { margin-top: 60px; font-size: 40px; color: var(--dim); letter-spacing: 0.04em; }
+.cta2 { margin-top: 22px; font-family: var(--mincho); font-weight: 600; font-size: 60px; letter-spacing: 0.04em; font-feature-settings: "palt"; }
+.url {
+  margin-top: 60px;
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 36px 18px 40px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--desk);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 42px;
+  letter-spacing: 0.01em;
+}
+.url svg { width: 34px; height: 34px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="rules"></div>
+
+  <!-- S0 — câu hỏi mở đầu -->
+  <section class="scene" id="s0">
+    <div id="ledgerBg"></div>
+    <div class="hush"></div>
+    <div class="center">
+      <div class="hook" data-in="0.3" data-d="0.9">通帳の明細、</div>
+      <div class="hook" data-in="1.9" data-d="0.9">まだ手で打ち込んでいますか。</div>
+      <div class="hook-sub"><span id="typing"></span><i class="caret" id="caret"></i></div>
+    </div>
+  </section>
+
+  <!-- S1 — tên sản phẩm -->
+  <section class="scene" id="s1">
+    <div class="center">
+      <div class="mark-big" id="markBig">
+        <div class="ring" id="ring"></div>
+        <svg viewBox="0 0 32 32"><rect x="1.5" y="1.5" width="29" height="29" rx="5" fill="#bd392c"/><g fill="#f4f7f8"><rect x="7" y="8" width="18" height="2" rx="1" opacity="0.45"/><rect x="7" y="14" width="18" height="4" rx="1.4"/><rect x="7" y="22" width="18" height="2" rx="1" opacity="0.45"/></g></svg>
+      </div>
+      <div class="name-big" data-in="0.55" data-d="0.9">通帳スキャン</div>
+      <div class="tagline" data-in="2.2" data-d="0.9">通帳の明細を、検算済みの表へ。</div>
+      <div class="chips">
+        <div class="chip" data-in="4.2"><svg viewBox="0 0 24 24" fill="none" stroke="#e0b84a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l2-3h6l2 3h3v13H4z"/><circle cx="12" cy="13" r="4"/></svg>写真・PDFから読み取り</div>
+        <div class="chip" data-in="4.45"><svg viewBox="0 0 24 24" fill="none" stroke="#e0b84a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>残高チェーンで全行を検算</div>
+        <div class="chip" data-in="4.7"><svg viewBox="0 0 24 24" fill="none" stroke="#e0b84a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M3.5 9.5h17M3.5 15h17M9.5 4v16"/></svg>Excel／CSVに書き出し</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S2 — bước 1: đưa sổ vào -->
+  <section class="scene" id="s2">
+    <div class="txt">
+      <div class="kicker" data-in="0.2">STEP 1</div>
+      <div class="title" data-in="0.35">通帳を取り込む</div>
+      <div class="body" data-in="0.9">写真でもPDFでも、<br>ドロップするだけ。</div>
+      <div class="sub" data-in="5.3">複数ページのPDFは、<br>1面ずつ自動で分かれます。</div>
+    </div>
+    <div class="vis">
+      <div class="win-wrap" data-in="0.3" data-fx="scale" data-d="0.8">
+        <div class="win" style="width:1000px">
+          <div class="win-bar"><i></i><i></i><i></i><span class="tag">実際の画面</span></div>
+          <div class="win-body" style="width:1000px;height:625px">
+            <img id="img1" src="../../public/shots/step-1-import.webp" style="width:1000px;height:625px;transform-origin:30% 30%">
+            <div class="glow" id="glow1" style="left:12px;top:382px;width:458px;height:137px"></div>
+          </div>
+        </div>
+        <div class="ripple" id="rip1"></div>
+        <div class="ripple" id="rip2"></div>
+        <div class="doc" id="doc1"><i></i><i></i><i></i><i></i><span>PDF</span></div>
+        <div class="doc jpg" id="doc2"><i></i><i></i><i></i><i></i><span>JPG</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S3 — bước 2: nắn ảnh -->
+  <section class="scene" id="s3">
+    <div class="txt">
+      <div class="kicker" data-in="0.2">STEP 2</div>
+      <div class="title" data-in="0.35">写真を整える</div>
+      <div class="body" data-in="0.9">斜めに撮った写真も、<br>四隅を合わせてまっすぐに。</div>
+      <div class="tools">
+        <span class="tool" data-in="4.8" data-fx="pop" data-d="0.5">台形補正</span>
+        <span class="tool" data-in="5.0" data-fx="pop" data-d="0.5">切り抜き</span>
+        <span class="tool" data-in="5.2" data-fx="pop" data-d="0.5">回転</span>
+        <span class="tool" data-in="5.4" data-fx="pop" data-d="0.5">明るさ</span>
+      </div>
+      <div class="sub" data-in="6.1">まっすぐな写真ほど、<br>読み取りは正確です。</div>
+    </div>
+    <div class="vis">
+      <div class="win-wrap" data-in="0.3" data-fx="scale" data-d="0.8">
+        <div class="win" style="width:1000px">
+          <div class="win-bar"><i></i><i></i><i></i><span class="tag">実際の画面</span></div>
+          <div class="win-body" style="width:1000px;height:625px;background:#b9c6c5">
+            <div class="warp" id="warp"><img src="../../public/shots/step-2-straighten.webp"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S4 — bước 3: đọc và kiểm tra chuỗi số dư -->
+  <section class="scene" id="s4">
+    <div class="txt">
+      <div class="kicker" data-in="0.2">STEP 3</div>
+      <div class="title" data-in="0.35">読み取って、<br>全行を検算</div>
+      <div class="formula" data-in="1.0">
+        <small>残高チェーン</small>
+        <div>前の残高 − お支払 ＋ お預り<br>＝ その行の残高</div>
+      </div>
+      <div class="sub" data-in="9.2">1行でも読み違えれば、<br>計算が合わなくなります。</div>
+    </div>
+    <div class="vis">
+      <div class="card" data-in="0.3" data-fx="scale" data-d="0.8">
+        <div class="card-head"><b>読み取り結果</b><span class="tag">イメージ</span></div>
+        <div style="position:relative">
+          <table class="lg" id="lg4">
+            <thead><tr><th>年月日</th><th>区分・摘要</th><th class="r">お支払</th><th class="r">お預り</th><th class="r">差引残高</th><th class="c">検算</th></tr></thead>
+            <tbody>
+              <tr><td>2025-03-21</td><td class="k">R</td><td class="r out">2,750</td><td class="r dash">–</td><td class="r bal">25,024</td><td class="c chk">―</td></tr>
+              <tr><td>2025-03-21</td><td class="k">R 手数料</td><td class="r out">1,100</td><td class="r dash">–</td><td class="r bal">23,924</td><td class="c chk"></td></tr>
+              <tr><td>2025-03-31</td><td class="k">L 振込2</td><td class="r dash">–</td><td class="r in">58,300</td><td class="r bal">82,224</td><td class="c chk"></td></tr>
+              <tr><td>2025-03-31</td><td class="k">K</td><td class="r dash">–</td><td class="r in">290,950</td><td class="r bal">373,174</td><td class="c chk"></td></tr>
+              <tr><td>2025-03-31</td><td class="k">Q</td><td class="r out">350,000</td><td class="r dash">–</td><td class="r bal">23,174</td><td class="c chk"></td></tr>
+            </tbody>
+          </table>
+          <div class="scan" id="scan4"></div>
+        </div>
+        <div class="eq" id="eq4"></div>
+        <div class="hanko" id="hanko">検算済</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S5 — bước 4a: chọn dòng trên bảng, ảnh tô đúng dòng đó -->
+  <section class="scene" id="s5">
+    <div class="top-txt">
+      <div class="kicker" data-in="0.2">STEP 4</div>
+      <div class="top-row">
+        <div class="title" data-in="0.35">写真と見比べる</div>
+        <div class="body" data-in="0.8">表の行を選ぶと、写真の同じ行に赤い帯がつきます。</div>
+      </div>
+    </div>
+    <div class="win-wrap" data-in="0.2" data-fx="scale" data-d="0.8" style="position:absolute;left:130px;top:292px">
+      <div class="win" style="width:1660px">
+        <div class="win-bar"><i></i><i></i><i></i><span class="tag">実際の画面</span></div>
+        <div class="win-body" style="width:1660px;height:620px;background:#fbfdfd">
+          <div class="zoom" id="zoom5">
+            <img src="../../public/shots/app-light.webp">
+            <svg width="2200" height="1375" viewBox="0 0 2200 1375">
+              <rect id="ringRow" x="1199" y="440" width="992" height="42" rx="8" fill="none" stroke="#bd392c" stroke-width="4" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/>
+              <rect id="ringBand" x="440" y="519" width="622" height="33" rx="8" fill="none" stroke="#bd392c" stroke-width="4" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/>
+              <path id="link5" d="M1064 536 C 1140 536, 1124 461, 1197 461" fill="none" stroke="#bd392c" stroke-width="4" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/>
+              <circle id="dotA" cx="1064" cy="536" r="7" fill="#bd392c" opacity="0"/>
+              <circle id="dotB" cx="1197" cy="461" r="7" fill="#bd392c" opacity="0"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S6 — bước 4b: sửa ô vàng -->
+  <section class="scene" id="s6">
+    <div class="txt">
+      <div class="kicker" data-in="0.2">STEP 4</div>
+      <div class="title" data-in="0.35">黄色い箇所だけ<br>直す</div>
+      <div class="body" data-in="0.9">計算が合わない箇所は、<br>黄色で知らせます。</div>
+      <div class="sub" data-in="6.0">直すと、その場で<br>検算し直します。</div>
+    </div>
+    <div class="vis">
+      <div class="card" data-in="0.3" data-fx="scale" data-d="0.8" id="card6">
+        <div class="card-head"><b>読み取り結果</b><span class="tag">イメージ</span></div>
+        <table class="lg">
+          <thead><tr><th>年月日</th><th>区分・摘要</th><th class="r">お支払</th><th class="r">お預り</th><th class="r">差引残高</th><th class="c">検算</th></tr></thead>
+          <tbody>
+            <tr><td>2025-03-31</td><td class="k">L 振込2</td><td class="r dash">–</td><td class="r in">58,300</td><td class="r bal">82,224</td><td class="c chk">OK</td></tr>
+            <tr><td>2025-03-31</td><td class="k">K</td><td class="r dash">–</td><td class="r in cell" id="cell6">209,950</td><td class="r bal">373,174</td><td class="c chk" id="chk6">NG</td></tr>
+            <tr><td>2025-03-31</td><td class="k">Q</td><td class="r out">350,000</td><td class="r dash">–</td><td class="r bal">23,174</td><td class="c chk">OK</td></tr>
+          </tbody>
+        </table>
+        <div class="eq" id="eq6"></div>
+        <svg class="cursor" id="cur6" viewBox="0 0 24 24"><path d="M4 2.5l15 9.2-6.6 1.4 3.9 7.3-2.9 1.5-3.9-7.3-5 4.6z" fill="#fff" stroke="#203647" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- S7 — bước 5: xuất file -->
+  <section class="scene" id="s7">
+    <div class="txt">
+      <div class="kicker" data-in="0.2">STEP 5</div>
+      <div class="title" data-in="0.35">Excel／CSVに<br>書き出す</div>
+      <div class="body" data-in="0.9">検算の結果も、黄色の印も、<br>そのままファイルへ。</div>
+      <div class="sub" data-in="1.7">面ごとのシートにも、<br>1つの表にもまとめられます。</div>
+    </div>
+    <div class="vis" style="display:block">
+      <div data-in="0.3" data-fx="scale" data-d="0.8" style="position:absolute;left:350px;top:40px">
+        <span class="tag" style="position:absolute;left:0;top:-46px">実際の画面</span>
+        <!-- Cắt sát mép hộp thoại: ảnh gốc còn dính một mép giao diện phía sau -->
+        <div style="width:631px;height:760px;border-radius:12px;overflow:hidden;box-shadow:0 50px 90px -40px rgba(4,14,24,0.8)">
+          <img src="../../public/shots/step-5-export.webp" style="display:block;width:657px;height:783px;margin:-10px 0 0 -13px">
+        </div>
+        <div class="glow" id="glow7" style="left:424px;top:693px;width:190px;height:58px;border-color:#f4f7f8;box-shadow:0 0 0 8px rgba(244,247,248,0.25)"></div>
+      </div>
+      <div class="xl" id="xl7" style="left:0;top:468px">
+        <div class="xl-bar"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="3" fill="#fff"/><path d="M7.5 8l4.5 8M12 8l-4.5 8" stroke="#217346" stroke-width="2.2" stroke-linecap="round"/><path d="M14.5 9h4M14.5 12h4M14.5 15h4" stroke="#217346" stroke-width="1.6" stroke-linecap="round"/></svg>通帳明細.xlsx</div>
+        <table>
+          <tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr>
+          <tr><td class="n">1</td><td>銀行名</td><td colspan="4">〇〇銀行　普通預金</td></tr>
+          <tr><td class="n">2</td><td>検証</td><td colspan="4" class="ok" id="xlOk">残高チェーン検証済（全行一致）</td></tr>
+          <tr><td class="n">3</td><td class="hd">年月日</td><td class="hd">摘要</td><td class="hd">お支払金額</td><td class="hd">お預り金額</td><td class="hd">差引残高</td></tr>
+          <tr><td class="n">4</td><td class="m">2025/03/21</td><td>R 手数料</td><td class="m">1,100</td><td class="m"></td><td class="m">23,924</td></tr>
+          <tr><td class="n">5</td><td class="m">2025/03/31</td><td>L 振込2</td><td class="m"></td><td class="m">58,300</td><td class="m">82,224</td></tr>
+          <tr><td class="n">6</td><td class="m">2025/03/31</td><td>K</td><td class="m"></td><td class="m">290,950</td><td class="m">373,174</td></tr>
+        </table>
+        <div class="xl-tabs"><span class="on">通帳①</span><span>通帳②</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S8 — nói thật về độ chính xác -->
+  <section class="scene" id="s8">
+    <div class="center">
+      <div class="honest1" data-in="0.3" data-d="0.9">100%とは言いません。</div>
+      <div class="honest2" data-in="2.9" data-d="0.9"><span class="mark-line" id="mark8">確かめるべき場所</span>を、正確に示します。</div>
+    </div>
+  </section>
+
+  <!-- S9 — mời dùng thử -->
+  <section class="scene" id="s9">
+    <div class="center">
+      <div class="lockup" data-in="0.2" data-d="0.9">
+        <svg viewBox="0 0 32 32"><rect x="1.5" y="1.5" width="29" height="29" rx="5" fill="#bd392c"/><g fill="#f4f7f8"><rect x="7" y="8" width="18" height="2" rx="1" opacity="0.45"/><rect x="7" y="14" width="18" height="4" rx="1.4"/><rect x="7" y="22" width="18" height="2" rx="1" opacity="0.45"/></g></svg>
+        <span>通帳スキャン</span>
+      </div>
+      <div class="cta1" data-in="0.9">ブラウザだけで使えます。インストールは不要です。</div>
+      <div class="cta2" data-in="1.6">まずは見本の通帳で、無料でお試しください。</div>
+      <div class="url" data-in="2.4" data-fx="pop" data-d="0.6">tsucho-scan.vercel.app<svg viewBox="0 0 24 24" fill="none" stroke="#203b50" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    </div>
+  </section>
+
+  <!-- Lớp chung -->
+  <div id="stepper">
+    <div class="st"><b>1</b>取り込む</div><div class="st-line"></div>
+    <div class="st"><b>2</b>整える</div><div class="st-line"></div>
+    <div class="st"><b>3</b>読み取る</div><div class="st-line"></div>
+    <div class="st"><b>4</b>直す</div><div class="st-line"></div>
+    <div class="st"><b>5</b>書き出す</div>
+  </div>
+  <div id="bug">
+    <svg viewBox="0 0 32 32"><rect x="1.5" y="1.5" width="29" height="29" rx="5" fill="#bd392c"/><g fill="#f4f7f8"><rect x="7" y="8" width="18" height="2" rx="1" opacity="0.45"/><rect x="7" y="14" width="18" height="4" rx="1.4"/><rect x="7" y="22" width="18" height="2" rx="1" opacity="0.45"/></g></svg>
+    通帳スキャン
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════
+   NHỊP — mỗi cảnh [bắt đầu, kết thúc] tính bằng giây.
+   step = số bước sáng lên ở thanh trên cùng.
+   Độ dài cảnh đo theo giọng đọc (am-thanh/sulafat): mỗi cảnh = độ trễ +
+   câu đọc + ~0,6 s nghỉ. Đổi giọng thì chạy lại tao-giong.py xem còn vừa.
+   ════════════════════════════════════════════════════════ */
+const CANH = [
+  { id: 's0', a: 0.0,  b: 6.8 },
+  { id: 's1', a: 6.8,  b: 13.3 },
+  { id: 's2', a: 13.3, b: 21.9, step: 1 },
+  { id: 's3', a: 21.9, b: 29.9, step: 2 },
+  { id: 's4', a: 29.9, b: 43.1, step: 3 },
+  { id: 's5', a: 43.1, b: 52.2, step: 4 },
+  { id: 's6', a: 52.2, b: 61.2, step: 4 },
+  { id: 's7', a: 61.2, b: 70.2, step: 5 },
+  { id: 's8', a: 70.2, b: 77.0 },
+  { id: 's9', a: 77.0, b: 86.5, cuoi: true },
+]
+const DURATION = CANH[CANH.length - 1].b
+const FADE = 0.4
+
+/* MỐC trong từng cảnh (giây tính từ đầu cảnh), canh theo chỗ ngắt hơi
+   của giọng đọc: hình hiện đúng lúc lời nhắc tới nó. */
+const MOC = {
+  s0: { go: 4.5, tocDo: 12 },                       // gõ chữ SAU câu hỏi, 12 ký tự/giây
+  s1: { dau: 0.15 },                                // con dấu thương hiệu đóng xuống
+  s2: { bay: [2.3, 2.65] },                         // hai tài liệu rơi vào ô thả —「ドロップするだけ」
+  s3: { nan: 2.4 },                                 // nắn ảnh —「四隅を合わせれば」
+  s4: { bat: [0, 4.5, 5.4, 6.3, 7.2], tong: 8.2, dau: 8.55 }, // phép tính —「前の残高から…」, dấu rơi vào chỗ nghỉ
+  s5: { zoom: 0.7, hang: 2.0, bang: 4.6, noi: 5.1 }, // chọn dòng —「選ぶと」, vòng trên ảnh —「赤い帯」
+  s6: { tro: 3.0, click: 4.0, go: 4.4, xong: 5.8 },  // sửa ô —「直せば、その場で…」
+  s7: { nut: 2.7, file: 3.5, soat: 5.0 },           // bấm xuất —「書き出し」, dòng 検証 —「検算の結果も」
+  s8: { gach: 3.4 },                                // gạch chân —「確かめるべき場所」
+}
+
+/* HIỆU ỨNG ÂM THANH sinh từ chính các mốc trên, nên luôn khớp hình.
+   quay-video.py đọc window.HIEU_UNG để đặt tiếng. */
+const HIEU_UNG = (() => {
+  const a = (id) => CANH.find((c) => c.id === id).a
+  const ds = []
+  const chu0 = '日付、金額、残高。一行ずつ、毎月。'
+  for (let i = 1; i <= chu0.length; i++) ds.push({ t: a('s0') + MOC.s0.go + i / MOC.s0.tocDo, loai: 'phim' })
+  ds.push({ t: a('s1') + MOC.s1.dau + 0.2, loai: 'dau' })
+  for (const b of MOC.s2.bay) ds.push({ t: a('s2') + b + 0.95, loai: 'roi' })
+  MOC.s4.bat.slice(1).forEach((b, i) => ds.push({ t: a('s4') + b + 0.5, loai: 'ting', bac: i }))
+  ds.push({ t: a('s4') + MOC.s4.dau + 0.12, loai: 'dau' })
+  ds.push({ t: a('s5') + MOC.s5.hang, loai: 'bam' })
+  ds.push({ t: a('s6') + MOC.s6.click, loai: 'bam' })
+  for (let k = 1; k <= 7; k++) ds.push({ t: a('s6') + MOC.s6.go + k * 0.12, loai: 'phim' })
+  ds.push({ t: a('s6') + MOC.s6.xong, loai: 'ting', bac: 4 })
+  ds.push({ t: a('s7') + MOC.s7.nut + 0.45, loai: 'bam' })
+  return ds
+})()
+
+/* ── Công cụ nội suy ─────────────────────────────────── */
+const clamp = (x, a = 0, b = 1) => (x < a ? a : x > b ? b : x)
+const lerp = (a, b, t) => a + (b - a) * t
+const E = {
+  out: (t) => 1 - Math.pow(1 - t, 3),
+  inOut: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  back: (t) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2) },
+}
+// Tiến độ 0→1 của một chuyển động bắt đầu ở giây a, dài d giây
+const P = (lt, a, d = 0.7, e = E.out) => e(clamp((lt - a) / d))
+const $ = (id) => document.getElementById(id)
+const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></svg>'
+const CHECK_OK = CHECK.replace('#fff', '#1f8a66')
+// Trộn hai màu hex theo tỉ lệ t
+const mix = (a, b, t) => {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const x = p(a), y = p(b)
+  return `rgb(${x.map((v, i) => Math.round(lerp(v, y[i], t))).join(',')})`
+}
+
+/* ── Ma trận phối cảnh: kéo 4 góc một phần tử tới 4 điểm bất kỳ ── */
+function adj(m) {
+  return [
+    m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
+    m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
+    m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3],
+  ]
+}
+function mulMM(a, b) {
+  const c = new Array(9)
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0
+    for (let k = 0; k < 3; k++) s += a[3 * i + k] * b[3 * k + j]
+    c[3 * i + j] = s
+  }
+  return c
+}
+const mulMV = (m, v) => [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]
+function basis(p) {
+  const m = [p[0][0], p[1][0], p[2][0], p[0][1], p[1][1], p[2][1], 1, 1, 1]
+  const v = mulMV(adj(m), [p[3][0], p[3][1], 1])
+  return mulMM(m, [v[0], 0, 0, 0, v[1], 0, 0, 0, v[2]])
+}
+// góc theo thứ tự: trên-trái, trên-phải, dưới-trái, dưới-phải
+function quad(el, w, h, q) {
+  const t = mulMM(basis(q), adj(basis([[0, 0], [w, 0], [0, h], [w, h]])))
+  for (let i = 0; i < 9; i++) t[i] /= t[8]
+  el.style.transform = `matrix3d(${[t[0], t[3], 0, t[6], t[1], t[4], 0, t[7], 0, 0, 1, 0, t[2], t[5], 0, t[8]].join(',')})`
+}
+
+/* ── Nền mở đầu: các dòng sổ mờ (số giả, không phải dữ liệu khách) ── */
+;(function () {
+  let seed = 11
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const kinds = ['振込', 'カード', '手数料', '振替', '利息', 'ＡＴＭ', '現金', '口座振替']
+  const f = (n) => '*' + n.toLocaleString('en-US')
+  let bal = 1843200
+  let html = ''
+  for (let i = 0; i < 30; i++) {
+    const cells = []
+    for (let half = 0; half < 2; half++) {
+      const d = `07-${String(4 + ((i / 8) | 0)).padStart(2, '0')}-${String(1 + ((rnd() * 27) | 0)).padStart(2, '0')}`
+      const amt = Math.round((rnd() * rnd() * 300000) / 10) * 10 + 500
+      const out = rnd() < 0.62 && bal > amt
+      bal = out ? bal - amt : bal + amt
+      cells.push(`<span>${d}</span><span>${kinds[(rnd() * kinds.length) | 0]}</span>`,
+        `<span class="r">${out ? f(amt) : ''}</span><span class="r">${out ? '' : f(amt)}</span>`)
+      if (half === 0) cells.push(`<span class="r">${f(bal)}</span>`)
+    }
+    html += `<div class="row">${cells.join('')}</div>`
+  }
+  $('ledgerBg').innerHTML = html
+})()
+
+/* ── Chuẩn bị: gom phần tử của từng cảnh ─────────────── */
+const SC = CANH.map((c) => {
+  const el = $(c.id)
+  return { ...c, el, ins: [...el.querySelectorAll('[data-in]')] }
+})
+const STEPS = [...document.querySelectorAll('.st')]
+const RANGE = {}
+for (const c of CANH) if (c.step) {
+  const r = RANGE[c.step]
+  RANGE[c.step] = r ? [r[0], c.b] : [c.a, c.b]
+}
+
+function entrances(sc, lt) {
+  for (const el of sc.ins) {
+    const a = +el.dataset.in, d = +(el.dataset.d || 0.7), fx = el.dataset.fx || 'up'
+    const p = P(lt, a, d)
+    el.style.opacity = p
+    if (fx === 'up') el.style.transform = `translateY(${(1 - p) * 30}px)`
+    else if (fx === 'scale') el.style.transform = `translateY(${(1 - p) * 24}px) scale(${0.96 + 0.04 * p})`
+    else if (fx === 'pop') el.style.transform = `scale(${0.72 + 0.28 * P(lt, a, d, E.back)})`
+  }
+}
+
+/* ════════════════════════════════════════════════════════
+   Chuyển động riêng của từng cảnh. lt = giây tính từ đầu cảnh.
+   ════════════════════════════════════════════════════════ */
+const RIENG = {
+  s0(lt) {
+    $('ledgerBg').style.transform = `rotate(-7deg) translateY(${-lt * 22}px)`
+    const chu = '日付、金額、残高。一行ずつ、毎月。'
+    const { go, tocDo } = MOC.s0
+    const n = clamp(Math.floor((lt - go) * tocDo), 0, chu.length)
+    $('typing').textContent = chu.slice(0, n)
+    // Con trỏ nhấp nháy khi đứng yên, sáng liên tục khi đang gõ
+    const dangGo = lt > go && n < chu.length
+    $('caret').style.opacity = lt < go - 0.2 ? 0 : dangGo ? 1 : Math.floor(lt * 2) % 2 ? 0.15 : 1
+  },
+
+  s1(lt) {
+    // Con dấu đóng xuống: to → đúng cỡ, xoay nhẹ về thẳng
+    const p = P(lt, MOC.s1.dau, 0.45, E.out)
+    $('markBig').style.opacity = clamp((lt - MOC.s1.dau) / 0.2)
+    $('markBig').style.transform = `scale(${lerp(1.7, 1, p)}) rotate(${lerp(-10, 0, p)}deg)`
+    const r = clamp((lt - 0.5) / 0.9)
+    $('ring').style.opacity = r > 0 && r < 1 ? 0.7 * (1 - r) : 0
+    $('ring').style.transform = `scale(${1 + r * 0.9})`
+  },
+
+  s2(lt) {
+    $('img1').style.transform = `scale(${1 + 0.025 * clamp(lt / 8)})`
+    // Hai tài liệu bay theo đường cong vào ô thả
+    const bay = (el, a, x0, y0) => {
+      const p = P(lt, a, 1.0, E.inOut)
+      const x1 = 182, y1 = 132, cx = 640, cy = -190
+      const x = (1 - p) * (1 - p) * x0 + 2 * (1 - p) * p * cx + p * p * x1
+      const y = (1 - p) * (1 - p) * y0 + 2 * (1 - p) * p * cy + p * p * y1
+      const roi = clamp((lt - a - 0.85) / 0.3)
+      el.style.opacity = lt < a ? 0 : 1 - roi
+      el.style.transform = `translate(${x}px,${y}px) rotate(${lerp(14, -4, p)}deg) scale(${1 - 0.45 * roi})`
+    }
+    const [b1, b2] = MOC.s2.bay
+    bay($('doc1'), b1, 1080, -60)
+    bay($('doc2'), b2, 1140, 40)
+    const gon = (el, a) => {
+      const r = clamp((lt - a) / 0.8)
+      el.style.left = '241px'
+      el.style.top = '207px'
+      el.style.opacity = r > 0 && r < 1 ? 0.9 * (1 - r) : 0
+      el.style.transform = `scale(${1 + r * 3.2})`
+    }
+    gon($('rip1'), b1 + 0.95)
+    gon($('rip2'), b2 + 0.95)
+    // Mặt sổ vừa thêm sáng lên trong danh sách
+    const g = clamp((lt - b2 - 1.3) / 1.6)
+    $('glow1').style.opacity = g > 0 ? 0.55 + 0.45 * Math.sin(g * Math.PI * 2 + Math.PI / 2) * (1 - g) : 0
+  },
+
+  s3(lt) {
+    const p = P(lt, MOC.s3.nan, 2.0, E.inOut)
+    const tu = [[118, 54], [874, 24], [26, 600], [984, 612]]
+    const den = [[0, 0], [1000, 0], [0, 625], [1000, 625]]
+    quad($('warp'), 1000, 625, tu.map((q, i) => [lerp(q[0], den[i][0], p), lerp(q[1], den[i][1], p)]))
+  },
+
+  s4(lt) {
+    const rows = [...$('lg4').tBodies[0].rows]
+    // Quét: từng dòng hiện ra khi vạch quét đi qua
+    rows.forEach((tr, i) => {
+      const q = P(lt, 0.8 + i * 0.45, 0.35)
+      tr.style.opacity = q
+    })
+    const sp = clamp((lt - 0.7) / 2.2)
+    $('scan4').style.top = `${lerp(56, 56 + 5 * 64, sp)}px`
+    $('scan4').style.opacity = sp > 0 && sp < 1 ? 1 : 0
+
+    // Kiểm từng dòng: số dư trước ± tiền = số dư dòng này
+    const PHEP = [
+      null,
+      ['25,024', '−', '1,100', '23,924'],
+      ['23,924', '＋', '58,300', '82,224'],
+      ['82,224', '＋', '290,950', '373,174'],
+      ['373,174', '−', '350,000', '23,174'],
+    ]
+    const { bat: BAT, tong, dau } = MOC.s4
+    let dang = 0
+    for (let i = 1; i <= 4; i++) if (lt >= BAT[i]) dang = i
+    rows.forEach((tr, i) => {
+      tr.classList.toggle('hl', dang > 0 && i === dang && lt < tong)
+      if (i > 0) tr.cells[5].textContent = lt >= BAT[i] + 0.5 ? 'OK' : ''
+    })
+    const eq = $('eq4')
+    if (lt >= tong) {
+      const v = P(lt, tong, 0.35)
+      eq.innerHTML = `<span class="sum" style="opacity:${v}">${CHECK_OK}全行、残高チェーンが一致</span>`
+    } else if (dang === 0) {
+      eq.innerHTML = `<span class="sum cho">${lt < 3.0 ? '読み取り中…' : '残高チェーンで検算中…'}</span>`
+    } else {
+      const [a, op, b, c] = PHEP[dang]
+      const v = P(lt, BAT[dang], 0.3)
+      const ok = P(lt, BAT[dang] + 0.5, 0.35, E.back)
+      eq.innerHTML = `<span>${a}</span><span class="op">${op}</span><span>${b}</span><span class="op">＝</span><span>${c}</span>` +
+        `<span class="pill" style="opacity:${clamp(ok)};transform:scale(${0.6 + 0.4 * ok})">${CHECK}一致</span>`
+      eq.style.opacity = 1
+      for (const s of eq.children) if (!s.classList.contains('pill')) {
+        s.style.opacity = v
+        s.style.transform = `translateY(${(1 - v) * 14}px)`
+      }
+    }
+    // Đóng dấu 検算済 khi cả 4 dòng đều khớp
+    const h = P(lt, dau, 0.3, E.out)
+    const hk = $('hanko')
+    hk.style.opacity = lt < dau ? 0 : 1
+    hk.style.transform = `rotate(-10deg) scale(${lerp(1.8, 1, h)})`
+  },
+
+  s5(lt) {
+    // Toàn cảnh → phóng về đúng vùng dòng 4 ở tỉ lệ 1:1 (ảnh nét nhất)
+    const { zoom, hang, bang, noi } = MOC.s5
+    const p = P(lt, zoom, 1.6, E.inOut)
+    const s = lerp(1660 / 2200, 1, p)
+    const tx = lerp(0, -400, p)
+    const ty = lerp(-150 * (1660 / 2200), -196, p)
+    $('zoom5').style.transform = `translate(${tx}px,${ty}px) scale(${s})`
+    const ve = (id, a, d = 0.6) => { $(id).style.strokeDashoffset = 1 - P(lt, a, d, E.inOut) }
+    ve('ringRow', hang)
+    ve('ringBand', bang)
+    ve('link5', noi, 0.5)
+    $('dotA').style.opacity = clamp((lt - noi) / 0.15)
+    $('dotB').style.opacity = clamp((lt - noi - 0.4) / 0.15)
+    const nhip = lt > noi + 0.6 ? 0.5 + 0.5 * Math.cos((lt - noi - 0.6) * 4) : 1
+    for (const id of ['ringRow', 'ringBand']) $(id).style.strokeWidth = 4 + 2 * (1 - nhip)
+  },
+
+  s6(lt) {
+    const cell = $('cell6'), chk = $('chk6'), cur = $('cur6')
+    const SAI = '209,950', DUNG = '290,950'
+    const { tro, click, go, xong } = MOC.s6
+    // Ô vàng: nháy nhẹ để kéo mắt người xem
+    if (lt < click) {
+      const n = 0.5 + 0.5 * Math.cos(Math.max(0, lt - 0.9) * 5)
+      cell.style.background = lt > 0.9 ? `color-mix(in srgb, var(--warn-bg) ${60 + 40 * n}%, #ffe08a)` : 'var(--warn-bg)'
+      cell.style.boxShadow = 'inset 0 0 0 2px var(--warn-edge)'
+      cell.textContent = SAI
+      cell.style.color = 'var(--warn-ink)'
+    } else if (lt < xong) {
+      const k = clamp(Math.floor((lt - go) / 0.12), 0, DUNG.length)
+      cell.style.background = '#fff'
+      cell.style.boxShadow = 'inset 0 0 0 3px var(--app-sel)'
+      cell.style.color = 'var(--app-in)'
+      cell.textContent = lt < go ? SAI : DUNG.slice(0, k) + (Math.floor(lt * 3) % 2 ? '' : '│')
+    } else {
+      const f = clamp((lt - xong) / 1.2)
+      cell.style.background = `color-mix(in srgb, var(--app-cell) ${100 * (1 - f)}%, #fff)`
+      cell.style.boxShadow = 'none'
+      cell.style.color = 'var(--app-in)'
+      cell.textContent = DUNG
+    }
+    const ok = lt >= xong
+    chk.textContent = ok ? 'OK' : 'NG'
+    chk.style.color = ok ? 'var(--app-ok)' : 'var(--warn-ink)'
+    chk.style.background = ok ? '' : 'var(--warn-bg)'
+
+    const eq = $('eq6')
+    const v = P(lt, 1.3, 0.4)
+    if (!ok) {
+      eq.innerHTML = `<span>82,224</span><span class="op">＋</span><span>209,950</span><span class="op">＝</span><span>292,174</span>` +
+        `<span class="pill ng">残高 373,174 と不一致</span>`
+      eq.style.background = 'var(--warn-bg)'
+    } else {
+      const q = P(lt, xong, 0.35, E.back)
+      eq.innerHTML = `<span>82,224</span><span class="op">＋</span><span>290,950</span><span class="op">＝</span><span>373,174</span>` +
+        `<span class="pill" style="transform:scale(${0.6 + 0.4 * q})">${CHECK}一致</span>`
+      eq.style.background = 'var(--paper-2)'
+    }
+    eq.style.opacity = v
+
+    // Con trỏ chuột đi tới ô vàng rồi bấm
+    const m = P(lt, tro, 1.0, E.inOut)
+    const bam = lt > click && lt < click + 0.25 ? 0.85 : 1
+    cur.style.opacity = clamp((lt - tro + 0.2) / 0.3) * (1 - clamp((lt - xong + 0.3) / 0.4))
+    cur.style.transform = `translate(${lerp(900, 560, m)}px,${lerp(560, 205, m)}px) scale(${bam})`
+  },
+
+  s7(lt) {
+    const { nut, file, soat } = MOC.s7
+    const g = clamp((lt - nut) / 0.9)
+    $('glow7').style.opacity = g > 0 && g < 1 ? Math.sin(g * Math.PI) : 0
+    const p = P(lt, file, 0.8)
+    $('xl7').style.opacity = p
+    $('xl7').style.transform = `translateY(${(1 - p) * 60}px)`
+    const f = clamp((lt - soat) / 1.8)
+    $('xlOk').style.background = `rgba(31,138,102,${0.2 * Math.sin(f * Math.PI)})`
+  },
+
+  s8(lt) {
+    // Gạch chân vàng chạy qua, chữ ngả sang vàng theo
+    const m = P(lt, MOC.s8.gach, 0.8, E.inOut)
+    $('mark8').style.setProperty('--m', m)
+    $('mark8').style.color = mix('#f4f7f8', '#f2d27a', m)
+  },
+}
+
+/* ── Vẽ khung hình ở giây t ──────────────────────────── */
+function seek(t) {
+  t = clamp(t, 0, DURATION)
+  $('rules').style.transform = `translateY(${(t * 9) % 60}px)`
+
+  for (const sc of SC) {
+    let o = 0
+    if (t >= sc.a && (t < sc.b || sc.cuoi)) {
+      const vao = sc.a === 0 ? clamp(t / 0.5) : clamp((t - sc.a) / FADE)
+      const ra = sc.cuoi ? 1 : clamp((sc.b - t) / FADE)
+      o = E.out(Math.min(vao, ra))
+    }
+    sc.el.style.opacity = o
+    sc.el.style.visibility = o > 0 ? 'visible' : 'hidden'
+    if (o > 0) {
+      const lt = t - sc.a
+      entrances(sc, lt)
+      RIENG[sc.id] && RIENG[sc.id](lt)
+    }
+  }
+
+  // Thanh bước: sáng dần bước đang làm, mờ các bước chưa tới
+  const hien = clamp((t - RANGE[1][0]) / 0.5) * clamp((RANGE[5][1] - t) / 0.5)
+  $('stepper').style.opacity = hien
+  STEPS.forEach((el, i) => {
+    const [a, b] = RANGE[i + 1]
+    const act = clamp((t - a + 0.2) / 0.4) * clamp((b + 0.2 - t) / 0.4)
+    const qua = t > b ? 1 : 0
+    const n = el.querySelector('b')
+    n.style.background = `rgba(244,247,248,${act})`
+    n.style.color = act > 0.5 ? '#203b50' : '#f4f7f8'
+    n.style.borderColor = `rgba(244,247,248,${0.5 + 0.5 * act})`
+    el.style.opacity = 0.4 + 0.6 * Math.max(act, qua * 0.55)
+  })
+  $('bug').style.opacity = clamp((t - RANGE[1][0]) / 0.5) * clamp((CANH[CANH.length - 1].a - t) / 0.4) * 0.9
+
+  return new Promise((r) => requestAnimationFrame(() => r(true)))
+}
+window.seek = seek
+window.DURATION = DURATION
+window.CANH = CANH // quay-video.py đọc để đặt giọng đọc đúng đầu mỗi cảnh
+window.HIEU_UNG = HIEU_UNG
+
+/* ── Nạp đủ phông chữ + ảnh trước khi cho phép chụp ─────── */
+window.__ready = (async () => {
+  const chu = document.body.textContent + '0123456789,−＋＝│OKNG一致不一致残高と'
+  const kieu = [
+    '800 60px "Shippori Mincho"', '600 60px "Shippori Mincho"',
+    '500 30px "Zen Kaku Gothic New"', '700 30px "Zen Kaku Gothic New"',
+    '500 30px "IBM Plex Mono"', '600 30px "IBM Plex Mono"',
+  ]
+  await Promise.all(kieu.map((k) => document.fonts.load(k, chu)))
+  await document.fonts.ready
+  await Promise.all([...document.images].map((i) => i.decode().catch(() => {})))
+  const h = location.hash.slice(1)
+  if (h === 'play') {
+    const t0 = performance.now()
+    const chay = () => { seek((performance.now() - t0) / 1000); requestAnimationFrame(chay) }
+    chay()
+  } else {
+    await seek(parseFloat(h) || 0)
+  }
+  return true
+})()
+</script>
+</body>
+</html>

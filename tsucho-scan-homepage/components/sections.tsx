@@ -6,6 +6,7 @@ import { ExcelPreview } from '@/components/excel-preview'
 import { Explain } from '@/components/explain'
 import { HINH_READS } from '@/components/diagrams'
 import { Faq as DanhSachHoiDap } from '@/components/faq'
+import { IntroVideo } from '@/components/intro-video'
 import { HowSteps } from '@/components/how-steps'
 import { ManHinh } from '@/components/man-hinh'
 import { PassbookSpread } from '@/components/passbook-spread'
@@ -120,6 +121,19 @@ export function Hero() {
         </div>
       </div>
     </section>
+  )
+}
+
+/* Đặt ngay sau phần đầu: người được gửi đường link thường chỉ xem đến
+ * đây. Nền giấy thường vì phần đầu là mặt bàn tối, phần kế là giấy đậm. */
+export function Video() {
+  const { t } = useI18n()
+  const v = t.video
+
+  return (
+    <Section id="video" title={v.title} lead={v.lead}>
+      <IntroVideo />
+    </Section>
   )
 }
 
