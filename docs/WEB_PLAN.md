@@ -2,6 +2,10 @@
 
 > Viết ngày 2026-07-30. Đọc cùng `README.md` và `MEMORY.md` (memory của Claude).
 > Mục đích: chuyển từ CLI sang web có login/phân quyền, để giám đốc Nhật tự vào test.
+>
+> **Đợt nâng cấp 10/2026:** kế hoạch thực thi chi tiết (đánh giá hiện trạng, lỗi đã
+> xác minh, ~30 task có tiêu chí nghiệm thu) nằm ở `docs/KE_HOACH_NANG_CAP_WEB.md`.
+> File này vẫn là đặc tả sản phẩm gốc.
 
 ---
 
