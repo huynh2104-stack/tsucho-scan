@@ -68,6 +68,16 @@ Xoá một job: `DELETE /api/jobs/<id>` (hoặc xoá thẳng thư mục).
 
 ---
 
+## Biến môi trường (tuỳ chọn)
+
+Không đặt gì cả vẫn chạy được. Đặt trước lệnh `uvicorn`.
+
+| Biến | Tác dụng |
+|---|---|
+| `TSUCHO_LOCAL_OCR=0` | Tắt OCR cục bộ (RapidOCR + Tesseract) dùng để khoanh đúng dòng trên ảnh. Dành cho máy chủ ít RAM: bản giống Render tốn đỉnh ~460 MB khi OCR chạy, tắt thì ~140 MB. Khung đỏ vẫn hiện nhưng chỉ là vị trí ước lượng. Số đo và cách đo lại: `docs/KE_HOACH_NANG_CAP_WEB.md` mục 9. |
+
+---
+
 ## Cách dùng
 
 Giao diện là **bàn làm việc ba khung hiện cùng lúc**, không đi theo bước:

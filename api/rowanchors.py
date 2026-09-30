@@ -152,12 +152,21 @@ def match_rows(rows, words, geometry, width, height):
     return result
 
 
+def local_ocr_enabled() -> bool:
+    """TSUCHO_LOCAL_OCR=0 tắt OCR cục bộ (RapidOCR + Tesseract).
+
+    Dành cho máy chủ ít RAM: model OCR nạp vào bộ nhớ ở lần gọi đầu, hết RAM là
+    502 (đã dính ở commit aa71757). Tắt thì khung đỏ chỉ dùng vị trí ước lượng.
+    """
+    return os.getenv("TSUCHO_LOCAL_OCR", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 def locate(path: Path, revision: str, rows: list[dict], geometry: dict) -> dict:
     executable = _executable()
     geometry = {**geometry, "exact": False,
                 "bands": [{**band, "method": "estimated"} for band in geometry["bands"]],
                 "ocr_status": "unavailable"}
-    if not rows:
+    if not rows or not local_ocr_enabled():
         return geometry
     words = []
     available = False

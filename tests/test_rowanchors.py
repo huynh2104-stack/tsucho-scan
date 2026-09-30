@@ -87,6 +87,37 @@ def test_missing_ocr_and_timeout_fail_closed(tmp_path,monkeypatch):
     assert failed['ocr_status']=='failed' and failed['bands'][0]['method']=='estimated'
 
 
+@pytest.mark.parametrize("value", ["0", "false", "OFF", " no "])
+def test_local_ocr_switch_skips_every_reader(tmp_path, monkeypatch, value):
+    path = tmp_path / "image.png"
+    Image.new("RGB", (100, 100), "white").save(path)
+
+    def forbidden(*args):
+        raise AssertionError("OCR reader must not run when TSUCHO_LOCAL_OCR is off")
+    monkeypatch.setattr(rowanchors, "_read_rapid_words", forbidden)
+    monkeypatch.setattr(rowanchors, "_read_words", forbidden)
+    monkeypatch.setattr(rowanchors, "_executable", lambda: "tesseract")
+    monkeypatch.setenv("TSUCHO_LOCAL_OCR", value)
+    result = rowanchors.locate(path, "a", [tx()], geometry())
+    assert result["ocr_status"] == "unavailable" and not result["exact"]
+    assert result["bands"][0]["method"] == "estimated"
+
+
+@pytest.mark.parametrize("value", [None, "", "1", "true"])
+def test_local_ocr_is_on_unless_explicitly_disabled(tmp_path, monkeypatch, value):
+    path = tmp_path / "image.png"
+    Image.new("RGB", (100, 100), "white").save(path)
+    words = [token(8373, .5, .55), token(510893, .85, .55)]
+    monkeypatch.setattr(rowanchors, "_read_rapid_words", lambda *args: words)
+    monkeypatch.setattr(rowanchors, "_executable", lambda: None)
+    if value is None:
+        monkeypatch.delenv("TSUCHO_LOCAL_OCR", raising=False)
+    else:
+        monkeypatch.setenv("TSUCHO_LOCAL_OCR", value)
+    result = rowanchors.locate(path, "a", [tx()], geometry())
+    assert result["ocr_status"] == "ready" and result["bands"][0]["method"] == "content"
+
+
 def test_cropped_balance_profile_keeps_full_page_skew_origin():
     mask=np.zeros((250,700),dtype=bool)
     for x in range(540,670):

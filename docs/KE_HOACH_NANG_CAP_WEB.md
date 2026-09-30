@@ -1030,9 +1030,9 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 ## 9. Theo dõi tiến độ
 
-**Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build `___` · rowmap POST lần đầu `___ s`, lần sau `___ s` · RSS đỉnh khi OCR `___ MB`
+**Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-- [~] 0.1 Đồng bộ nhánh, đo mốc (đã pull + pytest; còn tạo nhánh, build, đo RAM)
+- [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [ ] 0.2 Lưới an toàn kiểm thử
 - [ ] 0.3 Năm sửa lỗi nhỏ
 - [ ] 1.1 Danh tính dòng + giá trị máy đọc
@@ -1066,6 +1066,28 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [ ] 5.7 Chụp bằng điện thoại
 - [ ] 6.0 Cổng kế toán → 6.1 → 6.2
 - [ ] 7.x Vận hành
+
+### Ghi chú khi làm
+
+**Task 0.1 — xong 30/09/2026 (Sonnet 5.5).** Nhánh `nang-cap-10-2026`. `npm ci` 14 s (47 gói), `npm run build` 11 s, xanh, sinh 3 trang (`/`, `/login`, `/_not-found`).
+
+Đo RAM bằng `python tests/e2e/do_ram_rowmap.py --server-python .venv/Scripts/python.exe on tess off` (sổ mẫu, $0, thư mục dữ liệu tạm, Windows 11, RSS = working set do psutil đọc). **Khi chọn máy chủ, chạy lại đúng script này trên máy đó** rồi so với bảng.
+
+| Cấu hình | Khởi động | POST lần 1 | Cùng mặt, lần 2 | Mặt khác | RSS đỉnh | Còn lại sau | Dòng khớp nội dung (mặt 1 · mặt 2) |
+|---|---|---|---|---|---|---|---|
+| **Giống Render** (Python 3.12, RapidOCR 1.4.4 + Tesseract) | 117 MB | 2.5–2.6 s | 0.06–0.12 s | 2.4–2.6 s | **462 MB** | 188–193 MB | 11/12 · 6/8 |
+| Chỉ Tesseract (không cài RapidOCR) | 117 MB | 2.5 s | 0.1 s | 2.3 s | 145 MB | 125 MB | 11/12 · 6/8 |
+| Tắt OCR (`TSUCHO_LOCAL_OCR=0`) | 117 MB | 0.1 s | 0.06 s | 0.06 s | 139 MB | 119 MB | 0/12 · 0/8 (chỉ ước lượng) |
+| Máy anh đang chạy (Python 3.14, RapidOCR 1.2.3) | 124 MB | 2.7 s | 0.4 s | 2.6 s | 485 MB | 202–212 MB | 11/12 · 6/8 |
+
+Phát hiện khi đo (không sửa trong task này, chờ anh quyết):
+1. **Trên máy anh, RapidOCR hỏng âm thầm.** Python 3.14 chỉ cài được `rapidocr_onnxruntime` 1.2.3 (bản 1.4.4 đòi Python < 3.13). Bản 1.2.3 trả điểm tin cậy dạng *chữ*, nên `api/rowanchors.py:40` (`score < .85`) ném `TypeError` ở mỗi lần gọi; `locate()` nuốt lỗi. Tesseract vẫn đọc được nên kết quả vẫn "ready". Vậy trên localhost hiện chỉ Tesseract làm việc, RapidOCR chỉ tốn RAM và tốn 0.3 s mỗi lần (không cache được vì lần nào cũng lỗi). Bản Docker/Render (Python 3.12 + 1.4.4, trả số thực) và `.venv` của repo không dính.
+2. **RapidOCR đắt mà chưa thấy lợi.** Đỉnh 462 MB so với 145 MB (+317 MB), giữ thêm ~65 MB sau khi xong, không khớp thêm dòng nào và không nhanh hơn (thời gian nằm ở Tesseract, ~2.4 s mỗi mặt sổ mới). Lưu ý: chỉ đo trên sổ mẫu vẽ sạch, **chưa đo ảnh chụp thật**; chưa đủ để nói RapidOCR vô ích với ảnh thật.
+3. **Máy chủ 512 MB không đủ** với cấu hình giống Render (462 MB đỉnh của riêng tiến trình, chưa kể Tesseract chạy con): dễ lặp lại lỗi 502 của commit `aa71757`. Đường ra: máy ≥ 1 GB (đúng như mục 7b), hoặc `TSUCHO_LOCAL_OCR=0` (mất khung đỏ bám dòng chính xác), hoặc thêm công tắc tắt RIÊNG RapidOCR (giữ Tesseract, đỉnh ~145 MB) — **chưa làm**, cần anh duyệt.
+4. `locate()` ghi đè `ocr_status="failed"` bằng `"ready"` khi một bộ đọc khác thành công ⇒ lỗi của một bộ đọc bị che (chính là lý do phát hiện 1 không ai thấy).
+5. `npm audit` báo 4 lỗ hổng (1 nghiêm trọng, 3 cao), gốc ở `next` 16.2.12: bản vá là ≥ 16.3.3 ([GHSA-p293-qw3h-jr36](https://github.com/advisories/GHSA-p293-qw3h-jr36): lỗi đi ngược thư mục, cho chạy mã từ xa không cần đăng nhập trên máy chủ Windows). Bản deploy chỉ là file tĩnh do FastAPI phục vụ (không chạy máy chủ Next) nhưng `npm run dev` trên máy anh thì có; trang cảnh báo không nói rõ máy chủ dev có bị không. **Chưa nâng** vì đổi thư viện phải hỏi trước.
+
+Thêm ngoài kế hoạch (nhỏ): script đo lưu trong repo (`tests/e2e/do_ram_rowmap.py`, cần `pip install psutil httpx`, không thuộc `requirements.txt`). Task 0.1 có **2 commit** thay vì 1 vì bước 2 yêu cầu commit riêng hai file kế hoạch trước khi đo.
 
 ---
 
