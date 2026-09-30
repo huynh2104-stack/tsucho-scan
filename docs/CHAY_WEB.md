@@ -74,6 +74,7 @@ Không đặt gì cả vẫn chạy được. Đặt trước lệnh `uvicorn`.
 
 | Biến | Tác dụng |
 |---|---|
+| `TSUCHO_DATA_DIR=<thư mục>` | Đổi nơi lưu ảnh, kết quả và CSDL tài khoản (mặc định `.data/` ở gốc repo). Dùng cho test tự động và khi thử máy chủ mới, để **không bao giờ ghi nhầm vào `.data` đang chứa sổ thật**. `pytest` và `tests/e2e/smoke.py` tự đặt biến này sang thư mục tạm. |
 | `TSUCHO_LOCAL_OCR=0` | Tắt OCR cục bộ (RapidOCR + Tesseract) dùng để khoanh đúng dòng trên ảnh. Dành cho máy chủ ít RAM: bản giống Render tốn đỉnh ~460 MB khi OCR chạy, tắt thì ~140 MB. Khung đỏ vẫn hiện nhưng chỉ là vị trí ước lượng. Số đo và cách đo lại: `docs/KE_HOACH_NANG_CAP_WEB.md` mục 9. |
 
 ---
@@ -108,6 +109,32 @@ khi thật sự cần.
 
 ---
 
+## Kiểm tra tự động (chạy sau MỖI thay đổi, trước khi bàn giao)
+
+Bốn lệnh, cả bốn phải xanh. Không lệnh nào gọi Gemini và không lệnh nào đụng `.data`.
+
+```bash
+python -m pytest -q          # 1. test Python (chạy ở thư mục gốc repo)
+cd web && npm test           # 2. test logic TypeScript (Node chạy thẳng file .ts, không thêm thư viện)
+cd web && npm run build      # 3. kiểm tra kiểu + sinh web/out
+python tests/e2e/smoke.py    # 4. bấm thử app bằng trình duyệt thật, dùng sổ mẫu ($0)
+```
+
+- **Lệnh 4 cần lệnh 3 trước**: nó thử đúng bản `web/out`. Nếu `web/out` cũ hơn mã nguồn thì nó **từ chối chạy** (thử bản cũ sẽ báo xanh giả); thêm `--build` để nó tự build trước.
+- Cài một lần cho lệnh 4 (không thuộc `requirements.txt`): `pip install playwright openpyxl httpx` rồi `python -m playwright install chromium`. Thêm `--headed` để xem trình duyệt bấm.
+- Kịch bản lệnh 4 (in `PASS`/`FAIL` từng bước): đăng ký → bỏ qua hướng dẫn → thử với sổ mẫu → sửa một ô 残高 sai (bộ đếm "Còn N dòng" tăng) → Ctrl+Z (về như cũ) → xuất Excel và mở bằng openpyxl → F5 vẫn còn kết quả. Khi hỏng nó lưu ảnh chụp màn hình ở thư mục tạm của hệ điều hành và in đường dẫn.
+- Đã thử cố ý làm hỏng: gỡ listener phím tắt trong `page.tsx` thì lệnh 4 báo FAIL ở bước 4.
+- `tests/e2e/do_ram_rowmap.py`: không phải test, là script **đo RAM OCR cục bộ** khi chọn máy chủ (xem `docs/KE_HOACH_NANG_CAP_WEB.md` mục 9).
+
+### Viết thêm test TypeScript
+
+- Đặt cạnh mã: `web/src/lib/<tên>.test.ts` (script `npm test` tự nhặt mọi `src/lib/*.test.ts`).
+- Logic đem test phải nằm trong file `.ts` **thuần**: không JSX, không import alias `@/`, chỉ `import type` khi cần kiểu.
+- Import giữa các file `.ts` **ghi rõ đuôi `.ts`** (`from "./review.ts"`), vì Node không tự thêm đuôi. Bundler của Next vẫn build bình thường (đã thử).
+- Từ điển VI/EN/JA nằm ở `web/src/lib/dict.ts`. `dict.test.ts` bắt việc thiếu khoá hay lệch kiểu giữa ba thứ tiếng — lỗi mà trình biên dịch không thấy vì `i18n.tsx` ép kiểu `DICT[lang] as Dict`, và chỉ lộ ra khi màn hình hiện chữ `undefined`.
+
+---
+
 ## Cấu trúc mã nguồn
 
 ```
@@ -120,7 +147,8 @@ api/
 web/src/
   app/page.tsx           bàn làm việc 3 khung
   app/layout.tsx         khung trang, script chống nháy chủ đề
-  lib/i18n.tsx           từ điển VI/EN/JA
+  lib/i18n.tsx           bối cảnh ngôn ngữ (React)
+  lib/dict.ts            từ điển VI/EN/JA — dữ liệu thuần, có test (dict.test.ts)
   lib/theme.tsx          sáng/tối/theo hệ thống
   lib/api.ts             gọi API + SSE
   components/SheetRail   cột trái: mặt sổ, chọn nhiều
@@ -128,6 +156,10 @@ web/src/
   components/ReviewPane  khung phải: bảng dạng sổ, bật tắt cột
   components/Tour        hướng dẫn 7 bước, tô sáng đúng nút trên giao diện thật
   lib/tour.tsx           nhớ "đã xem hướng dẫn chưa" theo từng người dùng
+tests/
+  conftest.py            ép mọi test pytest chạy trên thư mục dữ liệu tạm
+  test_*.py              pytest (không gọi API thật)
+  e2e/smoke.py           bấm thử bằng trình duyệt thật (lệnh 4 ở trên)
 ```
 
 **Hướng dẫn sử dụng**: tự mở lần đầu mỗi người dùng đăng nhập; sau đó bấm nút

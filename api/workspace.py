@@ -10,6 +10,7 @@ Trạng thái lưu ra `meta.json` nên F5 hay khởi động lại server vẫn 
 
 import io
 import json
+import os
 import shutil
 import time
 import uuid
@@ -20,7 +21,10 @@ import fitz  # PyMuPDF — render trang PDF thành ảnh
 import numpy as np
 from PIL import Image, ImageEnhance
 
-DATA_DIR = Path(__file__).resolve().parents[1] / ".data"
+# Đặt TSUCHO_DATA_DIR để chạy trên thư mục dữ liệu RIÊNG (test tự động, thử máy
+# chủ mới) — nhờ vậy không bao giờ ghi nhầm vào `.data` đang chứa sổ thật.
+# `auth.DB_PATH` suy ra từ đây nên cơ sở dữ liệu tài khoản cũng đi theo.
+DATA_DIR = Path(os.getenv("TSUCHO_DATA_DIR") or Path(__file__).resolve().parents[1] / ".data")
 WS_DIR = DATA_DIR / "ws"
 
 ALLOWED_SUFFIX = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}

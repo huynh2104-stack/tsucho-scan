@@ -1032,8 +1032,10 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 0.2 (30/09) — pytest **191 passed** · `npm test` **6 pass** · build xanh · E2E `smoke.py` **6/6 bước** (~8 s).
+
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
-- [ ] 0.2 Lưới an toàn kiểm thử
+- [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
 - [ ] 0.3 Năm sửa lỗi nhỏ
 - [ ] 1.1 Danh tính dòng + giá trị máy đọc
 - [ ] 1.2 Một định nghĩa "cần soát"
@@ -1088,6 +1090,21 @@ Phát hiện khi đo (không sửa trong task này, chờ anh quyết):
 5. `npm audit` báo 4 lỗ hổng (1 nghiêm trọng, 3 cao), gốc ở `next` 16.2.12: bản vá là ≥ 16.3.3 ([GHSA-p293-qw3h-jr36](https://github.com/advisories/GHSA-p293-qw3h-jr36): lỗi đi ngược thư mục, cho chạy mã từ xa không cần đăng nhập trên máy chủ Windows). Bản deploy chỉ là file tĩnh do FastAPI phục vụ (không chạy máy chủ Next) nhưng `npm run dev` trên máy anh thì có; trang cảnh báo không nói rõ máy chủ dev có bị không. **Chưa nâng** vì đổi thư viện phải hỏi trước.
 
 Thêm ngoài kế hoạch (nhỏ): script đo lưu trong repo (`tests/e2e/do_ram_rowmap.py`, cần `pip install psutil httpx`, không thuộc `requirements.txt`). Task 0.1 có **2 commit** thay vì 1 vì bước 2 yêu cầu commit riêng hai file kế hoạch trước khi đo.
+
+**Task 0.2 — xong 30/09/2026.** Bốn lệnh kiểm tra (mục 3) đều xanh: pytest **191 passed** (180 + 11 mới), `npm test` **6 pass**, `npm run build` xanh, `tests/e2e/smoke.py` **6/6 bước** (~8 s). Không lệnh nào gọi Gemini; giờ sửa của `.data/app.db` không đổi sau khi chạy.
+- `TSUCHO_DATA_DIR` (`api/workspace.py`) + `tests/test_data_dir.py` (3 test, chạy tiến trình con vì biến chỉ được đọc lúc import). Ghi vào `CHAY_WEB.md` cùng 4 lệnh kiểm tra và cách viết thêm test TS.
+- Từ điển tách thành `web/src/lib/dict.ts` (DICT, LANGS, Lang, LANG_LABEL, Dict; dữ liệu thuần); `i18n.tsx` import lại và re-export nên mọi `import ... from "@/lib/i18n"` cũ chạy nguyên. Đã kiểm thân DICT giống hệt bản gốc (836 dòng) và grep lại `LangCtx`, `KEY`, `LangProvider`, `useT`, `localStorage`, `documentElement.lang` còn đủ (bài học `025d8dc`).
+- `dict.test.ts` (6 test): đúng ba ngôn ngữ như `LANGS`; tiếng Việt ≥ 200 mục (chặn xanh giả khi import hỏng); en/ja cùng khoá và cùng kiểu với vi (hàm phải cùng số tham số); hàm dịch không trả `undefined`/`NaN`; không chuỗi rỗng, trừ `ja.colGloss` (cố ý để trống). Cố ý xoá `ja.trySample` thì test đỏ đúng chỗ (`thieu: ['trySample']`), đã trả lại.
+- E2E `tests/e2e/smoke.py`: chạy uvicorn cổng 8765 với dữ liệu tạm, xong thì dừng server và xoá thư mục tạm. **Từ chối chạy khi `web/out` cũ hơn mã nguồn** (thêm `--build` để tự build): không thì sửa code xong E2E vẫn thử bản cũ và báo xanh giả (chính tôi đã suýt dính lúc viết). Cố ý gỡ listener phím tắt trong `page.tsx` thì bước 4 báo FAIL "bộ đếm về 0 sau Ctrl+Z" (bước 6 đỏ theo vì ô sửa sai còn nằm trên server); đã trả lại, build lại, 6/6 xanh; `git diff` của `page.tsx` rỗng.
+
+Khác kế hoạch (nhỏ, có lý do):
+- Script `test` thêm `--disable-warning=MODULE_TYPELESS_PACKAGE_JSON`: `web/package.json` chưa khai `"type"` nên Node in một cảnh báo dài ở mỗi lần chạy. Không đổi sang `"type": "module"` để khỏi động tới build Next.
+- Thêm `tests/conftest.py` (kế hoạch không ghi): `api.main` chạy `auth.init_db()` ngay khi import, nên trước đây mỗi lần chạy pytest đều mở `.data/app.db` thật. Nay mọi phiên pytest dùng thư mục tạm (xoá khi xong).
+- Bước 6 của E2E phải bấm vào một mặt sổ sau F5 (xem quan sát dưới).
+
+Quan sát khi viết E2E (không sửa):
+- Sau F5, kết quả còn nguyên nhưng **chưa mặt sổ nào được chọn**: khung phải chỉ hiện "Bấm một mặt sổ ở cột trái để xem kết quả của mặt đó", nên người dùng dễ tưởng mất kết quả. Gợi ý: sau khi nạp, tự chọn mặt sổ đầu tiên có kết quả. Chưa có trong kế hoạch, chờ anh duyệt.
+- **Phím `n` (và nút「Dòng cần soát sau」) đặt con trỏ LỆCH MỘT Ô.** Đã đo trên sổ mẫu: sửa 残高 dòng 4 thành 999 rồi bấm `n`, con trỏ nhảy vào ô **入金** của dòng 5 chứ không phải 残高. Nguyên nhân: `pendingFocus` ở `page.tsx` chọn `inputs[idx]` với idx = `cols.kind ? 5 : 4` (残高) và `cols.kind ? 2 : 1` (摘要), viết từ trước khi có cột 行 (ô `readOnly` đầu dòng), nay mọi ô đã dịch một bậc. **Task 1.2** (`focusField`) nên chọn ô theo thuộc tính (vd. thêm `data-field="balance"` vào `Cell`) thay vì theo số thứ tự, và E2E của 1.2 nên kiểm ô nào đang được focus.
 
 ---
 
