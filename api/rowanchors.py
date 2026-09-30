@@ -14,26 +14,24 @@ import subprocess
 import tempfile
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
 
 from PIL import Image
 
-_rapid_lock = Lock()
-_rapid_engine = None
+from . import ocrengine
 
 
 @lru_cache(maxsize=12)
 def _read_rapid_words(path: str, revision: str):
     """Optional bundled ONNX models: CPU inference, no downloads or API calls."""
-    from rapidocr_onnxruntime import RapidOCR
-    global _rapid_engine
+    # Bản RapidOCR dùng chung với `orient` (tự nhận hướng trang): nạp mô hình một lần thôi.
+    engine = ocrengine.engine()
+    if engine is None:
+        raise ImportError("RapidOCR is not installed")      # `locate` coi như bộ đọc vắng mặt
     with Image.open(path) as image:
         width, height = image.size
     # RapidOCR has mutable per-call state; serialize access to the shared engine.
-    with _rapid_lock:
-        if _rapid_engine is None:
-            _rapid_engine = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=1)
-        detected, _ = _rapid_engine(path)
+    with ocrengine.LOCK:
+        detected, _ = engine(path)
     words = []
     for quad, text, score in detected or []:
         number = _number(text)

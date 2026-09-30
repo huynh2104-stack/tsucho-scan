@@ -22,7 +22,9 @@ from pydantic import BaseModel, Field
 
 from export import export_accounts
 
-from . import auth, autofix, demo, export_csv, jobs, results, rowmap, rowanchors, sample, workspace
+from . import (
+    auth, autofix, demo, export_csv, imgjobs, jobs, results, rowmap, rowanchors, sample, workspace,
+)
 
 app = FastAPI(title="tsucho-scan API", version="0.3.0")
 
@@ -77,6 +79,19 @@ def _sheet(ws: workspace.Workspace, sheet_id: str) -> workspace.Sheet:
     s = ws.find(sheet_id)
     if not s:
         raise HTTPException(404, "Không tìm thấy mặt sổ")
+    return s
+
+
+def _sheet_ready(ws: workspace.Workspace, sheet_id: str) -> workspace.Sheet:
+    """Như `_sheet` nhưng chỉ nhận mặt sổ đã xử lý xong.
+
+    Mặt sổ còn đang tách trang / kiểm hướng ở luồng nền (hoặc bị hỏng) chưa có ảnh ổn định:
+    sửa hay quét lúc này sẽ đè lên việc nền hoặc mở file chưa tồn tại. Trả 409 kèm MÃ để
+    giao diện tự dịch, cùng lối với các lỗi khác.
+    """
+    s = _sheet(ws, sheet_id)
+    if s.status != "ready":
+        raise HTTPException(409, {"kind": "not_ready", "status": s.status})
     return s
 
 
@@ -210,17 +225,65 @@ def rename_book(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
 
 
 @app.post("/api/ws/{ws_id}/sheets")
-async def add_sheets(ws_id: str, files: list[UploadFile], user: CurrentUser) -> dict:
-    """Tải file lên. PDF nhiều trang được TÁCH thành nhiều mặt sổ độc lập."""
+async def add_sheets(
+    ws_id: str, files: list[UploadFile], user: CurrentUser, auto: bool = True
+) -> dict:
+    """Tải file lên. PDF nhiều trang được TÁCH thành nhiều mặt sổ độc lập.
+
+    Trả lời NGAY với các thẻ mặt sổ ở trạng thái "queued"; việc nặng (tách trang, lưu ảnh,
+    tự xoay/cắt) chạy ở luồng nền và giao diện hỏi lại `GET /api/ws/:id/sheets` để vẽ tiến độ.
+    `auto=false` tắt bước tự xoay/cắt. File lỗi không làm hỏng cả lô: các file tốt vẫn được
+    nhận, file xấu nằm trong `errors`; chỉ khi KHÔNG file nào nhận được mới trả 400.
+    """
     ws = _ws(ws_id, user)
-    added = []
+    added: list[workspace.Sheet] = []
+    errors: list[dict] = []
     for f in files:
+        name = f.filename or "file"
         data = await f.read()
         try:
-            added += workspace.add_upload(ws, f.filename or "file", data)
+            made, job = workspace.prepare_upload(ws, name, data, auto=auto)
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-    return {"added": [s.id for s in added], **workspace.to_json(ws)}
+            errors.append({"file": name, "message": str(e)})
+            continue
+        added += made
+        imgjobs.submit(workspace.process_upload, job)
+    if errors and not added:
+        raise HTTPException(400, errors[0]["message"])
+    return {"added": [s.id for s in added], "errors": errors, **workspace.to_json(ws)}
+
+
+@app.get("/api/ws/{ws_id}/sheets")
+def list_sheets(ws_id: str, user: CurrentUser) -> dict:
+    """Danh sách mặt sổ (không kèm kết quả quét) — nhẹ, để giao diện hỏi lại mỗi giây
+    trong lúc nền còn đang xử lý."""
+    return workspace.to_json(_ws(ws_id, user))
+
+
+@app.post("/api/ws/{ws_id}/autoprep")
+def autoprep_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Cho máy tự xoay + cắt gọn những mặt sổ ĐÃ CÓ (nhập trước khi có tính năng này).
+
+    Chạy nền như lúc nhập file. Mặt đã quét bị BỎ QUA trừ khi `force`: ảnh đổi thì kết quả
+    cũ không còn khớp, phải quét lại.
+    """
+    ws = _ws(ws_id, user)
+    ids = body.get("sheet_ids") or []
+    if not ids:
+        raise HTTPException(400, "Chưa chọn mặt sổ nào")
+    force = bool(body.get("force"))
+    queued, skipped = [], []
+    for sid in ids:
+        s = _sheet_ready(ws, sid)
+        if s.scanned and not force:
+            skipped.append(sid)
+            continue
+        s.status = "analyzing"
+        queued.append(sid)
+    if queued:
+        ws.save()
+        imgjobs.submit(workspace.autoprep_sheets, ws.id, queued)
+    return {"queued": queued, "skipped": skipped, **workspace.to_json(ws)}
 
 
 @app.delete("/api/ws/{ws_id}/sheets/{sheet_id}")
@@ -290,7 +353,7 @@ def rotate_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict
     if not ids:
         raise HTTPException(400, "Chưa chọn mặt sổ nào")
     for sid in ids:
-        workspace.rotate(ws, _sheet(ws, sid), degrees % 360)
+        workspace.rotate(ws, _sheet_ready(ws, sid), degrees % 360)
     ws.save()
     return workspace.to_json(ws)
 
@@ -313,7 +376,7 @@ def crop_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     except (KeyError, TypeError, ValueError) as e:
         raise HTTPException(400, "Vùng cắt không hợp lệ") from e
     try:
-        workspace.crop(ws, _sheet(ws, ids[0]), rect)
+        workspace.crop(ws, _sheet_ready(ws, ids[0]), rect)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     ws.save()
@@ -339,7 +402,7 @@ def warp_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
         raise HTTPException(400, "Toạ độ các điểm không hợp lệ") from e
 
     try:
-        workspace.perspective(ws, _sheet(ws, ids[0]), quad, mids or None)
+        workspace.perspective(ws, _sheet_ready(ws, ids[0]), quad, mids or None)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     ws.save()
@@ -367,7 +430,7 @@ def adjust_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict
 
     for sid in ids:
         workspace.adjust(
-            ws, _sheet(ws, sid),
+            ws, _sheet_ready(ws, sid),
             fine_deg=fine, brightness=bright, contrast=contrast,
         )
     ws.save()
@@ -382,7 +445,7 @@ def undo_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     if len(ids) != 1:
         raise HTTPException(400, "Hoàn tác áp dụng cho một mặt sổ đang xem")
     try:
-        workspace.undo(ws, _sheet(ws, ids[0]))
+        workspace.undo(ws, _sheet_ready(ws, ids[0]))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     ws.save()
@@ -394,7 +457,7 @@ def reset_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Trả ảnh về bản gốc — hoàn tác mọi lần xoay/cắt."""
     ws = _ws(ws_id, user)
     for sid in body.get("sheet_ids") or []:
-        workspace.reset_sheet(ws, _sheet(ws, sid))
+        workspace.reset_sheet(ws, _sheet_ready(ws, sid))
     ws.save()
     return workspace.to_json(ws)
 
@@ -488,7 +551,7 @@ def autofix_plan(ws_id: str, sheet_id: str, user: CurrentUser) -> dict:
     from PIL import Image
 
     ws = _ws(ws_id, user)
-    sheet = _sheet(ws, sheet_id)
+    sheet = _sheet_ready(ws, sheet_id)
     img = Image.open(sheet.dir(ws.id) / "current.png")
     img.load()
     return autofix.plan(img)
@@ -501,7 +564,7 @@ def autofix_apply(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict
     ids = body.get("sheet_ids") or []
     if len(ids) != 1:
         raise HTTPException(400, "Cắt nhanh áp dụng cho mặt sổ đang xem")
-    sheet = _sheet(ws, ids[0])
+    sheet = _sheet_ready(ws, ids[0])
 
     steps = body.get("steps") or []
     if not steps:
@@ -541,7 +604,7 @@ def split_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     if len(ids) != 1:
         raise HTTPException(400, "Tách áp dụng cho mặt sổ đang xem")
     try:
-        workspace.split_at(ws, _sheet(ws, ids[0]), float(body.get("x", 0.5)))
+        workspace.split_at(ws, _sheet_ready(ws, ids[0]), float(body.get("x", 0.5)))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e)) from e
     ws.save()
@@ -571,6 +634,8 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
             429,
             {"kind": "demo_quota", "limit": demo.han_muc(), "left": con},
         )
+    if any(s.status != "ready" for s in sheets):
+        raise HTTPException(409, {"kind": "not_ready"})
 
     paths = [str(s.scan_path(ws.id)) for s in sheets]
 

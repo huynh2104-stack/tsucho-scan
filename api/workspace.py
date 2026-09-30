@@ -10,8 +10,10 @@ Trạng thái lưu ra `meta.json` nên F5 hay khởi động lại server vẫn 
 
 import io
 import json
+import logging
 import os
 import shutil
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -19,7 +21,11 @@ from pathlib import Path
 
 import fitz  # PyMuPDF — render trang PDF thành ảnh
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
+
+from . import autoprep
+
+log = logging.getLogger("tsucho.workspace")
 
 # Đặt TSUCHO_DATA_DIR để chạy trên thư mục dữ liệu RIÊNG (test tự động, thử máy
 # chủ mới) — nhờ vậy không bao giờ ghi nhầm vào `.data` đang chứa sổ thật.
@@ -36,6 +42,9 @@ SCAN_MAX_MB = 4.2
 MAX_STORE_PX = 2600
 # Trang PDF render ở 200 DPI: đủ nét cho model đọc kana nhỏ, chưa nặng quá
 PDF_DPI = 200
+
+# Mặt mới nhập còn đang được máy xử lý nền: chưa xem/sửa/quét được
+BUSY = ("queued", "rendering", "analyzing")
 
 
 @dataclass
@@ -57,12 +66,23 @@ class Sheet:
     height: int = 0
     source_ext: str = ".png"     # đuôi của bản gốc chưa qua chỉnh sửa
     undo: dict | None = None     # trạng thái trước thao tác chỉnh cuối cùng
+    # ── Xử lý nền khi nhập file (xem `process_upload`) ──
+    # queued → rendering → analyzing → ready | failed. File cũ không có khoá này ⇒ "ready".
+    status: str = "ready"
+    error: str = ""              # MÃ lỗi khi status == "failed" (giao diện tự dịch)
+    auto: dict | None = None     # việc máy đã tự làm khi nhập (xem `autoprep.Plan.as_record`)
+    exif_fixed: bool = False     # ảnh đã được xoay theo thẻ EXIF của file gốc
 
     def dir(self, ws_id: str) -> Path:
         return WS_DIR / ws_id / self.id
 
+    def busy(self) -> bool:
+        return self.status in BUSY
+
     def edited(self) -> bool:
-        return self.rotation != 0 or self.cropped or self.adjusted or self.warped
+        # exif_fixed: điểm ảnh đã xoay khác file gốc (thẻ EXIF chỉ nằm trong file gốc)
+        # nên phải gửi bản đã xoay đi quét, không được gửi lại bytes gốc.
+        return self.rotation != 0 or self.cropped or self.adjusted or self.warped or self.exif_fixed
 
     def scan_path(self, ws_id: str) -> Path:
         """File ĐEM QUÉT.
@@ -100,9 +120,14 @@ class Workspace:
         return next((s for s in self.sheets if s.id == sheet_id), None)
 
     def save(self) -> None:
+        """Ghi `meta.json` NGUYÊN TỬ (ghi file tạm rồi đổi tên) và tuần tự.
+
+        Từ khi có luồng xử lý nền, yêu cầu của người dùng và luồng nền có thể cùng lưu một
+        workspace. Ghi thẳng vào file thì hai lần ghi chồng nhau có thể để lại file cụt.
+        """
         self.dir().mkdir(parents=True, exist_ok=True)
-        (self.dir() / "meta.json").write_text(
-            json.dumps(
+        with _SAVE_LOCK:
+            text = json.dumps(
                 {
                     "id": self.id,
                     "book_name": self.book_name,
@@ -111,9 +136,21 @@ class Workspace:
                     "sheets": [asdict(s) for s in self.sheets],
                 },
                 ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
+            )
+            target, tmp = self.dir() / "meta.json", self.dir() / "meta.json.tmp"
+            tmp.write_text(text, encoding="utf-8")
+            for attempt in range(6):
+                try:
+                    os.replace(tmp, target)
+                    return
+                except PermissionError:
+                    # Windows: chương trình diệt vi-rút hay tiến trình khác đang mở file đích
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+
+
+_SAVE_LOCK = threading.Lock()
 
 
 _cache: dict[str, Workspace] = {}
@@ -140,6 +177,11 @@ def load(ws_id: str) -> Workspace | None:
         owner=raw.get("owner", ""),
         sheets=[Sheet(**s) for s in raw.get("sheets", [])],
     )
+    # Máy chủ tắt giữa chừng lúc đang xử lý nền: việc đó không còn ai làm tiếp, để nguyên
+    # trạng thái "đang xử lý" thì thanh tiến độ quay mãi. Đánh dấu hỏng để người dùng tải lại.
+    for s in ws.sheets:
+        if s.busy():
+            s.status, s.error = "failed", "interrupted"
     _cache[ws.id] = ws
     return ws
 
@@ -204,7 +246,8 @@ def _write_sheet_images(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     img = _cap(img)
 
     img.save(d / "original.png")
-    img.save(d / "current.png")
+    # current.png lúc mới nhập giống hệt original.png: chép file, khỏi mã hoá PNG lần hai
+    shutil.copyfile(d / "original.png", d / "current.png")
     sheet.width, sheet.height = img.size
 
     thumb = img.copy()
@@ -258,8 +301,30 @@ def _unique_name(ws: Workspace, base: str, page: int | None) -> str:
     return f"{base}({n})"
 
 
-def add_upload(ws: Workspace, filename: str, data: bytes) -> list[Sheet]:
-    """Thêm 1 file tải lên. PDF nhiều trang → tách thành nhiều mặt sổ."""
+# Nhập file gồm HAI pha (xem imgjobs.py):
+#   • `prepare_upload` — nhanh, chạy ngay trong yêu cầu HTTP: kiểm file, lập sẵn các thẻ mặt
+#     sổ ở trạng thái "queued" để giao diện hiện ra tức thì, lưu file tải lên vào đĩa.
+#   • `process_upload` — chậm, chạy ở luồng nền: tách trang, lưu ảnh, kiểm hướng, cắt gọn.
+
+def _new_sheet(ws: Workspace, filename: str, stem: str, page: int | None, ext: str) -> Sheet:
+    sheet = Sheet(
+        id=uuid.uuid4().hex[:10],
+        # Không nhét "tr.N" vào tên: chữ đó phải dịch theo ngôn ngữ giao diện, nên để
+        # frontend ghép từ `page`.
+        name=_unique_name(ws, stem, page),
+        origin=filename,
+        page=page,
+        source_ext=ext,
+        status="queued",
+    )
+    ws.sheets.append(sheet)              # để _unique_name của trang kế thấy ngay
+    return sheet
+
+
+def prepare_upload(
+    ws: Workspace, filename: str, data: bytes, auto: bool = True
+) -> tuple[list[Sheet], dict]:
+    """Pha nhanh: kiểm file, lập thẻ mặt sổ "queued", lưu file. Trả (các mặt sổ, việc nền)."""
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIX:
         raise ValueError(f"'{filename}': chỉ nhận {', '.join(sorted(ALLOWED_SUFFIX))}")
@@ -267,53 +332,285 @@ def add_upload(ws: Workspace, filename: str, data: bytes) -> list[Sheet]:
         raise ValueError(f"'{filename}' lớn hơn {MAX_FILE_MB}MB")
 
     stem = Path(filename).stem
-    made: list[Sheet] = []
-
     if suffix == ".pdf":
-        # Ảnh xem/sửa render bằng PyMuPDF, NHƯNG bản đem quét là trang PDF tách
-        # bằng pypdf — đúng thứ extract.py vẫn tạo, nên cache cũ dùng lại được.
-        from extract import _split_pdf_pages
-
-        pages = _split_pdf_pages(data)
-        doc = fitz.open(stream=data, filetype="pdf")
         try:
-            for i, page in enumerate(doc):
-                pix = page.get_pixmap(dpi=PDF_DPI)
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                sheet = Sheet(
-                    id=uuid.uuid4().hex[:10],
-                    # Không nhét "tr.N" vào tên: chữ đó phải dịch theo ngôn ngữ
-                    # giao diện, nên để frontend ghép từ `page`.
-                    name=_unique_name(ws, stem, i + 1),
-                    origin=filename,
-                    page=i + 1,
-                    source_ext=".pdf",
-                )
+            doc = fitz.open(stream=data, filetype="pdf")
+            try:
+                pages = len(doc)
+                locked = doc.needs_pass
+            finally:
+                doc.close()
+        except Exception as e:  # noqa: BLE001 — PyMuPDF ném nhiều loại lỗi khác nhau
+            raise ValueError(f"'{filename}': không mở được file PDF") from e
+        if locked:
+            raise ValueError(f"'{filename}': PDF có đặt mật khẩu")
+        if pages == 0:
+            raise ValueError(f"'{filename}': PDF không có trang nào")
+        made = [_new_sheet(ws, filename, stem, i + 1, ".pdf") for i in range(pages)]
+    else:
+        try:
+            Image.open(io.BytesIO(data))          # chỉ đọc phần đầu file: đủ để biết có phải ảnh
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"'{filename}': không đọc được ảnh") from e
+        made = [_new_sheet(ws, filename, stem, None, suffix)]
+
+    up = ws.dir() / "uploads"
+    up.mkdir(parents=True, exist_ok=True)
+    path = up / f"{uuid.uuid4().hex[:10]}{suffix}"
+    path.write_bytes(data)
+    ws.save()
+    job = {
+        "ws_id": ws.id,
+        "path": str(path),
+        "filename": filename,
+        "suffix": suffix,
+        "sheet_ids": [s.id for s in made],
+        "auto": bool(auto),
+    }
+    return made, job
+
+
+def _fail(sheet: Sheet, code: str) -> None:
+    sheet.status, sheet.error = "failed", code
+
+
+def _gone(ws: Workspace, sheet: Sheet) -> bool:
+    """Người dùng đã xoá mặt sổ này trong lúc nền đang xử lý → dọn tàn dư và bỏ qua."""
+    if ws.find(sheet.id) is not None:
+        return False
+    shutil.rmtree(sheet.dir(ws.id), ignore_errors=True)
+    return True
+
+
+def _finish_sheet(ws: Workspace, sheet: Sheet, auto: bool, plans: dict) -> None:
+    """Ảnh đã lưu xong: cho đi tiếp sang bước phân tích (nếu bật) hoặc sẵn sàng."""
+    if not auto:
+        sheet.status = "ready"
+        return
+    sheet.status = "analyzing"
+    ws.save()
+    try:
+        img = Image.open(sheet.dir(ws.id) / "current.png")
+        img.load()
+        plan = autoprep.analyze(img)
+    except Exception:  # noqa: BLE001 — phân tích hỏng thì cứ để ảnh nguyên, đừng chặn người dùng
+        log.exception("phân tích ảnh %s lỗi", sheet.id)
+        sheet.status = "ready"
+        return
+    plans[sheet.id] = plan
+    if plan.sure:
+        _apply_plan(ws, sheet, plan)
+    # Chưa đủ chắc: giữ "analyzing" tới cuối file, xem các trang khác có cùng hướng không
+
+
+def _apply_plan(ws: Workspace, sheet: Sheet, plan, propagated: bool = False) -> None:
+    try:
+        if plan.rotate or plan.box:
+            auto_apply(ws, sheet, plan.rotate, plan.box)
+        sheet.auto = plan.as_record(propagated=propagated)
+    except Exception:  # noqa: BLE001
+        log.exception("tự chỉnh ảnh %s lỗi", sheet.id)
+    sheet.status = "ready"
+
+
+def _settle_uncertain(ws: Workspace, sheet_ids: list[str], plans: dict) -> None:
+    """Cuối một file: các trang chưa đủ chắc thì xoay theo đa số nếu chính nó cũng nghiêng
+    về hướng đó; còn lại chỉ cắt gọn và ghi rõ "chưa chắc hướng"."""
+    agreed = autoprep.consensus(plans.values())
+    for sid in sheet_ids:
+        sheet = ws.find(sid)
+        if sheet is None or sheet.status != "analyzing":
+            continue
+        plan = plans.get(sid)
+        if plan is None:
+            sheet.status = "ready"
+            continue
+        if autoprep.should_follow(plan, agreed):
+            try:
+                img = Image.open(sheet.dir(ws.id) / "current.png")
+                img.load()
+                _apply_plan(ws, sheet, autoprep.analyze(img, rotate=agreed), propagated=True)
+                continue
+            except Exception:  # noqa: BLE001
+                log.exception("xoay theo đa số cho %s lỗi", sid)
+        _apply_plan(ws, sheet, plan)
+
+
+def auto_apply(
+    ws: Workspace,
+    sheet: Sheet,
+    rotate_cw: int = 0,
+    box: tuple[float, float, float, float] | None = None,
+) -> None:
+    """Máy tự chỉnh: xoay (nếu cần) rồi cắt (nếu có) — GỘP MỘT bước, chỉ một lần chụp hoàn tác.
+
+    Nên bấm「Hoàn tác ảnh」một lần là về đúng ảnh trước khi máy chỉnh, không phải về giữa
+    chừng (đã xoay mà chưa cắt).
+    """
+    d = sheet.dir(ws.id)
+    _snapshot(ws, sheet)
+    img = Image.open(d / "current.png")
+    img.load()
+    if rotate_cw % 360:
+        img = autoprep.turn(img, rotate_cw)
+    cropped = False
+    if box:
+        w, h = img.size
+        left, top, right, bottom = box
+        px = (max(0, int(left * w)), max(0, int(top * h)), min(w, int(right * w)), min(h, int(bottom * h)))
+        if px[2] - px[0] >= 20 and px[3] - px[1] >= 20:
+            img = img.crop(px)
+            cropped = True
+    _regen_current(ws, sheet, img)
+    sheet.rotation = round((sheet.rotation + rotate_cw) % 360, 1)
+    sheet.cropped = sheet.cropped or cropped
+    sheet.sha256 = _hash_current(ws, sheet)
+    sheet.scanned = False
+
+
+def autoprep_sheets(ws_id: str, sheet_ids: list[str]) -> None:
+    """Việc nền: cho máy tự xoay/cắt các mặt sổ ĐÃ có ảnh (endpoint `/autoprep`). Người gọi
+    đã đặt status "analyzing" cho từng mặt để giao diện thấy ngay."""
+    ws = load(ws_id)
+    if ws is None:
+        return
+    plans: dict = {}
+    try:
+        for sid in sheet_ids:
+            sheet = ws.find(sid)
+            if sheet is None or sheet.status != "analyzing":
+                continue
+            _finish_sheet(ws, sheet, True, plans)
+            ws.save()
+        _settle_uncertain(ws, sheet_ids, plans)
+    except Exception:  # noqa: BLE001
+        log.exception("tự căn chỉnh lỗi")
+        for sid in sheet_ids:                    # đừng để mặt nào kẹt ở "đang phân tích"
+            sheet = ws.find(sid)
+            if sheet is not None and sheet.status == "analyzing":
+                sheet.status = "ready"
+    mark_duplicates(ws)
+    ws.save()
+
+
+def process_upload(job: dict) -> None:
+    """Pha chậm, chạy ở luồng nền (xem `imgjobs`). Không ném lỗi ra ngoài: mặt sổ hỏng thì
+    tự đánh dấu "failed" kèm mã lỗi để giao diện báo."""
+    ws = load(job["ws_id"])
+    path = Path(job["path"])
+    try:
+        if ws is None:
+            return                              # workspace đã bị xoá
+        data = path.read_bytes()
+        if job["suffix"] == ".pdf":
+            _process_pdf(ws, data, job)
+        else:
+            _process_image(ws, data, job)
+    except Exception:  # noqa: BLE001
+        log.exception("xử lý file %s lỗi", job.get("filename"))
+        if ws is not None:
+            for sid in job["sheet_ids"]:
+                sheet = ws.find(sid)
+                if sheet is not None and sheet.busy():
+                    _fail(sheet, "unexpected")
+            ws.save()
+    finally:
+        path.unlink(missing_ok=True)
+        try:
+            path.parent.rmdir()                 # thư mục uploads rỗng thì bỏ
+        except OSError:
+            pass
+
+
+def _process_pdf(ws: Workspace, data: bytes, job: dict) -> None:
+    # Ảnh xem/sửa render bằng PyMuPDF, NHƯNG bản đem quét là trang PDF tách bằng pypdf —
+    # đúng thứ extract.py vẫn tạo, nên cache cũ dùng lại được.
+    from extract import _split_pdf_pages
+
+    try:
+        pages = _split_pdf_pages(data)
+    except Exception:  # noqa: BLE001 — không tách được thì quét bằng ảnh đã render
+        log.exception("tách PDF bằng pypdf lỗi")
+        pages = []
+    plans: dict = {}
+    doc = fitz.open(stream=data, filetype="pdf")
+    try:
+        for i, sid in enumerate(job["sheet_ids"]):
+            sheet = ws.find(sid)
+            if sheet is None or sheet.status != "queued":
+                continue
+            sheet.status = "rendering"
+            try:
+                pix = doc[i].get_pixmap(dpi=PDF_DPI)
+                if pix.n == 3 and not pix.alpha:
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                else:                           # hiếm: ảnh xám / có alpha
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    img.load()
                 _write_sheet_images(ws, sheet, img)
                 if i < len(pages):
                     (sheet.dir(ws.id) / "source.pdf").write_bytes(pages[i])
-                made.append(sheet)
-                ws.sheets.append(sheet)   # để _unique_name thấy ngay
-        finally:
-            doc.close()
-    else:
-        img = Image.open(io.BytesIO(data))
-        img.load()
-        sheet = Sheet(
-            id=uuid.uuid4().hex[:10],
-            name=_unique_name(ws, stem, None),
-            origin=filename,
-            source_ext=suffix,
-        )
-        _write_sheet_images(ws, sheet, img)
-        (sheet.dir(ws.id) / f"source{suffix}").write_bytes(data)
-        made.append(sheet)
-        ws.sheets.append(sheet)
-
-    for s in made:
-        s.sha256 = _hash_current(ws, s)
+                sheet.sha256 = _hash_current(ws, sheet)
+            except Exception:  # noqa: BLE001
+                log.exception("render trang %d lỗi", i + 1)
+                _fail(sheet, "render")
+                ws.save()
+                continue
+            if _gone(ws, sheet):
+                continue
+            _finish_sheet(ws, sheet, job["auto"], plans)
+            ws.save()
+    finally:
+        doc.close()
+    _settle_uncertain(ws, job["sheet_ids"], plans)
     mark_duplicates(ws)
     ws.save()
+
+
+def _process_image(ws: Workspace, data: bytes, job: dict) -> None:
+    sheet = ws.find(job["sheet_ids"][0])
+    if sheet is None or sheet.status != "queued":
+        return
+    sheet.status = "rendering"
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        # Điện thoại/máy scan ghi hướng chụp vào thẻ EXIF; mọi trình xem ảnh đều xoay theo nó.
+        # Bỏ qua thì ảnh trong app nằm ngang trong khi ở Windows lại đứng.
+        exif = img.getexif().get(0x0112, 1)
+        if exif not in (0, 1):
+            img = ImageOps.exif_transpose(img)
+            sheet.exif_fixed = True
+        _write_sheet_images(ws, sheet, img)
+        d = sheet.dir(ws.id)
+        (d / f"source{job['suffix']}").write_bytes(data)
+        if sheet.exif_fixed:
+            # Bản đem quét phải là điểm ảnh ĐÃ xoay (xem Sheet.edited)
+            fixed = Image.open(d / "current.png")
+            fixed.load()
+            _write_scan_jpeg(d / "scan.jpg", fixed)
+        sheet.sha256 = _hash_current(ws, sheet)
+    except Exception:  # noqa: BLE001
+        log.exception("đọc ảnh %s lỗi", job.get("filename"))
+        _fail(sheet, "decode")
+        ws.save()
+        return
+    plans: dict = {}
+    if not _gone(ws, sheet):
+        _finish_sheet(ws, sheet, job["auto"], plans)
+        _settle_uncertain(ws, job["sheet_ids"], plans)
+    mark_duplicates(ws)
+    ws.save()
+
+
+def add_upload(ws: Workspace, filename: str, data: bytes, auto: bool = False) -> list[Sheet]:
+    """Thêm 1 file và xử lý XONG ngay tại chỗ (đồng bộ). Dùng cho test và tiện ích; đường
+    dùng thật là `prepare_upload` + `imgjobs.submit(process_upload, …)`."""
+    made, job = prepare_upload(ws, filename, data, auto=auto)
+    process_upload(job)
+    bad = [s for s in made if s.status == "failed"]
+    if bad:
+        raise ValueError(f"'{filename}': không xử lý được ({bad[0].error})")
     return made
 
 
@@ -355,6 +652,8 @@ def _snapshot(ws: Workspace, sheet: Sheet) -> None:
         "height": sheet.height,
         "sha256": sheet.sha256,
     }
+    # Sắp đổi ảnh nên nhãn "máy đã tự chỉnh" hết đúng. `auto_apply` tự ghi lại nhãn sau khi gọi.
+    sheet.auto = None
 
 
 def undo(ws: Workspace, sheet: Sheet) -> None:
@@ -374,6 +673,7 @@ def undo(ws: Workspace, sheet: Sheet) -> None:
     sheet.adjusted = bool(snap.get("adjusted"))
     sheet.sha256 = _hash_current(ws, sheet)
     sheet.scanned = False
+    sheet.auto = None                    # ảnh không còn là bản máy đã chỉnh
     sheet.undo = None                    # chỉ hoàn tác được một bước
     prev.unlink(missing_ok=True)
 

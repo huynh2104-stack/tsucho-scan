@@ -19,7 +19,8 @@ def _paths(**env_extra):
          "from api import auth, workspace; print(workspace.DATA_DIR); print(workspace.WS_DIR); print(auth.DB_PATH)"],
         cwd=ROOT, env=env, capture_output=True, text=True, check=True,
     )
-    return [Path(line) for line in out.stdout.splitlines()]
+    # 3 dòng CUỐI: một số bản PyMuPDF in thêm cảnh báo `fitz` deprecated ra stdout lúc import
+    return [Path(line) for line in out.stdout.splitlines()[-3:]]
 
 
 def test_khong_dat_bien_thi_dung_thu_muc_data_mac_dinh():

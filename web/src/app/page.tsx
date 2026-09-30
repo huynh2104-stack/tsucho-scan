@@ -24,6 +24,7 @@ import {
   deleteSheet,
   exportFile,
   getJob,
+  getSheets,
   getWorkspace,
   listWorkspaces,
   listenEvents,
@@ -248,6 +249,24 @@ export default function Workbench() {
 
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
+
+  /* Mặt sổ mới nhập còn được máy xử lý NỀN (tách trang PDF, tự xoay/cắt gọn): hỏi lại mỗi giây
+     tới khi xong. Chỉ thay danh sách mặt sổ, không đụng kết quả người dùng đang sửa. */
+  const hasBusy = sheets.some(
+    (s) => s.status === "queued" || s.status === "rendering" || s.status === "analyzing",
+  );
+  useEffect(() => {
+    const id = ws?.id;
+    if (!id || !hasBusy) return;
+    const timer = setInterval(() => {
+      getSheets(id)
+        .then((fresh) =>
+          setWs((prev) => (prev && prev.id === id ? { ...prev, sheets: fresh.sheets } : prev)),
+        )
+        .catch(() => {});
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [ws?.id, hasBusy]);
 
   // Include content as well as row count: deleting/inserting/reordering rows
   // must never reuse another transaction's coordinates, even at equal length.
@@ -516,6 +535,8 @@ export default function Workbench() {
   const editTarget = () => (active ? [active] : []);
 
   const runScan = async (ids: string[]) => {
+    // Mặt sổ còn đang xử lý nền chưa quét được (server cũng trả 409)
+    ids = ids.filter((id) => (sheets.find((s) => s.id === id)?.status ?? "ready") === "ready");
     if (!ws || ids.length === 0) return;
 
     setScanning(true);

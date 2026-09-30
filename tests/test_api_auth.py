@@ -14,7 +14,7 @@ import io
 
 from PIL import Image
 
-from api import auth, demo, main, workspace
+from api import auth, demo, imgjobs, main, workspace
 
 # Route ai cũng gọi được — số còn lại bắt buộc phải đăng nhập
 PUBLIC = {
@@ -45,6 +45,9 @@ def client(tmp_path, monkeypatch):
     auth.init_db()
     with TestClient(main.app) as c:
         yield c
+    # Nhập file xử lý ở luồng nền: đợi xong TRƯỚC khi monkeypatch trả lại thư mục dữ liệu,
+    # không thì việc nền chạy nhầm sang thư mục của test khác.
+    imgjobs.wait_idle()
 
 
 def register(client, email="a@b.com", password="matkhau123"):

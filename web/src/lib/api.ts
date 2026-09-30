@@ -39,6 +39,23 @@ export type Sheet = {
   height: number;
   source_ext: string;
   undo: Record<string, unknown> | null;
+  /** Xử lý nền lúc nhập file: queued → rendering → analyzing → ready | failed.
+   *  Thiếu = "ready" (dữ liệu cũ). Mặt chưa ready chưa có ảnh ổn định, server trả 409 nếu sửa/quét. */
+  status?: "queued" | "rendering" | "analyzing" | "ready" | "failed";
+  /** Mã lỗi khi status = "failed" (interrupted / render / decode / unexpected). */
+  error?: string;
+  /** Việc máy đã tự làm khi nhập: xoay bao nhiêu độ, có cắt gọn không, có chắc hướng không. */
+  auto?: {
+    rotate: number;
+    cropped: boolean;
+    detected: number;
+    sure: boolean;
+    lines: number;
+    ratio: number;
+    checked: boolean;
+    propagated: boolean;
+  } | null;
+  exif_fixed?: boolean;
 };
 
 /** Metadata một sổ (ngân hàng) trong kết quả. */
@@ -413,6 +430,10 @@ export const rowMapEstimate = async (wsId: string, sheetId: string, count: numbe
   return { ...geometry, exact: false,
     bands: geometry.bands.map(band => ({ ...band, method: "estimated" as const })) };
 };
+
+/** Danh sách mặt sổ (nhẹ, không kèm kết quả quét) — hỏi lại mỗi giây khi máy còn xử lý nền. */
+export const getSheets = async (wsId: string) =>
+  asJson<Pick<Workspace, "sheets">>(await fetch(`${API}/api/ws/${wsId}/sheets`, CRED));
 
 /** Thêm sổ MẪU (dữ liệu giả lập) — chạy hết luồng mà không gọi model. */
 export const addSample = (wsId: string) =>
