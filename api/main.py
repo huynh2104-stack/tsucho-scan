@@ -528,7 +528,10 @@ def save_result(
         if not isinstance(b, dict) or not isinstance(b.get("rows"), list):
             raise HTTPException(400, "Khối dòng không đúng định dạng")
 
-    return results.save_edits(ws_id, sheet_id, blocks)
+    try:
+        return results.save_edits(ws_id, sheet_id, blocks)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @app.post("/api/ws/{ws_id}/sample")

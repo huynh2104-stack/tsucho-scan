@@ -10,10 +10,19 @@ khởi động lại server. Đó cũng chính là "lịch sử kết quả đã
 
 import json
 import os
+import secrets
+import threading
 import time
 from pathlib import Path
 
 from . import workspace
+
+# Mã định danh dòng (`rid`) dài tối đa chừng này khi client gửi lên
+RID_MAX = 32
+
+# Đọc-sửa-ghi một file kết quả (bổ sung rid, autosave) phải tuần tự: hai yêu cầu chồng nhau thì
+# yêu cầu ghi sau có thể đè mất bản sửa của yêu cầu ghi trước. Chỉ một tiến trình (xem Dockerfile).
+_LOCK = threading.RLock()
 
 
 def _dir(ws_id: str) -> Path:
@@ -35,6 +44,44 @@ def _write_atomic(path: Path, data: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def new_rid() -> str:
+    """12 ký tự hex — cùng độ dài với `newRid()` bên web."""
+    return secrets.token_hex(6)
+
+
+def ensure_rids(blocks: list[dict]) -> bool:
+    """Gán `rid` cho mọi dòng chưa có (hoặc trùng với dòng trước trong cùng mặt sổ).
+
+    `rid` là danh tính BỀN của dòng: chỉ số (khối, dòng) trượt khi xoá/thêm dòng, còn `rid` thì
+    không bao giờ đổi — nhờ đó biết "người đã soát dòng này chưa" và "máy đọc ra gì trước khi
+    bị sửa" (task 1.1). Trả về True nếu đã thêm/đổi gì đó (để người gọi biết có cần ghi lại).
+    """
+    seen: set[str] = set()
+    changed = False
+    for block in blocks:
+        for row in block.get("rows", []):
+            if not isinstance(row, dict):
+                continue
+            rid = row.get("rid")
+            if not isinstance(rid, str) or not rid or rid in seen:
+                row["rid"] = rid = new_rid()
+                changed = True
+            seen.add(rid)
+    return changed
+
+
+def validate_rows(blocks: list[dict]) -> None:
+    """Kiểm tối thiểu dữ liệu người dùng gửi lên. Mọi khoá khác của dòng được GIỮ NGUYÊN
+    (orig, reviewed, inferred…, kể cả khoá của phiên bản sau này) để không mất công soát."""
+    for block in blocks:
+        for row in block["rows"]:
+            if not isinstance(row, dict):
+                raise ValueError("Dòng không đúng định dạng")
+            rid = row.get("rid")
+            if rid is not None and (not isinstance(rid, str) or len(rid) > RID_MAX):
+                raise ValueError("Mã dòng (rid) không hợp lệ")
 
 
 def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> None:
@@ -61,18 +108,20 @@ def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> No
                 blocks.append({"meta": meta, "rows": [tx]})
 
     for sid in sheet_ids:
-        _write_atomic(
-            _path(ws_id, sid),
-            {
-                "sheet_id": sid,
-                "job_id": job_id,
-                "scanned_at": time.time(),
-                "model": payload.get("model"),
-                "cached": payload.get("cached"),
-                "cost_usd": payload.get("cost_usd"),
-                "blocks": blocks_by_sheet[sid],
-            },
-        )
+        ensure_rids(blocks_by_sheet[sid])
+        with _LOCK:
+            _write_atomic(
+                _path(ws_id, sid),
+                {
+                    "sheet_id": sid,
+                    "job_id": job_id,
+                    "scanned_at": time.time(),
+                    "model": payload.get("model"),
+                    "cached": payload.get("cached"),
+                    "cost_usd": payload.get("cost_usd"),
+                    "blocks": blocks_by_sheet[sid],
+                },
+            )
 
 
 def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
@@ -85,21 +134,24 @@ def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
     Không có hàm này thì công soát chỉ nằm trong bộ nhớ trình duyệt: F5, đăng
     xuất, hay rớt mạng là mất sạch (bug người dùng báo 31/07/2026).
     """
+    validate_rows(blocks)
+    ensure_rids(blocks)                    # client cũ chưa gửi rid thì bù ở đây
     path = _path(ws_id, sheet_id)
-    base: dict = {}
-    if path.is_file():
-        try:
-            base = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            base = {}
+    with _LOCK:
+        base: dict = {}
+        if path.is_file():
+            try:
+                base = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                base = {}
 
-    data = {
-        **base,
-        "sheet_id": sheet_id,
-        "blocks": blocks,
-        "edited_at": time.time(),
-    }
-    _write_atomic(path, data)
+        data = {
+            **base,
+            "sheet_id": sheet_id,
+            "blocks": blocks,
+            "edited_at": time.time(),
+        }
+        _write_atomic(path, data)
     return data
 
 
@@ -110,13 +162,35 @@ def load_all(ws_id: str) -> dict[str, dict]:
         return {}
     out: dict[str, dict] = {}
     for f in d.glob("*.json"):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue                      # file hỏng thì bỏ qua, không làm chết cả kho
-        if data.get("sheet_id"):
+        data = _read_with_rids(f)
+        if data and data.get("sheet_id"):
             out[data["sheet_id"]] = data
     return out
+
+
+def _read_with_rids(path: Path) -> dict | None:
+    """Đọc một file kết quả; dòng nào thiếu `rid` (file cũ) thì bổ sung rồi GHI LẠI — một lần
+    duy nhất, lần đọc sau thấy đủ rid là không ghi nữa. File hỏng thì trả None."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None                       # file hỏng thì bỏ qua, không làm chết cả kho
+    blocks = data.get("blocks")
+    if not isinstance(blocks, list) or not any(
+        isinstance(b, dict) and any(isinstance(r, dict) and not r.get("rid") for r in b.get("rows", []))
+        for b in blocks
+    ):
+        return data
+    with _LOCK:
+        # Đọc lại TRONG khoá: có thể autosave vừa ghi bản mới hơn giữa chừng, ghi đè bằng
+        # bản cũ đọc ở trên là mất công soát.
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if ensure_rids([b for b in data.get("blocks", []) if isinstance(b, dict)]):
+            _write_atomic(path, data)
+    return data
 
 
 def drop(ws_id: str, sheet_id: str) -> None:

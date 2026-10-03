@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Tx } from "./api.ts";
-import { DATE_MARK, applyDateEdit, nearDates, parseDateInput, parseYen } from "./review.ts";
+import { DATE_MARK, applyDateEdit, applyEdit, nearDates, newRid, parseDateInput, parseYen, shown } from "./review.ts";
 
 // ── parseDateInput ───────────────────────────────────────────────────
 
@@ -130,4 +130,93 @@ test("dòng ghi chú không bị tô vàng vì ngày trống", () => {
 test("nearDates bỏ qua dòng chưa có ngày hợp lệ", () => {
   const rows = [tx({ date: "2025-01-01" }), tx({ date: null }), tx({ date: "tuần sau" }), tx(), tx({ date: null })];
   assert.deepEqual(nearDates(rows, 3), { prev: "2025-01-01", next: null });
+});
+
+
+// ── Task 1.1: danh tính dòng + giá trị máy đọc ───────────────────────
+
+test("newRid: 12 ký tự hex, không trùng", () => {
+  const ids = new Set(Array.from({ length: 500 }, () => newRid()));
+  assert.equal(ids.size, 500);
+  for (const id of ids) assert.match(id, /^[0-9a-f]{12}$/);
+});
+
+test("shown: ô ngày hiện ngày ISO, không đọc được thì hiện chữ gốc; rỗng = null", () => {
+  assert.equal(shown(tx(), "date"), "2025-04-11");
+  assert.equal(shown(tx({ date: null, date_raw: "07-0?-11" }), "date"), "07-0?-11");
+  assert.equal(shown(tx({ date: null, date_raw: null }), "date"), null);
+  assert.equal(shown(tx({ description: "" }), "description"), null);
+  assert.equal(shown(tx({ balance: 0 }), "balance"), 0);
+});
+
+test("sửa ô lần đầu: nhớ giá trị MÁY ĐỌC vào orig, giữ nguyên mọi trường khác", () => {
+  const rows = [tx({ description: "ﾌﾘｺﾐ", rid: "aaaaaaaaaaaa" })];
+  const out = applyEdit(rows, 0, "description", "フリコミ");
+  assert.equal(out[0].description, "フリコミ");
+  assert.deepEqual(out[0].orig, { description: "ﾌﾘｺﾐ" });
+  assert.equal(out[0].rid, "aaaaaaaaaaaa");
+  assert.deepEqual(rows[0].orig, undefined);                          // không đụng bản gốc
+});
+
+test("sửa lần hai: orig vẫn giữ giá trị của MÁY, không phải giá trị của lần sửa trước", () => {
+  const r1 = applyEdit([tx({ balance: 1000 })], 0, "balance", 1200);
+  const r2 = applyEdit(r1, 0, "balance", 1300);
+  assert.deepEqual(r2[0].orig, { balance: 1000 });
+  assert.equal(r2[0].balance, 1300);
+});
+
+test("sửa về đúng giá trị máy thì xoá khoá khỏi orig, và bỏ hẳn orig khi hết ô nào", () => {
+  const r1 = applyEdit([tx({ balance: 1000, description: "A" })], 0, "balance", 1200);
+  const r2 = applyEdit(r1, 0, "description", "B");
+  assert.deepEqual(r2[0].orig, { balance: 1000, description: "A" });
+  const r3 = applyEdit(r2, 0, "balance", 1000);
+  assert.deepEqual(r3[0].orig, { description: "A" });
+  const r4 = applyEdit(r3, 0, "description", "A");
+  assert.equal("orig" in r4[0], false);
+});
+
+test("gõ lại đúng giá trị đang có: trả về CHÍNH mảng cũ (không tạo bước Ctrl+Z / autosave)", () => {
+  const rows = [tx({ balance: 1000, date: "2025-04-12" })];
+  assert.equal(applyEdit(rows, 0, "balance", 1000), rows);
+  assert.equal(applyEdit(rows, 0, "date", "2025/4/12"), rows);          // chuẩn hoá ra đúng ngày cũ
+  assert.equal(applyEdit(rows, 0, "date", "R7.4.12"), rows);
+  assert.equal(applyEdit([tx({ description: null })], 0, "description", null).length, 1);
+});
+
+test("ngày: orig ghi ngày máy đọc (ISO); gõ chữ vô nghĩa vẫn ghi nhớ; gõ lại ngày máy thì hết orig", () => {
+  const r1 = applyEdit([tx()], 0, "date", "tuần sau");
+  assert.deepEqual(r1[0].orig, { date: "2025-04-11" });
+  const r2 = applyEdit(r1, 0, "date", "07-04-11");                      // dạng in trên sổ = đúng ngày máy
+  assert.equal(r2[0].date, "2025-04-11");
+  assert.equal("orig" in r2[0], false);
+});
+
+test("ngày máy KHÔNG đọc được: orig ghi chữ gốc để khôi phục được", () => {
+  const rows = [tx({ date: null, date_raw: "07-0?-11" })];
+  const out = applyEdit(rows, 0, "date", "2025-04-11");
+  assert.deepEqual(out[0].orig, { date: "07-0?-11" });
+});
+
+test("dòng do người thêm không có giá trị máy ⇒ không ghi orig", () => {
+  const rows = [tx({ added: true, balance: null })];
+  const out = applyEdit(rows, 0, "balance", 500);
+  assert.equal(out[0].balance, 500);
+  assert.equal("orig" in out[0], false);
+});
+
+test("người tự gõ ô máy đã suy ra thì ô đó không còn là 'suy ra'", () => {
+  const rows = [tx({ balance: 900, inferred: ["balance"] })];
+  const out = applyEdit(rows, 0, "balance", 950);
+  assert.equal("inferred" in out[0], false);
+  assert.deepEqual(out[0].orig, { balance: 900 });
+  const giu = applyEdit([tx({ balance: 900, inferred: ["balance"] })], 0, "description", "đổi");
+  assert.deepEqual(giu[0].inferred, ["balance"]);                       // sửa ô khác thì giữ nguyên
+});
+
+test("sửa dòng nào chỉ đổi dòng đó, các dòng khác giữ nguyên tham chiếu", () => {
+  const rows = [tx({ rid: "1" }), tx({ rid: "2" }), tx({ rid: "3" })];
+  const out = applyEdit(rows, 1, "description", "mới");
+  assert.equal(out[0], rows[0]);
+  assert.equal(out[2], rows[2]);
+  assert.notEqual(out[1], rows[1]);
 });

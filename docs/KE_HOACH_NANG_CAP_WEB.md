@@ -1037,7 +1037,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
 - [x] 0.3 Năm sửa lỗi nhỏ (xong 03/10/2026)
-- [ ] 1.1 Danh tính dòng + giá trị máy đọc
+- [x] 1.1 Danh tính dòng + giá trị máy đọc (xong 03/10/2026)
 - [ ] 1.2 Một định nghĩa "cần soát"
 - [ ] 1.3 ✓ Đã soát
 - [ ] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A**
@@ -1121,6 +1121,15 @@ Quan sát khi viết E2E (không sửa):
 4. **Font cho sổ mẫu trong Docker**: *chưa* build thử được (máy không có Docker). Bằng chứng gián tiếp: `python:3.12-slim` không có font CJK; font mặc định của Pillow vẽ mọi chữ Nhật thành cùng một ô vuông (đã thử: 'サ' và '日' ra ảnh y hệt); gói Debian `fonts-ipafont-gothic` đặt `/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf` (đã tra packages.debian.org). Chọn gói IPA (nhẹ) thay vì Noto CJK; thêm vào `Dockerfile` và `api/sample.py._FONT_CANDIDATES`, có test giữ hai nơi khớp nhau. **Cần anh mở sổ mẫu trên Render sau lần deploy kế tiếp để xác nhận.**
 5. `api/exporter.py`: giữ nguyên, chỉ thêm 2 dòng chú thích "chưa được dùng ở đâu (kiểm 30/09/2026)".
 - Quan sát (không sửa): dòng có ngày không đọc được hiện vàng và vào file Excel với 要確認, nhưng bộ đếm「Còn N dòng cần soát」chưa tính nó (bộ đếm vẫn dùng định nghĩa riêng) — task 1.2 gom lại.
+
+**Sửa lỗi anh báo 03/10 (sau 0.3): gõ LẠI đúng giá trị đã chuẩn hoá thì ô không đổi.** Ví dụ ô đang là `2025-04-12`, gõ lại `2025/4/12` rồi Enter vẫn thấy `2025/4/12`; cùng lỗi với `１２３４` khi ô đã là `1,234`. Nguyên nhân: `Cell` là input không kiểm soát với `key={value}`; giá trị sau chuẩn hoá trùng giá trị cũ ⇒ key không đổi ⇒ React không vẽ lại ô. Sửa: sau mỗi lần ghi nhận, tăng một bộ đếm trong key để ô luôn dựng lại với giá trị chuẩn hoá. Thêm: gõ lại giá trị đang có không còn tạo bước Ctrl+Z hay lượt autosave rỗng (`applyEdit` trả lại đúng mảng cũ, `commitStore` bỏ qua khi không đổi). E2E bước 8 có thêm 5 lần gõ lại; đã thử gỡ bản sửa thì bước 8 đỏ đúng chỗ.
+
+**Task 1.1 — xong 03/10/2026** (pytest +9, `npm test` +11, E2E bước 10):
+- Kiểu mới trong `api.ts` (mọi trường tuỳ chọn): `Tx.rid / orig / reviewed / reviewed_at / added / inferred`, `EditField`; `row_no` sửa thành số nguyên.
+- `api/results.py`: `save_job` gán `rid` (12 hex) cho mọi dòng — sổ mẫu cũng đi qua đây; `load_all` bổ sung `rid` cho file cũ rồi ghi lại nguyên tử **đúng một lần** (lần đọc sau không ghi); `save_edits` kiểm `rid` (chuỗi ≤ 32 ký tự, sai thì HTTP 400), bù `rid` cho dòng thiếu/trùng, **giữ nguyên mọi khoá khác** kể cả khoá lạ của phiên bản sau. Thêm khoá `RLock` quanh đọc-sửa-ghi: nếu không thì lần bổ sung `rid` trong `load_all` có thể đè mất bản autosave vừa ghi giữa chừng.
+- `web/src/lib/review.ts`: `applyEdit` (đường sửa ô DUY NHẤT: ngày → ISO, ghi `orig` lần đầu sửa ô, xoá khỏi `orig` khi sửa về đúng giá trị máy, bỏ nhãn `inferred` của ô người đã tự gõ, trả đúng mảng cũ nếu không đổi), `newRid` (dùng `getRandomValues`, không dùng `randomUUID`), `shown`. `page.tsx`: `editCell` gọi `applyEdit`; `addRow` đặt `rid` + `added: true`; `autoBalance` ghi `inferred: ["balance"]` và không tạo bước hoàn tác khi chẳng suy được ô nào.
+- Với ô ngày, `orig.date` ghi **giá trị đang hiện** (ngày ISO của máy, hoặc chữ gốc nếu máy không đọc được ngày) để sau này khôi phục được cả hai trường `date`/`date_raw`.
+- Chưa đổi hành vi hiển thị (đúng như kế hoạch). `applyDateEdit` của 0.3 vẫn đang gắn `status/reason` cho ngày hỏng — 1.2 chuyển sang suy ra để giao diện không bao giờ sửa hai trường này.
 
 ---
 

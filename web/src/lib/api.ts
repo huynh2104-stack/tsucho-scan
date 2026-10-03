@@ -90,6 +90,17 @@ export type Workspace = {
   results?: ResultStore;
 };
 
+/** Các ô người dùng sửa được trong một dòng (thứ tự cột trên màn hình). */
+export type EditField =
+  | "date"
+  | "kind"
+  | "description"
+  | "extra_text"
+  | "store_code"
+  | "amount_out"
+  | "amount_in"
+  | "balance";
+
 export type Tx = {
   date: string | null;
   date_raw: string | null;
@@ -103,8 +114,22 @@ export type Tx = {
   status: "ok" | "fixed" | "check" | "note";
   reason?: string;
   is_note?: boolean;
-  row_no?: string | null;
+  /** Số thứ tự dòng IN trên sổ (số nguyên). */
+  row_no?: number | null;
   sheet_id: string | null;
+  /* ── Công soát của người dùng (task 1.1). `status`/`reason` ở trên là dữ kiện của MÁY
+     và giao diện không bao giờ sửa chúng; mọi thứ dưới đây là phần người dùng thêm vào. ── */
+  /** Danh tính bền của dòng: 12 ký tự hex, sinh một lần, không bao giờ đổi. */
+  rid?: string;
+  /** Giá trị MÁY ĐỌC của những ô đã bị sửa (chỉ ô đang khác máy; sửa về đúng máy thì xoá khoá). */
+  orig?: Partial<Record<EditField, string | number | null>>;
+  /** Người đã xác nhận dòng này (bấm ✓). */
+  reviewed?: boolean;
+  reviewed_at?: number;
+  /** Dòng do người thêm (không có giá trị máy). */
+  added?: boolean;
+  /** Ô do máy SUY RA (vd「Tự tính số dư」), không phải số in trên sổ. */
+  inferred?: EditField[];
 };
 
 export type Account = {

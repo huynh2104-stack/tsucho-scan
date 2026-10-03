@@ -7,7 +7,7 @@
  * Nhật ("１２３４") bị xoá thành rỗng mà không báo gì.
  */
 
-import type { Tx } from "./api.ts";
+import type { EditField, Tx } from "./api.ts";
 
 // ── Ngày ─────────────────────────────────────────────────────────────
 
@@ -165,6 +165,71 @@ export function applyDateEdit(rows: Tx[], index: number, input: string): Tx {
     status: "check",
     reason: [...rest, DATE_MARK].join(SEP),
   };
+}
+
+
+// ── Danh tính dòng & giá trị máy đọc (task 1.1) ──────────────────────
+
+/** 12 ký tự hex. KHÔNG dùng `crypto.randomUUID()`: nó chỉ có ở ngữ cảnh an toàn (HTTPS/localhost),
+ *  còn mở app qua `http://<IP-LAN>` (thử trên điện thoại) thì `getRandomValues` vẫn dùng được. */
+export function newRid(): string {
+  const b = new Uint8Array(6);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(b);
+  } else {
+    for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+type Cellish = string | number | null | undefined;
+const norm = (v: Cellish) => (v === "" || v === undefined ? null : v);
+
+/** Giá trị đang HIỆN trên ô `f` của dòng. Ô ngày hiện `date`, không đọc được thì hiện chữ gốc. */
+export function shown(tx: Tx, f: EditField): string | number | null {
+  return norm(f === "date" ? (tx.date ?? tx.date_raw) : tx[f]);
+}
+
+/** Sau khi ô `f` vừa bị sửa (`before` → `after`): ghi giá trị MÁY ĐỌC vào `orig` lần đầu sửa ô
+ *  đó, xoá khỏi `orig` nếu người dùng sửa về đúng giá trị máy, và bỏ nhãn "máy suy ra" của ô
+ *  đó (người đã tự gõ thì không còn là số suy ra). Dòng do người thêm không có giá trị máy. */
+function noteEdit(before: Tx, after: Tx, f: EditField): Tx {
+  const was = shown(before, f);
+  const now = shown(after, f);
+  if (was === now) return after;
+  const out: Tx = { ...after };
+  if (!before.added) {
+    const orig = { ...(before.orig ?? {}) };
+    if (!(f in orig)) orig[f] = was;
+    if (norm(orig[f]) === now) delete orig[f];
+    if (Object.keys(orig).length) out.orig = orig;
+    else delete out.orig;
+  }
+  if (out.inferred?.includes(f)) {
+    const rest = out.inferred.filter((x) => x !== f);
+    if (rest.length) out.inferred = rest;
+    else delete out.inferred;
+  }
+  return out;
+}
+
+/**
+ * Người dùng sửa ô `field` của dòng `index` thành `value` (chuỗi đã gõ, hoặc số cho ô tiền).
+ * Trả về mảng dòng MỚI, hoặc CHÍNH mảng `rows` nếu không có gì đổi — để chỗ gọi khỏi tạo
+ * bước Ctrl+Z / lượt autosave rỗng khi người dùng gõ lại đúng giá trị đang có.
+ */
+export function applyEdit(
+  rows: Tx[],
+  index: number,
+  field: EditField,
+  value: string | number | null,
+): Tx[] {
+  const before = rows[index];
+  const edited: Tx =
+    field === "date" ? applyDateEdit(rows, index, String(value ?? "")) : ({ ...before, [field]: value } as Tx);
+  const after = noteEdit(before, edited, field);
+  if (JSON.stringify(after) === JSON.stringify(before)) return rows;
+  return rows.map((t, i) => (i === index ? after : t));
 }
 
 // ── Số tiền ──────────────────────────────────────────────────────────

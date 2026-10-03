@@ -27,6 +27,7 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     (cần bộ đọc chữ cục bộ RapidOCR; thiếu thì bước này báo SKIP)
   8 gõ ngày kiểu 2025/4/12, ngày vô nghĩa, số toàn góc ０１２３, ▲500 → xuất Excel không lỗi
   9 trình duyệt tiếng Nhật mở lần đầu → giao diện tiếng Nhật; tiếng Pháp → tiếng Anh
+ 10 mỗi dòng có rid; ô đã sửa nhớ giá trị máy đọc (orig); F5 rồi sửa ô khác vẫn không mất orig
 """
 from __future__ import annotations
 
@@ -313,6 +314,15 @@ def step_manual_input(pg, base: str, ctx: dict) -> str:
                "dòng có ngày không đọc được chuyển sang vàng")
     type_into(money_cell(1, 0), "１２３４")
     wait_until(lambda: money_cell(1, 0).input_value() == "1,234", "số toàn góc １２３４ thành 1,234")
+    # Lỗi người dùng báo 03/10: gõ LẠI đúng giá trị đã chuẩn hoá thì ô giữ nguyên chữ vừa gõ
+    type_into(date_cell(1), "2025/4/12")
+    wait_until(lambda: date_cell(1).input_value() == "2025-04-12", "gõ lại 2025/4/12 phải ra lại 2025-04-12")
+    type_into(date_cell(1), "R7.4.12")
+    wait_until(lambda: date_cell(1).input_value() == "2025-04-12", "gõ lại bằng niên hiệu cũng ra 2025-04-12")
+    type_into(money_cell(1, 0), "１２３４")
+    wait_until(lambda: money_cell(1, 0).input_value() == "1,234", "gõ lại １２３４ phải ra lại 1,234")
+    type_into(money_cell(1, 0), "1234円")
+    wait_until(lambda: money_cell(1, 0).input_value() == "1,234", "gõ 1234円 phải ra 1,234")
     before = money_cell(3, 0).input_value()
     type_into(money_cell(3, 0), "▲500")
     wait_until(lambda: money_cell(3, 0).get_attribute("data-invalid") == "1", "ô báo đỏ khi gõ ▲500")
@@ -348,6 +358,42 @@ def step_language_from_browser(pg, base: str, ctx: dict) -> str:
     return ", ".join(seen)
 
 
+def sample_rows(pg, base: str) -> list[dict]:
+    """Các dòng của mặt sổ mẫu 1 theo SERVER (kết quả đã lưu)."""
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+    data = pg.request.get(f"{base}/api/ws/{ws_id}").json()
+    sheet = next(s for s in data["sheets"] if s["name"] == SAMPLE_SHEET_NAME)
+    return data["results"][sheet["id"]]["blocks"][0]["rows"]
+
+
+def step_orig_survives_reload(pg, base: str, ctx: dict) -> str:
+    """Task 1.1: dòng có rid bền; ô đã sửa nhớ giá trị MÁY ĐỌC; F5 rồi autosave lại cả mặt sổ
+    cũng không làm mất chúng (client không được làm rơi khoá lạ)."""
+    wait_until(lambda: (sample_rows(pg, base)[1].get("orig") or {}).get("date") == "2025-04-11",
+               "server đã lưu orig của dòng 1 (autosave)", timeout=15)
+    truoc = sample_rows(pg, base)
+    rids = [r["rid"] for r in truoc]
+    assert all(re.fullmatch(r"[0-9a-f]{12}", x) for x in rids) and len(set(rids)) == len(rids), rids
+    assert truoc[1]["orig"] == {"date": "2025-04-11", "amount_out": 1100}, truoc[1].get("orig")
+    assert truoc[2]["orig"] == {"date": "2025-04-11"}, truoc[2].get("orig")
+
+    pg.reload()
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.click(timeout=15000)
+    pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+    cell = pg.locator("tr[data-row]").nth(5).locator("input[data-cell]").nth(3)     # 摘要 của dòng 5
+    goc = cell.input_value()
+    cell.click()
+    cell.press("Control+a")
+    cell.type("ĐÃ SỬA")
+    cell.press("Enter")
+    wait_until(lambda: (sample_rows(pg, base)[5].get("orig") or {}).get("description") == goc,
+               "server lưu orig của ô vừa sửa sau F5", timeout=15)
+    sau = sample_rows(pg, base)
+    assert [r["rid"] for r in sau] == rids, "rid đổi sau F5 + autosave"
+    assert sau[1]["orig"] == truoc[1]["orig"] and sau[2]["orig"] == truoc[2]["orig"], "mất orig sau F5"
+    return f"{len(rids)} dòng có rid bền; orig còn nguyên sau F5; dòng 5 nhớ máy đọc {goc!r}"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -358,6 +404,7 @@ STEPS = [
     ("7. Tải PDF sai chiều → tự xoay đúng", step_upload_rotated_pdf),
     ("8. Gõ ngày/số kiểu lạ → Excel không lỗi", step_manual_input),
     ("9. Ngôn ngữ theo trình duyệt", step_language_from_browser),
+    ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

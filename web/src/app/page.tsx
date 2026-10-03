@@ -49,7 +49,7 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { applyDateEdit } from "@/lib/review";
+import { applyEdit, newRid } from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
 import DropZone from "@/components/DropZone";
@@ -702,10 +702,12 @@ export default function Workbench() {
   ) => {
     commitStore((prev) => {
       const data = prev[sheetId];
-      if (!data) return prev;
-      const blocks = data.blocks.map((b, bi) =>
-        bi === blockIndex ? { ...b, rows: fn(b.rows) } : b,
-      );
+      const cur = data?.blocks[blockIndex];
+      if (!data || !cur) return prev;
+      const rows = fn(cur.rows);
+      // fn trả lại đúng mảng cũ = không có gì đổi: đừng tạo bước Ctrl+Z hay lượt autosave rỗng
+      if (rows === cur.rows) return prev;
+      const blocks = data.blocks.map((b, bi) => (bi === blockIndex ? { ...b, rows } : b));
       return { ...prev, [sheetId]: { ...data, blocks } };
     });
   };
@@ -734,11 +736,11 @@ export default function Workbench() {
 
   /** Thay kho do NGƯỜI DÙNG sửa → có vào lịch sử Ctrl+Z. */
   const commitStore = (next: (prev: ResultStore) => ResultStore) =>
-    setHist((h) => ({
-      past: [...h.past.slice(-49), h.present],
-      present: next(h.present),
-      future: [],
-    }));
+    setHist((h) => {
+      const present = next(h.present);
+      if (present === h.present) return h;       // không đổi gì thì không ghi vào lịch sử
+      return { past: [...h.past.slice(-49), h.present], present, future: [] };
+    });
 
   /** Đồng bộ kết quả từ server. GỘP chứ không ghi đè, và KHÔNG vào lịch sử.
    *
@@ -822,15 +824,9 @@ export default function Workbench() {
 
   /** Sửa một ô. Autosave ở trên sẽ đẩy lên server ngay sau đó. */
   const editCell: EditFn = (ref, field, value) =>
-    patchRows(ref.sheet, ref.block, (rows) =>
-      rows.map((tx, i) => {
-        if (i !== ref.row) return tx;
-        // Ngày gõ tay phải được đổi sang ISO (hoặc đánh dấu "không đọc được"): lưu nguyên chuỗi
-        // thì xuất Excel lỗi. Xem lib/review.ts.
-        if (field === "date") return applyDateEdit(rows, i, String(value ?? ""));
-        return { ...tx, [field]: value } as Tx;
-      }),
-    );
+    // Toàn bộ luật nằm ở lib/review.ts (có test): ngày gõ tay đổi sang ISO, nhớ giá trị MÁY ĐỌC
+    // vào `orig`, và trả lại đúng mảng cũ nếu không có gì đổi (gõ lại giá trị đang có).
+    patchRows(ref.sheet, ref.block, (rows) => applyEdit(rows, ref.row, field, value));
 
   /** Xoá một dòng (có hỏi lại) — dùng khi model đọc thừa một dòng. */
   const deleteRow: RowActionFn = (ref) =>
@@ -848,6 +844,8 @@ export default function Workbench() {
     patchRows(ref.sheet, ref.block, (rows) => [
       ...rows,
       {
+        rid: newRid(),
+        added: true,           // không có giá trị máy đọc; cần người xác nhận
         date: null,
         date_raw: null,
         kind: null,
@@ -867,15 +865,19 @@ export default function Workbench() {
   const autoBalance = (sheetId: string, blockIndex: number) =>
     patchRows(sheetId, blockIndex, (rows) => {
       let running: number | null = null;
-      return rows.map((tx) => {
+      let changed = false;
+      const out = rows.map((tx) => {
         if (tx.balance != null) {
           running = tx.balance;
           return tx;
         }
         if (running == null || tx.is_note) return tx;
         running = running - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
-        return { ...tx, balance: running };
+        changed = true;
+        // `inferred`: số này do máy SUY RA, không phải số in trên sổ — Excel phải phân biệt được
+        return { ...tx, balance: running, inferred: [...(tx.inferred ?? []), "balance" as const] };
       });
+      return changed ? out : rows;           // không suy được ô nào thì không tạo bước Ctrl+Z
     });
 
   /* Phím tắt toàn cục.

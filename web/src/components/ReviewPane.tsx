@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
 import { parseYen } from "@/lib/review";
-import type { AccountMeta, ResultStore, Sheet, Tx } from "@/lib/api";
+import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
 
@@ -27,7 +27,7 @@ export type ViewMode = "page" | "list";
 
 /** Địa chỉ một dòng trong kho: mặt sổ nào, khối nào, dòng thứ mấy. */
 export type TxRef = { sheet: string; block: number; row: number };
-export type EditFn = (ref: TxRef, field: keyof Tx, value: string | number | null) => void;
+export type EditFn = (ref: TxRef, field: EditField, value: string | number | null) => void;
 export type RowActionFn = (ref: TxRef) => void;
 
 /** Cột 検算 tính LẠI từ dữ liệu đang hiển thị — sửa ô là đổi ngay. */
@@ -205,9 +205,14 @@ function Cell({
   /** Trả `false` = từ chối giá trị: ô quay về giá trị cũ và nháy đỏ một lúc. */
   onCommit: (v: string) => void | boolean;
 }) {
+  /* Sau MỖI lần ghi nhận giá trị phải dựng lại ô (tăng `rev` đổi `key`). Ô là input không kiểm
+     soát (`defaultValue`), nên nếu giá trị sau chuẩn hoá TRÙNG giá trị đang hiện — gõ lại
+     "2025/4/12" khi ô đã là "2025-04-12", gõ "１２３４" khi ô đã là "1,234" — thì `key={value}`
+     không đổi, React không vẽ lại ô và nó giữ nguyên chữ vừa gõ như thể chưa làm gì. */
+  const [rev, setRev] = useState(0);
   return (
     <input
-      key={value}
+      key={`${value}|${rev}`}
       data-cell
       data-money={money ? "" : undefined}
       readOnly={readOnly}
@@ -225,6 +230,8 @@ function Cell({
             delete el.dataset.invalid;
             el.title = "";
           }, 2500);
+        } else {
+          setRev((r) => r + 1);     // ô được dựng lại với giá trị chuẩn hoá mới nhất
         }
       }}
       onKeyDown={(e) => {
@@ -333,7 +340,7 @@ function Row({
           `readOnly` + con trỏ mặc định → nhìn và cư xử y như ô chữ thường. */}
       <td className="w-8 border-r border-rule2 bg-card2 px-0.5">
         <Cell
-          value={tx.row_no || String(n).padStart(2, "0")}
+          value={tx.row_no != null ? String(tx.row_no).padStart(2, "0") : String(n).padStart(2, "0")}
           align="center"
           readOnly
           picked={on(cRow)}
