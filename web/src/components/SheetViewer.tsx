@@ -870,6 +870,33 @@ export default function SheetViewer({
         </div>
       </div>
 
+      {/* Máy đã tự chỉnh ảnh lúc nhập file: nói rõ đã làm gì và cho hoàn tác ngay tại đây */}
+      {sheet.auto && (sheet.auto.rotate !== 0 || sheet.auto.cropped) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-accentpale/60 px-3 py-1.5">
+          <span className="text-[12px] font-semibold text-accent">
+            ✨{" "}
+            {[
+              sheet.auto.rotate
+                ? t.autoRotated(sheet.auto.rotate > 180 ? sheet.auto.rotate - 360 : sheet.auto.rotate)
+                : "",
+              sheet.auto.cropped ? t.autoCropped : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          <span className="flex-1" />
+          <Tool onClick={() => { clearPreview(); onUndo(); }} disabled={busy || !sheet.undo} title={t.undo}>
+            ↶ {t.undo}
+          </Tool>
+        </div>
+      )}
+      {sheet.auto && !sheet.auto.sure && sheet.auto.detected !== 0 && sheet.auto.rotate === 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
+          <span className="text-[12px] font-semibold text-warnink">⚠ {t.autoUnsureBadge}</span>
+          <span className="text-[11.5px] text-warnink/90">{t.autoUnsure}</span>
+        </div>
+      )}
+
       {/* Kết quả cũ không còn khớp ảnh — phải nói ra, nếu không người dùng xuất
           file từ kết quả của một tấm ảnh khác mà không biết. */}
       {stale && (

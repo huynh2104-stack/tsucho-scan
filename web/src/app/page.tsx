@@ -16,7 +16,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   addSample,
-  addSheets,
+  addSheetsWithProgress,
+  autoprepSheets,
   adjustSheets,
   buildAccounts,
   createWorkspace,
@@ -62,6 +63,8 @@ import ReviewPane, {
   type ViewMode,
 } from "@/components/ReviewPane";
 import ExportDialog, { type ExportOpts } from "@/components/ExportDialog";
+import ImportProgress, { type PendingUpload } from "@/components/ImportProgress";
+import SheetBusy from "@/components/SheetBusy";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 const WS_KEY = "tsucho.ws";
@@ -155,6 +158,19 @@ export default function Workbench() {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanEvent | null>(null);
   const [busy, setBusy] = useState(false);
+  /* Nhập file: thẻ TẠM hiện ngay lúc thả (kèm % tải lên), và các mặt sổ của đợt nhập đang
+     được máy xử lý nền (để vẽ "k/n trang"). */
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [batch, setBatch] = useState<string[]>([]);
+  // Tự xoay & cắt gọn khi nhập: BẬT sẵn, tắt được; nhớ trong trình duyệt (đọc sau hydrate)
+  const [autoPrep, setAutoPrep] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("tsucho.autoprep") === "0") setAutoPrep(false);
+    } catch {
+      /* trình duyệt chặn localStorage: dùng mặc định */
+    }
+  }, []);
   /* Lỗi giữ ở dạng CÓ CẤU TRÚC (mã + tên mặt sổ), không giữ câu đã dịch sẵn.
      Giữ câu dịch sẵn thì đổi ngôn ngữ giữa chừng, dòng đỏ vẫn nằm nguyên tiếng
      cũ — chính là lỗi người dùng báo. Câu chữ được dựng lúc VẼ, nên đổi ngôn
@@ -252,9 +268,15 @@ export default function Workbench() {
 
   /* Mặt sổ mới nhập còn được máy xử lý NỀN (tách trang PDF, tự xoay/cắt gọn): hỏi lại mỗi giây
      tới khi xong. Chỉ thay danh sách mặt sổ, không đụng kết quả người dùng đang sửa. */
-  const hasBusy = sheets.some(
+  const busySheets = sheets.filter(
     (s) => s.status === "queued" || s.status === "rendering" || s.status === "analyzing",
   );
+  const hasBusy = busySheets.length > 0;
+  // Đợt nhập hiện tại: những mặt vừa thêm mà còn tồn tại; F5 giữa chừng thì chỉ còn đếm mặt đang làm
+  const batchTotal = Math.max(batch.filter((id) => sheets.some((s) => s.id === id)).length, busySheets.length);
+  useEffect(() => {
+    if (batch.length > 0 && !hasBusy) setBatch([]);
+  }, [batch, hasBusy]);
   useEffect(() => {
     const id = ws?.id;
     if (!id || !hasBusy) return;
@@ -354,16 +376,37 @@ export default function Workbench() {
     }
   };
 
-  /** Tải file lên. `beforeId` = chèn NGAY TRƯỚC mặt sổ đó (thả vào giữa danh sách). */
+  /** Tải file lên. `beforeId` = chèn NGAY TRƯỚC mặt sổ đó (thả vào giữa danh sách).
+   *
+   * Thẻ tạm kèm thanh tiến độ hiện NGAY lúc thả file; máy chủ trả lời ngay khi nhận đủ file
+   * (phần nặng chạy nền), rồi `hasBusy` ở trên lo việc hỏi lại tiến độ. */
   const upload = useCallback(
     async (files: File[], beforeId?: string) => {
       if (!ws) return;
       const ok = files.filter((f) => /\.(jpe?g|png|webp|pdf)$/i.test(f.name));
       if (ok.length === 0) return;
-      setBusy(true);
       setErr(null);
+      const pend: PendingUpload[] = ok.map((f) => ({
+        key: Math.random().toString(36).slice(2),
+        name: f.name,
+        size: f.size,
+        pct: 0,
+      }));
+      setUploads((prev) => [...prev, ...pend]);
+      const sum = pend.reduce((n, u) => n + u.size, 0) || 1;
       try {
-        const created = await addSheets(ws.id, ok);
+        const created = await addSheetsWithProgress(ws.id, ok, autoPrep, (sent, all) => {
+          const bytes = (sent / Math.max(1, all)) * sum;   // bỏ phần đệm của multipart
+          setUploads((prev) =>
+            prev.map((u) => {
+              const i = pend.findIndex((x) => x.key === u.key);
+              if (i < 0) return u;
+              const from = pend.slice(0, i).reduce((n, x) => n + x.size, 0);
+              const pct = Math.round(((bytes - from) / Math.max(1, u.size)) * 100);
+              return { ...u, pct: Math.max(0, Math.min(100, pct)) };
+            }),
+          );
+        });
         const added = created.added;
         let next: Workspace = created;
 
@@ -385,15 +428,38 @@ export default function Workbench() {
         if (added.length) {
           setActive(added[0]);
           setTicked((prev) => new Set([...prev, ...added]));
+          setBatch((prev) => [...prev, ...added]);
+        }
+        // Có file hỏng trong lô: các file tốt vẫn vào, file xấu báo ở đây
+        if (created.errors?.length) {
+          setErr({ text: created.errors.map((e) => e.message).join(" · ") });
         }
       } catch (e) {
         setErr({ text: e instanceof Error ? e.message : String(e) });
       } finally {
-        setBusy(false);
+        setUploads((prev) => prev.filter((u) => !pend.some((x) => x.key === u.key)));
       }
     },
-    [ws],
+    [ws, autoPrep],
   );
+
+  /** Cho máy tự xoay + cắt gọn các mặt sổ đang tích chọn (mặt đã quét bị bỏ qua). */
+  const runAutoprep = async () => {
+    if (!ws) return;
+    const ids = tickedIds().filter(
+      (id) => (sheets.find((s) => s.id === id)?.status ?? "ready") === "ready",
+    );
+    if (ids.length === 0) return;
+    setErr(null);
+    try {
+      const r = await autoprepSheets(ws.id, ids);
+      setWs(r);
+      if (r.queued.length) setBatch((prev) => [...prev, ...r.queued]);
+      if (r.skipped.length) setErr({ text: t.autoSkipped(r.skipped.length) });
+    } catch (e) {
+      setErr({ text: e instanceof Error ? e.message : String(e) });
+    }
+  };
 
   const toggle = (id: string) => {
     setTicked((prev) => {
@@ -950,7 +1016,26 @@ export default function Workbench() {
           }`}
         >
           <div data-tour="drop">
-            <DropZone busy={busy} onFiles={(f) => void upload(f)} />
+            <DropZone busy={false} onFiles={(f) => void upload(f)} />
+          </div>
+
+          {/* Công tắc tự xoay & cắt gọn — bật sẵn */}
+          <div className="flex items-center gap-2 px-3 pb-2" title={t.autoPrepToggleHint}>
+            <Tick
+              on={autoPrep}
+              size={15}
+              title={t.autoPrepToggleHint}
+              onClick={() => {
+                const v = !autoPrep;
+                setAutoPrep(v);
+                try {
+                  localStorage.setItem("tsucho.autoprep", v ? "1" : "0");
+                } catch {
+                  /* không nhớ được cũng không sao */
+                }
+              }}
+            />
+            <span className="text-[11.5px] leading-snug text-ink2">✨ {t.autoPrepToggle}</span>
           </div>
 
           {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
@@ -985,7 +1070,7 @@ export default function Workbench() {
             </div>
           )}
 
-          <div className="flex items-center gap-2 border-y border-rule bg-card2 px-3 py-2">
+          <div className="flex items-center gap-1.5 border-y border-rule bg-card2 px-2.5 py-2">
             <Tick
               on={allTicked}
               title={t.selectAll}
@@ -993,7 +1078,7 @@ export default function Workbench() {
                 setTicked(allTicked ? new Set() : new Set(sheets.map((s) => s.id)))
               }
             />
-            <span className="tnum text-[12px] font-semibold">
+            <span className="tnum whitespace-nowrap text-[12px] font-semibold">
               {t.chosen(ticked.size)}
             </span>
             <span className="flex-1" />
@@ -1027,11 +1112,20 @@ export default function Workbench() {
                 </svg>
               </button>
             )}
+            {ticked.size > 0 && (
+              <button
+                onClick={() => void runAutoprep()}
+                title={t.autoPrepBtn}
+                className="rounded-md px-1 py-1 text-[13px] leading-none hover:bg-accentpale/70"
+              >
+                ✨
+              </button>
+            )}
             <button
               data-tour="scan"
               onClick={() => void runScan(tickedIds())}
               disabled={scanning || ticked.size === 0}
-              className="flex items-center gap-1 rounded-lg border border-accent bg-accent px-2.5 py-1 text-[12px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
+              className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-accent bg-accent px-2.5 py-1 text-[12px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
             >
               {scanning ? (
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
@@ -1049,6 +1143,12 @@ export default function Workbench() {
           </div>
 
           <div data-tour="rail" className="thin-scroll min-h-0 flex-1 overflow-auto">
+            <ImportProgress
+              uploads={uploads}
+              done={batchTotal - busySheets.length}
+              total={batchTotal}
+              stage={busySheets[0]?.status}
+            />
             <SheetRail
               wsId={ws?.id ?? ""}
               sheets={sheets}
@@ -1095,6 +1195,22 @@ export default function Workbench() {
             pane === "image" ? "block" : "hidden"
           }`}
         >
+          {activeSheet && activeSheet.status && activeSheet.status !== "ready" ? (
+            <SheetBusy
+              sheet={activeSheet}
+              onDelete={() => {
+                if (!ws || !active) return;
+                const id = active;
+                setActive(null);
+                setTicked((p) => {
+                  const n = new Set(p);
+                  n.delete(id);
+                  return n;
+                });
+                void guard(() => deleteSheet(ws.id, id));
+              }}
+            />
+          ) : (
           <SheetViewer
             wsId={ws?.id ?? ""}
             sheet={activeSheet}
@@ -1151,6 +1267,7 @@ export default function Workbench() {
             highlightSpan={bands ? { x0: bands.x0, x1: bands.x1 } : null}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
           />
+          )}
         </section>
 
         {/* ── Cột phải: kết quả ──────────────────────────────── */}

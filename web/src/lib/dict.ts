@@ -122,6 +122,33 @@ export const DICT = {
     stScanning: "Đang quét",
     stSkipped: "Bỏ qua",
     stFailed: "Không quét được",
+    // ── Nhập file thông minh: tiến độ, trạng thái, tự xoay/cắt ──
+    uploadingFile: (pct: number) => `Đang tải lên… ${pct}%`,
+    uploadPreparing: "Đang chuẩn bị…",
+    importProgress: (done: number, total: number) => `Đang xử lý ${done}/${total} trang`,
+    stQueued: "Đang chờ xử lý",
+    stRendering: "Đang tách trang…",
+    stAnalyzing: "Đang kiểm tra hướng…",
+    stImportFailed: "Nhập không được",
+    importFailedMsg: (code: string) =>
+      code === "interrupted"
+        ? "Bị gián đoạn giữa chừng (máy chủ khởi động lại). Hãy xoá mặt sổ này rồi tải lại file."
+        : code === "decode"
+          ? "Không đọc được ảnh này. Hãy thử file khác."
+          : "Không xử lý được trang này. Hãy xoá mặt sổ này rồi tải lại file.",
+    sheetProcessing: "Đang xử lý mặt sổ này…",
+    sheetProcessingHint:
+      "Máy đang tách trang, kiểm tra hướng và cắt gọn. Xong là ảnh hiện ra ngay.",
+    autoPrepToggle: "Tự xoay & cắt gọn khi nhập file",
+    autoPrepToggleHint:
+      "Mặt sổ vừa nhập được máy tự xoay cho chữ đứng và cắt bỏ phần trắng thừa. Hoàn tác được một lần.",
+    autoPrepBtn: "Tự xoay & cắt gọn các mặt đã chọn",
+    autoSkipped: (n: number) => `${n} mặt đã quét nên bỏ qua (ảnh đổi thì phải quét lại).`,
+    autoRotated: (deg: number) => `Đã tự xoay ${deg}°`,
+    autoCropped: "đã cắt gọn",
+    autoUnsureBadge: "Chưa chắc hướng",
+    autoUnsure:
+      "Máy chưa chắc hướng của trang này. Nếu chữ đang nằm ngang hoặc lộn ngược, hãy tự xoay.",
     stNeedCheck: (n: number) => `${n} dòng cần soát`,
     stNoRows: "Không có giao dịch",
 
@@ -403,6 +430,33 @@ export const DICT = {
     stScanning: "Scanning",
     stSkipped: "Skipped",
     stFailed: "Scan failed",
+    // ── Smart import: progress, status, auto-rotate/trim ──
+    uploadingFile: (pct: number) => `Uploading… ${pct}%`,
+    uploadPreparing: "Preparing…",
+    importProgress: (done: number, total: number) => `Processing ${done}/${total} pages`,
+    stQueued: "Queued",
+    stRendering: "Rendering page…",
+    stAnalyzing: "Checking orientation…",
+    stImportFailed: "Import failed",
+    importFailedMsg: (code: string) =>
+      code === "interrupted"
+        ? "Interrupted midway (the server restarted). Delete this page and upload the file again."
+        : code === "decode"
+          ? "This image could not be read. Try another file."
+          : "This page could not be processed. Delete it and upload the file again.",
+    sheetProcessing: "Processing this page…",
+    sheetProcessingHint:
+      "Splitting the page, checking orientation and trimming. The image appears as soon as it is done.",
+    autoPrepToggle: "Auto-rotate & trim on import",
+    autoPrepToggleHint:
+      "New pages are turned upright and empty margins are trimmed automatically. One-step undo.",
+    autoPrepBtn: "Auto-rotate & trim selected pages",
+    autoSkipped: (n: number) => `${n} scanned page(s) skipped (changing the image means re-scanning).`,
+    autoRotated: (deg: number) => `Auto-rotated ${deg}°`,
+    autoCropped: "trimmed",
+    autoUnsureBadge: "Orientation unsure",
+    autoUnsure:
+      "Not sure which way this page faces. If the text is sideways or upside down, rotate it manually.",
     stNeedCheck: (n: number) => `${n} to review`,
     stNoRows: "No transactions",
 
@@ -679,6 +733,34 @@ export const DICT = {
     stScanning: "読取り中",
     stSkipped: "スキップ",
     stFailed: "読取不可",
+    // ── スマート取込：進捗・状態・自動回転/切り抜き ──
+    uploadingFile: (pct: number) => `アップロード中… ${pct}%`,
+    uploadPreparing: "準備中…",
+    importProgress: (done: number, total: number) => `処理中 ${done}/${total} 面`,
+    stQueued: "処理待ち",
+    stRendering: "ページを展開中…",
+    stAnalyzing: "向きを確認中…",
+    stImportFailed: "取込失敗",
+    importFailedMsg: (code: string) =>
+      code === "interrupted"
+        ? "途中で中断されました（サーバーが再起動）。この面を削除して、ファイルを取り込み直してください。"
+        : code === "decode"
+          ? "この画像を読み込めません。別のファイルをお試しください。"
+          : "この面を処理できませんでした。削除して、ファイルを取り込み直してください。",
+    sheetProcessing: "この面を処理中…",
+    sheetProcessingHint:
+      "ページの展開・向きの確認・余白の切り抜きを行っています。終わり次第、画像が表示されます。",
+    autoPrepToggle: "取込時に自動で回転・切り抜き",
+    autoPrepToggleHint:
+      "取り込んだ面の向きを自動で直し、余白を切り抜きます。1回で元に戻せます。",
+    autoPrepBtn: "選択した面を自動で回転・切り抜き",
+    autoSkipped: (n: number) =>
+      `${n} 面はスキャン済みのためスキップしました（画像を変えると再スキャンが必要です）。`,
+    autoRotated: (deg: number) => `${deg}°自動回転`,
+    autoCropped: "余白を切り抜き済",
+    autoUnsureBadge: "向き未確認",
+    autoUnsure:
+      "この面の向きを判定できませんでした。文字が横向き・逆さの場合は手動で回転してください。",
     stNeedCheck: (n: number) => `要確認 ${n} 行`,
     stNoRows: "取引なし",
 

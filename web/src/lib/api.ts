@@ -306,6 +306,52 @@ export async function addSheets(wsId: string, files: File[]) {
   );
 }
 
+/** Kết quả tải lên: danh sách mặt sổ vừa lập (còn "queued") + lỗi từng file hỏng. */
+export type UploadResult = Workspace & {
+  added: string[];
+  errors: { file: string; message: string }[];
+};
+
+/** Tải file lên CÓ TIẾN ĐỘ. `fetch` không báo được số byte đã gửi nên dùng XMLHttpRequest.
+ *
+ *  Máy chủ trả lời ngay sau khi nhận đủ file (việc tách trang, tự xoay/cắt chạy nền), nên
+ *  thanh tiến độ này chính là toàn bộ thời gian người dùng phải chờ trước khi thấy các thẻ
+ *  mặt sổ. `auto=false` tắt bước tự xoay/cắt. */
+export function addSheetsWithProgress(
+  wsId: string,
+  files: File[],
+  auto: boolean,
+  onProgress: (sent: number, total: number) => void,
+): Promise<UploadResult> {
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API}/api/ws/${wsId}/sheets?auto=${auto ? "true" : "false"}`);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.onload = () => {
+      // Dựng lại thành Response để dùng chung cách báo lỗi (401, mã lỗi…) với mọi lời gọi khác
+      const res = new Response(xhr.responseText, {
+        status: xhr.status,
+        headers: { "Content-Type": xhr.getResponseHeader("Content-Type") ?? "application/json" },
+      });
+      asJson<UploadResult>(res).then(resolve, reject);
+    };
+    xhr.send(fd);
+  });
+}
+
+/** Cho máy tự xoay + cắt gọn những mặt sổ ĐÃ CÓ. Mặt đã quét bị bỏ qua (nằm trong `skipped`). */
+export const autoprepSheets = (wsId: string, sheet_ids: string[], force = false) =>
+  jsonPost<Workspace & { queued: string[]; skipped: string[] }>(`/api/ws/${wsId}/autoprep`, {
+    sheet_ids,
+    force,
+  });
+
 export const deleteSheet = async (wsId: string, sheetId: string) =>
   asJson<Workspace>(
     await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE", ...CRED }),

@@ -23,10 +23,13 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
   4 sửa 1 ô 残高 thành số sai → bộ đếm "Còn N dòng" tăng → Ctrl+Z → về như cũ
   5 hộp Xuất file → tải .xlsx → mở bằng openpyxl thấy sheet + dòng dữ liệu
   6 F5 → kết quả còn nguyên (và server đã lưu bản sau Ctrl+Z)
+  7 tải PDF 4 trang cố ý đặt sai chiều → thanh tiến độ hiện, máy tự xoay đúng cả 4 trang
+    (cần bộ đọc chữ cục bộ RapidOCR; thiếu thì bước này báo SKIP)
 """
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import re
 import shutil
@@ -121,6 +124,38 @@ def server_balance(pg, base: str, row: int = EDIT_ROW):
     return data["results"][first]["blocks"][0]["rows"][row]["balance"]
 
 
+class Skip(Exception):
+    """Bước không chạy được vì thiếu điều kiện môi trường (không phải lỗi của app)."""
+
+
+def make_rotated_pdf(path: Path) -> list[int]:
+    """PDF 4 trang giả sổ ngân hàng, mỗi trang cố ý đặt SAI chiều. Trả về góc xoay CW mà máy
+    phải áp để từng trang đứng lại: [0, 90, 180, 270]."""
+    import fitz
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = ImageFont.load_default(size=30)
+    doc = fitz.open()
+    need = [0, 90, 180, 270]
+    for n, k in enumerate(need):
+        img = Image.new("RGB", (1200, 900), "white")
+        d = ImageDraw.Draw(img)
+        for i in range(16):
+            y = 60 + i * 50
+            d.text((60, y), f"07-04-{11 + i:02d}  R  TRANSFER {n}{i + 1}", fill="black", font=font)
+            d.text((760, y), f"{(i + 3 + n) * 12345:,}", fill="black", font=font)
+            d.text((1000, y), f"{(i + 9 + n) * 98765:,}", fill="black", font=font)
+        # cần xoay k độ CW mới đứng ⇒ đang bị xoay ngược lại k độ
+        lech = img.rotate(k, expand=True) if k else img          # PIL: dương = ngược chiều kim đồng hồ
+        buf = io.BytesIO()
+        lech.save(buf, "PNG")
+        page = doc.new_page(width=lech.width * 72 / 200, height=lech.height * 72 / 200)   # 200 DPI như app
+        page.insert_image(page.rect, stream=buf.getvalue())
+    doc.save(path)
+    doc.close()
+    return need
+
+
 # ── các bước ──────────────────────────────────────────────────────────
 
 def step_register(pg, base: str, ctx: dict) -> str:
@@ -210,6 +245,34 @@ def step_reload(pg, base: str, ctx: dict) -> str:
     return f"sau F5 vẫn {n} dòng, ô 残高 = {ctx['orig_balance']}"
 
 
+def step_upload_rotated_pdf(pg, base: str, ctx: dict) -> str:
+    pdf = Path(ctx["tmp"]) / "sai-chieu.pdf"
+    need = make_rotated_pdf(pdf)
+    # Ghi lại việc khối tiến độ có từng xuất hiện không (nó có thể chỉ hiện vài trăm ms)
+    pg.evaluate("""() => { window.__saw = false;
+        new MutationObserver(() => { if (document.querySelector('[data-import-progress]')) window.__saw = true; })
+          .observe(document.body, {childList: true, subtree: true}); }""")
+    pg.locator("input[type=file]").set_input_files(str(pdf))
+
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+
+    def mine():
+        sheets = pg.request.get(f"{base}/api/ws/{ws_id}/sheets").json()["sheets"]
+        return [s for s in sheets if s["origin"] == "sai-chieu.pdf"]
+
+    wait_until(lambda: len(mine()) == len(need), "4 thẻ mặt sổ của PDF vừa tải", timeout=10)
+    wait_until(lambda: all(s["status"] in ("ready", "failed") for s in mine()), "xử lý nền xong", timeout=90)
+    sheets = mine()
+    assert all(s["status"] == "ready" for s in sheets), [s["status"] + ":" + s["error"] for s in sheets]
+    assert pg.evaluate("window.__saw"), "khối tiến độ nhập file không hề hiện ra"
+    if not any(s["auto"] and s["auto"]["checked"] for s in sheets):
+        raise Skip("máy chủ không có bộ đọc chữ cục bộ (RapidOCR) nên không kiểm được hướng")
+    got = [int(s["rotation"]) for s in sheets]
+    assert got == need, f"cần xoay {need} nhưng máy đã xoay {got}"
+    pg.get_by_text("Đã tự xoay").first.wait_for(timeout=5000)           # nhãn ✨ trên thẻ mặt sổ
+    return f"4 trang sai chiều → máy tự xoay {got}; khối tiến độ đã hiện"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -217,6 +280,7 @@ STEPS = [
     ("4. Sửa 残高 sai → bộ đếm tăng → Ctrl+Z", step_edit_undo),
     ("5. Xuất Excel", step_export),
     ("6. F5 vẫn còn kết quả", step_reload),
+    ("7. Tải PDF sai chiều → tự xoay đúng", step_upload_rotated_pdf),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
@@ -246,6 +310,9 @@ def run(base: str, tmp: Path, headed: bool) -> int:
                 detail = fn(pg, base, ctx)
                 ok += 1
                 print(f"[PASS] {title} ({time.time() - t0:.1f}s) — {detail}", flush=True)
+            except Skip as e:
+                ok += 1
+                print(f"[SKIP] {title} — {e}", flush=True)
             except Exception as e:  # noqa: BLE001
                 msg = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
                 print(f"[FAIL] {title} ({time.time() - t0:.1f}s) — {msg}", flush=True)

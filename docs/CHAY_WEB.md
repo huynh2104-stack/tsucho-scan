@@ -89,6 +89,8 @@ Giao diện là **bàn làm việc ba khung hiện cùng lúc**, không đi theo
 
 1. **Kéo thả ảnh hoặc PDF** vào bất kỳ đâu trên trang. PDF nhiều trang được
    **tách ngay thành từng mặt sổ riêng**, mỗi mặt sửa độc lập.
+   Thẻ tải lên hiện ngay kèm thanh %, rồi máy xử lý nền (tách trang, **tự xoay cho chữ đứng và cắt gọn
+   phần trắng thừa**, hoàn tác được một lần). Tắt ở ô ✨ dưới khu thả file; nút ✨ cạnh nút xoá áp cho các mặt đã tích.
 2. **Chọn mặt sổ** ở cột trái — click = chọn một, `Ctrl`+click = thêm/bớt,
    `Shift`+click = chọn cả dải (giống Windows Explorer).
 3. **Chỉnh ảnh** ở khung giữa: xoay trái/phải/lộn ngược **áp cho mọi mặt đang
@@ -122,7 +124,7 @@ python tests/e2e/smoke.py    # 4. bấm thử app bằng trình duyệt thật, 
 
 - **Lệnh 4 cần lệnh 3 trước**: nó thử đúng bản `web/out`. Nếu `web/out` cũ hơn mã nguồn thì nó **từ chối chạy** (thử bản cũ sẽ báo xanh giả); thêm `--build` để nó tự build trước.
 - Cài một lần cho lệnh 4 (không thuộc `requirements.txt`): `pip install playwright openpyxl httpx` rồi `python -m playwright install chromium`. Thêm `--headed` để xem trình duyệt bấm.
-- Kịch bản lệnh 4 (in `PASS`/`FAIL` từng bước): đăng ký → bỏ qua hướng dẫn → thử với sổ mẫu → sửa một ô 残高 sai (bộ đếm "Còn N dòng" tăng) → Ctrl+Z (về như cũ) → xuất Excel và mở bằng openpyxl → F5 vẫn còn kết quả. Khi hỏng nó lưu ảnh chụp màn hình ở thư mục tạm của hệ điều hành và in đường dẫn.
+- Kịch bản lệnh 4 (in `PASS`/`FAIL` từng bước): đăng ký → bỏ qua hướng dẫn → thử với sổ mẫu → sửa một ô 残高 sai (bộ đếm "Còn N dòng" tăng) → Ctrl+Z (về như cũ) → xuất Excel và mở bằng openpyxl → F5 vẫn còn kết quả → tải PDF 4 trang cố ý sai chiều và thấy máy tự xoay đúng (bước 7; báo SKIP nếu máy chủ thiếu RapidOCR). Khi hỏng nó lưu ảnh chụp màn hình ở thư mục tạm của hệ điều hành và in đường dẫn.
 - Đã thử cố ý làm hỏng: gỡ listener phím tắt trong `page.tsx` thì lệnh 4 báo FAIL ở bước 4.
 - `tests/e2e/do_ram_rowmap.py`: không phải test, là script **đo RAM OCR cục bộ** khi chọn máy chủ (xem `docs/KE_HOACH_NANG_CAP_WEB.md` mục 9).
 

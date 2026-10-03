@@ -116,9 +116,24 @@ export default function SheetRail({
         const st = states[s.id] ?? "idle";
         const ps = perSheet[s.id];
 
+        // Xử lý NỀN lúc nhập (tách trang, kiểm hướng, cắt gọn) — xem api/imgjobs.py
+        const proc = s.status && s.status !== "ready" ? s.status : null;
+        const procBusy = proc === "queued" || proc === "rendering" || proc === "analyzing";
+        const noImage = !s.sha256;           // chưa render xong: chưa có ảnh để hiện
+        const autoDone = !!s.auto && (s.auto.rotate !== 0 || s.auto.cropped);
+        const autoUnsure = !!s.auto && !s.auto.sure && s.auto.detected !== 0 && s.auto.rotate === 0;
+
         // Trạng thái viết thành CHỮ, không chỉ icon
         const status: { label: string; cls: string } | null =
-          st === "scanning"
+          proc === "failed"
+            ? { label: t.stImportFailed, cls: "bg-danger/15 text-danger" }
+            : procBusy
+              ? {
+                  label:
+                    proc === "queued" ? t.stQueued : proc === "rendering" ? t.stRendering : t.stAnalyzing,
+                  cls: "bg-accentpale text-accent",
+                }
+              : st === "scanning"
             ? { label: t.stScanning, cls: "bg-accentpale text-accent" }
             : st === "wait"
               ? { label: t.stWaiting, cls: "bg-rule2 text-ink3" }
@@ -205,17 +220,28 @@ export default function SheetRail({
                 title={t.clickToView}
               >
                 <div className="relative h-[52px] w-10 flex-none overflow-hidden rounded-md border border-rule2 bg-card2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={sheetImage(wsId, s, true)}
-                    /* Ảnh sổ nằm sau lớp đăng nhập: thẻ <img> thường KHÔNG gửi
-                       cookie sang cổng khác, phải khai báo use-credentials. */
-                    crossOrigin="use-credentials"
-                    alt=""
-                    className={`h-full w-full object-cover ${
-                      st === "wait" ? "opacity-40 grayscale" : ""
-                    }`}
-                  />
+                  {noImage ? (
+                    /* Chưa có ảnh (đang tách trang / nhập hỏng): vẽ ô chờ thay vì ảnh hỏng */
+                    <span className="flex h-full w-full items-center justify-center bg-rule2/60">
+                      {proc === "failed" ? (
+                        <span className="text-[15px] font-bold text-danger">!</span>
+                      ) : (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-rule border-t-accent" />
+                      )}
+                    </span>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={sheetImage(wsId, s, true)}
+                      /* Ảnh sổ nằm sau lớp đăng nhập: thẻ <img> thường KHÔNG gửi
+                         cookie sang cổng khác, phải khai báo use-credentials. */
+                      crossOrigin="use-credentials"
+                      alt=""
+                      className={`h-full w-full object-cover ${
+                        st === "wait" ? "opacity-40 grayscale" : ""
+                      } ${procBusy ? "opacity-60" : ""}`}
+                    />
+                  )}
                   {st === "scanning" && (
                     <>
                       <span className="pointer-events-none absolute inset-0 bg-accent/20" />
@@ -272,13 +298,35 @@ export default function SheetRail({
                         {status.label}
                       </span>
                     )}
-                    {s.rotation !== 0 && (
+                    {autoDone && s.auto && (
+                      <span
+                        className="rounded bg-accentpale px-1 font-semibold text-accent"
+                        title={t.autoPrepToggleHint}
+                      >
+                        ✨{" "}
+                        {[
+                          s.auto.rotate
+                            ? t.autoRotated(s.auto.rotate > 180 ? s.auto.rotate - 360 : s.auto.rotate)
+                            : "",
+                          s.auto.cropped ? t.autoCropped : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    )}
+                    {autoUnsure && (
+                      <span className="rounded bg-warnbg px-1 font-semibold text-warnink" title={t.autoUnsure}>
+                        ⚠ {t.autoUnsureBadge}
+                      </span>
+                    )}
+                    {/* Máy đã tự xoay/cắt thì nhãn ✨ ở trên đã nói rồi, khỏi lặp */}
+                    {!autoDone && s.rotation !== 0 && (
                       <span className="tnum rounded bg-card3 px-1 text-ink2">
                         {/* 354° đọc là "nghiêng -6°" dễ hiểu hơn nhiều */}
                         {s.rotation > 180 ? s.rotation - 360 : s.rotation}°
                       </span>
                     )}
-                    {s.cropped && (
+                    {!autoDone && s.cropped && (
                       <span className="rounded bg-card3 px-1 text-ink2">{t.cropped}</span>
                     )}
                     {s.adjusted && (
