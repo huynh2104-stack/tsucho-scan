@@ -25,6 +25,8 @@ _FONT_CANDIDATES = [
     r"C:\Windows\Fonts\msgothic.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    # Gói `fonts-ipafont-gothic` mà Dockerfile cài (nhẹ hơn Noto CJK nhiều lần)
+    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
 ]
 
 W, H = 1400, 1000

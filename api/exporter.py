@@ -1,3 +1,5 @@
+# CHƯA ĐƯỢC DÙNG Ở ĐÂU (kiểm 30/09/2026: không file nào import; endpoint xuất thật nằm ở
+# api/main.py + export.py + api/export_csv.py). Giữ nguyên, ĐỪNG xoá khi chưa hỏi chủ dự án.
 """Xuất file theo tuỳ chọn của người dùng (hộp thoại xuất).
 
 Nhận DỮ LIỆU ĐÃ SỬA từ trình duyệt chứ không đọc lại kết quả quét: người dùng

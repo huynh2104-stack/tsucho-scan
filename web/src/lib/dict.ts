@@ -19,6 +19,19 @@ export const LANG_LABEL: Record<Lang, string> = {
   ja: "日本語",
 };
 
+/**
+ * Ngôn ngữ giao diện lần đầu vào, khi chưa có lựa chọn đã lưu: lấy từ danh sách ngôn ngữ của
+ * trình duyệt (`navigator.languages`), theo thứ tự ưu tiên của người dùng. `ja*` → ja,
+ * `vi*` → vi, `en*` → en; ngôn ngữ khác thì bỏ qua và xét tiếp; không có gì khớp → en.
+ */
+export function detectLang(languages: readonly string[] | undefined): Lang {
+  for (const tag of languages ?? []) {
+    const base = tag.toLowerCase().split("-")[0];
+    if (base === "ja" || base === "vi" || base === "en") return base;
+  }
+  return "en";
+}
+
 export const DICT = {
   vi: {
     appName: "通帳スキャン",
@@ -125,6 +138,8 @@ export const DICT = {
     // ── Nhập file thông minh: tiến độ, trạng thái, tự xoay/cắt ──
     uploadingFile: (pct: number) => `Đang tải lên… ${pct}%`,
     uploadPreparing: "Đang chuẩn bị…",
+    cellNumberOnly:
+      "Chỉ nhập số nguyên (không dấu âm, không số lẻ). Giá trị cũ được giữ nguyên.",
     importProgress: (done: number, total: number) => `Đang xử lý ${done}/${total} trang`,
     stQueued: "Đang chờ xử lý",
     stRendering: "Đang tách trang…",
@@ -433,6 +448,7 @@ export const DICT = {
     // ── Smart import: progress, status, auto-rotate/trim ──
     uploadingFile: (pct: number) => `Uploading… ${pct}%`,
     uploadPreparing: "Preparing…",
+    cellNumberOnly: "Whole numbers only (no minus sign or decimals). The previous value was kept.",
     importProgress: (done: number, total: number) => `Processing ${done}/${total} pages`,
     stQueued: "Queued",
     stRendering: "Rendering page…",
@@ -736,6 +752,7 @@ export const DICT = {
     // ── スマート取込：進捗・状態・自動回転/切り抜き ──
     uploadingFile: (pct: number) => `アップロード中… ${pct}%`,
     uploadPreparing: "準備中…",
+    cellNumberOnly: "整数のみ入力できます（マイナス・小数は不可）。元の値を保持しました。",
     importProgress: (done: number, total: number) => `処理中 ${done}/${total} 面`,
     stQueued: "処理待ち",
     stRendering: "ページを展開中…",

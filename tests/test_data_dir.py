@@ -38,3 +38,13 @@ def test_dat_bien_thi_ca_workspace_lan_csdl_tai_khoan_di_theo(tmp_path):
 def test_bien_rong_thi_coi_nhu_khong_dat():
     data, _, _ = _paths(TSUCHO_DATA_DIR="")
     assert data == ROOT / ".data"
+
+
+def test_dockerfile_cai_font_cjk_dung_voi_duong_dan_sample_tim():
+    """Sổ mẫu in chữ Nhật; python:slim không có font CJK nên Dockerfile phải cài một gói, và
+    sample.py phải tìm đúng chỗ gói đó đặt file (không thì sổ mẫu trên máy chủ mất chữ Nhật)."""
+    from api import sample
+
+    docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "fonts-ipafont-gothic" in docker
+    assert "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" in sample._FONT_CANDIDATES

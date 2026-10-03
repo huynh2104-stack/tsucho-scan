@@ -173,3 +173,37 @@ def test_ghi_muc_do_bao_dam_bang_GIA_TRI_khong_phai_cong_thuc(tmp_path):
     assert ws["A6"].value == "検証レベル"
     assert "残高チェーン検証済" in str(ws["B6"].value)
     assert "取引 2行" in str(ws["F6"].value)
+
+# ── Ngày người dùng gõ tay không được làm xuất file lỗi (task 0.3) ──────────
+
+def _yellow(cell):
+    return str(cell.fill.start_color.rgb).endswith("FFF2CC")
+
+
+def test_ngay_hong_khong_lam_xuat_excel_do(tmp_path):
+    txs = [
+        _tx(bal=100, date="2025-04-11"),                                  # ngày đúng
+        _tx(bal=100, date="2025/4/11", date_raw="07-04-11"),              # kiểu cũ trước khi sửa frontend
+        _tx(bal=100, date="R7.4.11"),
+        _tx(bal=100, date=None, date_raw="tuần sau"),                     # không đọc được
+        _tx(bal=100, date="2025-02-30"),                                  # ISO đúng dạng nhưng ngày không tồn tại
+        _tx(bal=100, date=20250411),                                      # kiểu dữ liệu lạ
+        _tx(bal=100, date="", date_raw=None),
+    ]
+    out = tmp_path / "f.xlsx"
+    export_accounts([_acc(txs)], str(out))                                # không được ném lỗi
+    ws = load_workbook(out).active
+    cells = [ws.cell(row=HEADER_ROW + 1 + i, column=1) for i in range(len(txs))]
+
+    assert cells[0].value.date() == date(2025, 4, 11) and not _yellow(cells[0])
+    assert [c.value for c in cells[1:6]] == ["2025/4/11", "R7.4.11", "tuần sau", "2025-02-30", "20250411"]
+    assert all(_yellow(c) for c in cells[1:])                             # mọi ô hỏng đều tô vàng
+    assert cells[6].value in (None, "")
+
+
+def test_csv_voi_ngay_hong_van_xuat_duoc():
+    from api.export_csv import accounts_to_csv
+
+    txs = [_tx(bal=100, date="2025/4/11"), _tx(bal=100, date=None, date_raw="tuần sau")]
+    text = accounts_to_csv([_acc(txs)]).decode("utf-8-sig")
+    assert "2025/4/11" in text and "tuần sau" in text

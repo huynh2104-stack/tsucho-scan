@@ -49,6 +49,7 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { applyDateEdit } from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
 import DropZone from "@/components/DropZone";
@@ -822,7 +823,13 @@ export default function Workbench() {
   /** Sửa một ô. Autosave ở trên sẽ đẩy lên server ngay sau đó. */
   const editCell: EditFn = (ref, field, value) =>
     patchRows(ref.sheet, ref.block, (rows) =>
-      rows.map((tx, i) => (i === ref.row ? ({ ...tx, [field]: value } as Tx) : tx)),
+      rows.map((tx, i) => {
+        if (i !== ref.row) return tx;
+        // Ngày gõ tay phải được đổi sang ISO (hoặc đánh dấu "không đọc được"): lưu nguyên chuỗi
+        // thì xuất Excel lỗi. Xem lib/review.ts.
+        if (field === "date") return applyDateEdit(rows, i, String(value ?? ""));
+        return { ...tx, [field]: value } as Tx;
+      }),
     );
 
   /** Xoá một dòng (có hỏi lại) — dùng khi model đọc thừa một dòng. */

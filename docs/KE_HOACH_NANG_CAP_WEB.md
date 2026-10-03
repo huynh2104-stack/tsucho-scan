@@ -1032,11 +1032,11 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 0.2 (30/09) — pytest **191 passed** · `npm test` **6 pass** · build xanh · E2E `smoke.py` **6/6 bước** (~8 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 0.3 + nhập file thông minh (03/10) — pytest **252 passed** · `npm test` **23 pass** · build xanh · E2E `smoke.py` **9/9 bước** (~15 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
-- [ ] 0.3 Năm sửa lỗi nhỏ
+- [x] 0.3 Năm sửa lỗi nhỏ (xong 03/10/2026)
 - [ ] 1.1 Danh tính dòng + giá trị máy đọc
 - [ ] 1.2 Một định nghĩa "cần soát"
 - [ ] 1.3 ✓ Đã soát
@@ -1113,6 +1113,14 @@ Quan sát khi viết E2E (không sửa):
   - Giao diện chỉ mới vá tối thiểu: hỏi lại `GET /sheets` mỗi giây khi còn mặt đang xử lý, không quét mặt chưa ready.
 - **Giao diện (làm xong ngày 03/10)**: thẻ tải lên hiện NGAY lúc thả file kèm thanh % (XHR, `ImportProgress.tsx`); thanh「Đang xử lý k/n trang」+ trạng thái từng thẻ (đang chờ / tách trang / kiểm hướng / nhập không được, có chuỗi vi/en/ja); khung giữa cho mặt chưa xong (`SheetBusy.tsx`); nhãn「✨ Đã tự xoay -90° · đã cắt gọn」trên thẻ và biểu ngữ có nút Hoàn tác ở khung giữa; 「⚠ Chưa chắc hướng」; công tắc「Tự xoay & cắt gọn khi nhập file」(bật sẵn, nhớ trong `localStorage` `tsucho.autoprep`); nút ✨ cho các mặt đã tích (mặt đã quét bị bỏ qua); bước E2E số 7 (PDF 4 trang sai chiều → tự xoay đúng; SKIP nếu thiếu RapidOCR). Đo trên PDF khách A thật: khối tiến độ hiện sau 0.01 s, xong 24 trang sau ~12 s.
 - **Còn lại**: (a) **ảnh chụp điện thoại chưa cắt được** (cần tìm 4 góc tờ giấy, task 5.2) và **chưa chỉnh nghiêng nhỏ** (bộ đo góc của `autofix.py` nhiễu ±5°; góc từ dòng chữ nhiễu ±0.5° — chưa đủ tin để tự áp); (b) sau khi tự xoay/cắt, quét lại tốn lượt Gemini vì ảnh đổi thì cache trượt — nên báo trước (task 4.3); (c) công tắc nên chuyển vào ⚙ Cài đặt khi có task 3.1 (hiện nằm dưới khu thả file); (d) khi RAM ít (`TSUCHO_LOCAL_OCR=0`) tính năng tự xoay bị tắt hẳn, chỉ còn nút xoay tay.
+
+**Task 0.3 — xong 03/10/2026** (pytest 252, `npm test` 23, build xanh, E2E 9/9; thêm bước 8 và 9):
+1. **Ngày gõ tay**: `web/src/lib/review.ts` (`parseDateInput`, `applyDateEdit`, `nearDates`; 16 test TS). Nhận `2025-04-11` · `2025/4/11` · `2025.4.11` · `2025年4月11日` · `20250411` · `R7.4.11` · `H31.4.30` · `令和7年4月11日` · `令和元年5月1日` · dạng in `07-04-11` (niên hiệu theo dòng bên cạnh, mặc định 令和) · `4/11` (năm suy từ dòng trước/sau; sang năm được). Không đọc được → `date: null`, `date_raw` = chuỗi gõ, dòng chuyển `status: check` với lý do `日付不明(手入力)`; gõ lại cho đúng thì gỡ lý do (kể cả `日付不明` của engine) và trả dòng về ok. Server: `export.py._iso_to_date` không ném lỗi nữa (ngày hỏng → ghi chuỗi + tô vàng); CSV vốn đã ghi chuỗi. Có test pytest cho 7 kiểu ngày hỏng.
+2. **Ô tiền**: `parseYen` chuyển sang `review.ts`: chuẩn hoá NFKC (`１，２３４`, `￥`, `，`), nhận `円`, `、`, dấu cách; ô trống hoặc chỉ có gạch ngang = không có số. **Không nhận** số âm, `▲500`, số lẻ, chữ → ô quay về giá trị cũ và nháy đỏ 2.5 s (chuỗi vi/en/ja). *Đổi hành vi so với trước*: `-500` từng được nhận là số âm và `12.5` thành `125`; nay cả hai bị từ chối (theo kế hoạch: sổ ngân hàng không có số âm — nếu gặp sổ có 残高 âm như ゆうちょ 貸付 thì phải nới lại).
+3. **Ngôn ngữ**: `detectLang` trong `dict.ts` (ja* → ja, vi* → vi, en* → en, ngôn ngữ lạ thì xét tiếp, không khớp → en); `LangProvider` dùng nó khi chưa có lựa chọn đã lưu (không ghi đè vào localStorage) và LUÔN đặt `<html lang>` lúc nạp.
+4. **Font cho sổ mẫu trong Docker**: *chưa* build thử được (máy không có Docker). Bằng chứng gián tiếp: `python:3.12-slim` không có font CJK; font mặc định của Pillow vẽ mọi chữ Nhật thành cùng một ô vuông (đã thử: 'サ' và '日' ra ảnh y hệt); gói Debian `fonts-ipafont-gothic` đặt `/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf` (đã tra packages.debian.org). Chọn gói IPA (nhẹ) thay vì Noto CJK; thêm vào `Dockerfile` và `api/sample.py._FONT_CANDIDATES`, có test giữ hai nơi khớp nhau. **Cần anh mở sổ mẫu trên Render sau lần deploy kế tiếp để xác nhận.**
+5. `api/exporter.py`: giữ nguyên, chỉ thêm 2 dòng chú thích "chưa được dùng ở đâu (kiểm 30/09/2026)".
+- Quan sát (không sửa): dòng có ngày không đọc được hiện vàng và vào file Excel với 要確認, nhưng bộ đếm「Còn N dòng cần soát」chưa tính nó (bộ đếm vẫn dùng định nghĩa riêng) — task 1.2 gom lại.
 
 ---
 

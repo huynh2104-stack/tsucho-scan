@@ -21,8 +21,10 @@ WORKDIR /app
 
 # Numeric OCR is local to the service; Japanese tessdata helps with passbook
 # print. The small ONNX models are bundled in the RapidOCR wheel below.
+# fonts-ipafont-gothic: ảnh sổ MẪU (api/sample.py) in chữ Nhật; python:slim không có font CJK nào
+# nên thiếu gói này thì sổ mẫu trên máy chủ mất hết chữ Nhật (chỉ còn ô trống/ô vuông).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr tesseract-ocr-jpn && rm -rf /var/lib/apt/lists/*
+    tesseract-ocr tesseract-ocr-jpn fonts-ipafont-gothic && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1

@@ -25,6 +25,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
   6 F5 → kết quả còn nguyên (và server đã lưu bản sau Ctrl+Z)
   7 tải PDF 4 trang cố ý đặt sai chiều → thanh tiến độ hiện, máy tự xoay đúng cả 4 trang
     (cần bộ đọc chữ cục bộ RapidOCR; thiếu thì bước này báo SKIP)
+  8 gõ ngày kiểu 2025/4/12, ngày vô nghĩa, số toàn góc ０１２３, ▲500 → xuất Excel không lỗi
+  9 trình duyệt tiếng Nhật mở lần đầu → giao diện tiếng Nhật; tiếng Pháp → tiếng Anh
 """
 from __future__ import annotations
 
@@ -38,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date, datetime
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -273,6 +276,78 @@ def step_upload_rotated_pdf(pg, base: str, ctx: dict) -> str:
     return f"4 trang sai chiều → máy tự xoay {got}; khối tiến độ đã hiện"
 
 
+def export_xlsx(pg, ctx: dict, name: str) -> Path:
+    """Mở hộp Xuất file, tải .xlsx về thư mục tạm."""
+    pg.locator('[data-tour="export"]').click()
+    dialog = pg.locator("[role=dialog][aria-labelledby=exp-title]")
+    dialog.wait_for(timeout=5000)
+    with pg.expect_download(timeout=30000) as info:
+        dialog.get_by_role("button", name=VI["download"]).click()
+    saved = Path(ctx["tmp"]) / name
+    info.value.save_as(saved)
+    return saved
+
+
+def step_manual_input(pg, base: str, ctx: dict) -> str:
+    """Task 0.3: ngày/số gõ tay kiểu lạ không được làm hỏng bảng hay file xuất."""
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+
+    def date_cell(i):
+        return pg.locator("tr[data-row]").nth(i).locator("input[data-cell]").nth(1)
+
+    def money_cell(i, k):                       # k: 0 = 出金, 1 = 入金, 2 = 残高
+        return pg.locator("tr[data-row]").nth(i).locator("input[data-money]").nth(k)
+
+    def type_into(cell, text):
+        cell.click()
+        cell.press("Control+a")
+        cell.type(text)
+        cell.press("Enter")
+
+    type_into(date_cell(1), "2025/4/12")
+    wait_until(lambda: date_cell(1).input_value() == "2025-04-12", "ngày 2025/4/12 được đổi sang 2025-04-12")
+    type_into(date_cell(2), "tuần sau")
+    wait_until(lambda: date_cell(2).input_value() == "tuần sau", "ô ngày giữ chuỗi gõ")
+    wait_until(lambda: pg.locator("tr[data-row]").nth(2).locator("td.bg-warnbg").count() > 0,
+               "dòng có ngày không đọc được chuyển sang vàng")
+    type_into(money_cell(1, 0), "１２３４")
+    wait_until(lambda: money_cell(1, 0).input_value() == "1,234", "số toàn góc １２３４ thành 1,234")
+    before = money_cell(3, 0).input_value()
+    type_into(money_cell(3, 0), "▲500")
+    wait_until(lambda: money_cell(3, 0).get_attribute("data-invalid") == "1", "ô báo đỏ khi gõ ▲500")
+    assert money_cell(3, 0).input_value() == before, "ô phải giữ giá trị cũ khi gõ ▲500"
+
+    path = export_xlsx(pg, ctx, "nhap-tay.xlsx")
+    from openpyxl import load_workbook
+
+    ws = load_workbook(path).worksheets[0]
+    cells = [c for row in ws.iter_rows() for c in row if c.value is not None]
+    assert any(isinstance(c.value, datetime) and c.value.date() == date(2025, 4, 12) for c in cells), "thiếu ô ngày 2025-04-12"
+    bad = [c for c in cells if c.value == "tuần sau"]
+    assert bad and str(bad[0].fill.start_color.rgb).endswith("FFF2CC"), "ngày hỏng phải ghi chuỗi gốc và tô vàng"
+    assert any(c.value == 1234 for c in cells), "thiếu số 1234"
+    return "ngày 2025/4/12 → 2025-04-12; ngày vô nghĩa → vàng; １２３４ → 1,234; ▲500 bị từ chối; Excel xuất được"
+
+
+def step_language_from_browser(pg, base: str, ctx: dict) -> str:
+    """Task 0.3: chưa chọn ngôn ngữ thì theo trình duyệt (ja → ja, ngôn ngữ lạ → en) và <html lang> đúng."""
+    browser = pg.context.browser
+    seen = []
+    for locale, button, lang in (("ja-JP", "ログイン", "ja"), ("fr-FR", "Sign in", "en")):
+        c = browser.new_context(locale=locale)               # KHÔNG đặt tsucho.lang như context chính
+        try:
+            p = c.new_page()
+            p.goto(f"{base}/login/")
+            p.get_by_role("button", name=button, exact=True).wait_for(timeout=10000)
+            got = p.evaluate("document.documentElement.lang")
+            assert got == lang, f"locale {locale}: <html lang> là {got!r}, cần {lang!r}"
+            seen.append(f"{locale}→{lang}")
+        finally:
+            c.close()
+    return ", ".join(seen)
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -281,6 +356,8 @@ STEPS = [
     ("5. Xuất Excel", step_export),
     ("6. F5 vẫn còn kết quả", step_reload),
     ("7. Tải PDF sai chiều → tự xoay đúng", step_upload_rotated_pdf),
+    ("8. Gõ ngày/số kiểu lạ → Excel không lỗi", step_manual_input),
+    ("9. Ngôn ngữ theo trình duyệt", step_language_from_browser),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

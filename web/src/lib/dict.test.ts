@@ -11,7 +11,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { DICT, LANGS } from "./dict.ts";
+import { DICT, LANGS, detectLang } from "./dict.ts";
+
+test("ngôn ngữ lần đầu lấy từ trình duyệt: ja/vi/en, còn lại thì en", () => {
+  assert.equal(detectLang(["ja-JP", "en-US"]), "ja");
+  assert.equal(detectLang(["ja"]), "ja");
+  assert.equal(detectLang(["vi-VN"]), "vi");
+  assert.equal(detectLang(["VI"]), "vi");
+  assert.equal(detectLang(["en-GB"]), "en");
+  assert.equal(detectLang(["fr-FR", "vi", "en"]), "vi");      // bỏ qua ngôn ngữ không hỗ trợ, xét tiếp
+  assert.equal(detectLang(["fr-FR", "de"]), "en");
+  assert.equal(detectLang([]), "en");
+  assert.equal(detectLang(undefined), "en");
+});
 
 /** Mọi "lá" của cây từ điển: đường dẫn → giá trị (chuỗi hoặc hàm). */
 function leaves(node: unknown, path = "", out = new Map<string, unknown>()): Map<string, unknown> {

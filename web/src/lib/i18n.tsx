@@ -18,7 +18,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { DICT, LANGS, LANG_LABEL, type Dict, type Lang } from "./dict";
+import { DICT, LANGS, LANG_LABEL, detectLang, type Dict, type Lang } from "./dict";
 
 // Giữ nguyên đường import cũ (`@/lib/i18n`) cho các component đang dùng.
 export { LANGS, LANG_LABEL };
@@ -36,12 +36,23 @@ export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>("vi");
 
   // Đọc lựa chọn cũ sau khi hydrate — không đọc lúc render đầu để server và
-  // client cho ra cùng một HTML.
+  // client cho ra cùng một HTML. Chưa từng chọn thì theo ngôn ngữ của trình duyệt
+  // (người Nhật mở lần đầu phải thấy tiếng Nhật, không phải tiếng Việt).
   useEffect(() => {
-    const saved = localStorage.getItem(KEY);
-    if (saved && (LANGS as readonly string[]).includes(saved)) {
-      setLangState(saved as Lang);
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(KEY);
+    } catch {
+      /* trình duyệt chặn localStorage: coi như chưa có lựa chọn */
     }
+    const chosen: Lang =
+      saved && (LANGS as readonly string[]).includes(saved)
+        ? (saved as Lang)
+        : detectLang(navigator.languages?.length ? navigator.languages : [navigator.language]);
+    setLangState(chosen);
+    // LUÔN đặt lang của <html> lúc nạp, không chỉ khi bấm đổi: trình duyệt chọn phông Hán theo
+    // `lang` (Android dễ hiện nét chữ Trung Quốc nếu vẫn là lang="vi" khi đang xem tiếng Nhật).
+    document.documentElement.lang = chosen;
   }, []);
 
   const setLang = useCallback((l: Lang) => {

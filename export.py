@@ -31,6 +31,7 @@ NOTE_FONT = Font(name="Arial", italic=True, color="808080")
 FAINT_FONT = Font(name="Arial", color="9AA5AF")  # OK/NG/― viết nhạt
 
 CENTER = Alignment(horizontal="center")
+_ISO_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 # Tên riêng katakana (≥3 ký tự liền) — chỗ model hay sai chính tả mà không tự biết
 _KANA_RUN = re.compile(r"[ァ-ヶー]{3,}")
 
@@ -44,6 +45,24 @@ VERIFY_ROW = 6  # dòng "mức độ bảo đảm"
 
 OK_FILL = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
 WARN_FILL = PatternFill(start_color="FCE5CD", end_color="FCE5CD", fill_type="solid")
+
+
+def _iso_to_date(value) -> date | None:
+    """"YYYY-MM-DD" hợp lệ → date. Mọi thứ khác → None, KHÔNG ném lỗi.
+
+    Người dùng gõ tay vào ô ngày ("2025/4/11", "R7.4.11", "tuần sau") và frontend gửi nguyên
+    lên đây; trước đây `date.fromisoformat` ném ValueError → xuất Excel trả 500 và công soát
+    của cả buổi không tải về được. Ngày hỏng thì ghi chuỗi gốc và tô vàng (xem `_write_sheet`).
+    """
+    if isinstance(value, date):
+        return value
+    m = _ISO_DATE.match(value.strip()) if isinstance(value, str) else None
+    if not m:
+        return None
+    try:
+        return date(int(m[1]), int(m[2]), int(m[3]))
+    except ValueError:                       # 2025-02-30
+        return None
 
 
 def verification_summary(txs: list[dict]) -> dict:
@@ -165,11 +184,12 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
         date_cell = _set(ws, r, col["年月日(西暦)"], None, border=BORDER)
         if is_note:
             date_cell.value = "—"
-        elif tx.get("date"):
-            date_cell.value = date.fromisoformat(tx["date"])
+        elif _iso_to_date(tx.get("date")) is not None:
+            date_cell.value = _iso_to_date(tx["date"])
             date_cell.number_format = DATE_FMT
         else:
-            date_cell.value = tx.get("date_raw") or ""
+            # Không có ngày, hoặc ngày không đọc được: giữ chuỗi người dùng/máy ghi + tô vàng
+            date_cell.value = str(tx.get("date") or tx.get("date_raw") or "")
             date_cell.fill = UNCERTAIN
 
         _set(ws, r, col["区分"], tx.get("kind") or ("注記" if is_note else None), border=BORDER)

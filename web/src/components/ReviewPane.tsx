@@ -17,13 +17,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
+import { parseYen } from "@/lib/review";
 import type { AccountMeta, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
-const parseYen = (s: string) => {
-  const digits = s.replace(/[^\d-]/g, "");
-  return digits === "" || digits === "-" ? null : parseInt(digits, 10);
-};
 
 export type OptCols = { store: boolean; extra: boolean; kind: boolean };
 export type ViewMode = "page" | "list";
@@ -191,6 +188,7 @@ function Cell({
   placeholder,
   picked,
   readOnly,
+  invalidHint,
   onCommit,
 }: {
   value: string;
@@ -202,7 +200,10 @@ function Cell({
   placeholder?: string;
   /** Nằm trong vùng bôi đen — tô nền để thấy đang chọn tới đâu. */
   picked?: boolean;
-  onCommit: (v: string) => void;
+  /** Câu báo khi giá trị gõ vào bị từ chối (onCommit trả false). */
+  invalidHint?: string;
+  /** Trả `false` = từ chối giá trị: ô quay về giá trị cũ và nháy đỏ một lúc. */
+  onCommit: (v: string) => void | boolean;
 }) {
   return (
     <input
@@ -212,7 +213,20 @@ function Cell({
       readOnly={readOnly}
       defaultValue={value}
       placeholder={placeholder}
-      onBlur={(e) => e.target.value !== value && onCommit(e.target.value)}
+      onBlur={(e) => {
+        const el = e.target;
+        if (el.value === value) return;
+        if (onCommit(el.value) === false) {
+          // `key={value}` không đổi nên React sẽ KHÔNG tự vẽ lại ô: phải trả giá trị cũ bằng tay
+          el.value = value;
+          el.dataset.invalid = "1";
+          el.title = invalidHint ?? "";
+          setTimeout(() => {
+            delete el.dataset.invalid;
+            el.title = "";
+          }, 2500);
+        }
+      }}
       onKeyDown={(e) => {
         const el = e.currentTarget;
         if (e.key === "Enter") {
@@ -242,7 +256,7 @@ function Cell({
         if (moveCell(el, e.key)) e.preventDefault();
       }}
       inputMode={money ? "numeric" : undefined}
-      className={`w-full rounded border border-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none ${
+      className={`w-full rounded border border-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none data-[invalid]:border-danger data-[invalid]:bg-danger/10 ${
         picked ? "bg-accent/25" : "bg-transparent"
       } ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""} ${
         money ? "tnum" : ""
@@ -359,7 +373,12 @@ function Row({
           placeholder="–"
           tone={tx.amount_out != null ? "font-medium text-outink" : ""}
           picked={on(cOut)}
-          onCommit={(v) => onEdit(ref_, "amount_out", parseYen(v))}
+          invalidHint={t.cellNumberOnly}
+          onCommit={(v) => {
+            const r = parseYen(v);
+            if (!r.ok) return false;
+            onEdit(ref_, "amount_out", r.value);
+          }}
         />
       </td>
       <td className={`whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
@@ -370,7 +389,12 @@ function Row({
           placeholder="–"
           tone={tx.amount_in != null ? "font-medium text-inink" : ""}
           picked={on(cIn)}
-          onCommit={(v) => onEdit(ref_, "amount_in", parseYen(v))}
+          invalidHint={t.cellNumberOnly}
+          onCommit={(v) => {
+            const r = parseYen(v);
+            if (!r.ok) return false;
+            onEdit(ref_, "amount_in", r.value);
+          }}
         />
       </td>
       <td className={`whitespace-nowrap px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
@@ -381,7 +405,12 @@ function Row({
           placeholder="–"
           tone={`font-semibold ${flag ? "text-warnink" : ""}`}
           picked={on(cBal)}
-          onCommit={(v) => onEdit(ref_, "balance", parseYen(v))}
+          invalidHint={t.cellNumberOnly}
+          onCommit={(v) => {
+            const r = parseYen(v);
+            if (!r.ok) return false;
+            onEdit(ref_, "balance", r.value);
+          }}
         />
       </td>
       {cols.store && (
