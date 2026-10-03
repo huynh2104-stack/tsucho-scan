@@ -49,7 +49,7 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { applyEdit, newRid } from "@/lib/review";
+import { analyzeRows, applyEdit, newRid, setReviewed, sheetStats, type FocusField } from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
 import DropZone from "@/components/DropZone";
@@ -146,7 +146,7 @@ export default function Workbench() {
   const [mappedRows, setMappedRows] = useState<{ key: string; data: RowBands | null } | null>(null);
   const [pendingFocus, setPendingFocus] = useState<{
     ref: TxRef;
-    field: "balance" | "description";
+    field: FocusField;
   } | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
@@ -307,35 +307,23 @@ export default function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selRow, bands, active, store]);
 
-  /** Thống kê từng mặt sổ, tính lại từ kho — kể cả các ô người dùng vừa sửa. */
+  /** Thống kê từng mặt sổ, tính lại từ kho — kể cả các ô người dùng vừa sửa.
+   *  Huy hiệu cột trái, bộ đếm「Còn N dòng」và phím n đều đi qua `analyzeRows` (lib/review.ts),
+   *  nên ba nơi này không thể lệch nhau. */
   const perSheet: Record<string, PerSheet> = useMemo(() => {
     const out: Record<string, PerSheet> = {};
     for (const [sid, data] of Object.entries(store)) {
-      let rows = 0,
-        need = 0,
-        fixed = 0;
-      for (const b of data.blocks) {
-        let prev: number | null = null;
-        for (const tx of b.rows) {
-          if (tx.is_note) {
-            if (tx.balance != null) prev = tx.balance;
-            continue;
-          }
-          rows += 1;
-          // Tính lại NG theo dữ liệu hiện tại, không dùng status đã đóng băng
-          if (tx.balance != null) {
-            if (prev != null) {
-              const want = prev - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
-              if (want !== tx.balance) need += 1;
-            }
-            prev = tx.balance;
-          } else if (tx.status === "check") {
-            need += 1;
-          }
-          if (tx.status === "fixed") fixed += 1;
-        }
+      const st = sheetStats(data.blocks);
+      if (st.rows > 0) {
+        out[sid] = {
+          sheet_id: sid,
+          rows: st.rows,
+          need_check: st.need,
+          fixed: st.fixed,
+          confirmed: st.confirmed,
+          edited: st.edited,
+        };
       }
-      if (rows > 0) out[sid] = { sheet_id: sid, rows, need_check: need, fixed };
     }
     return out;
   }, [store]);
@@ -487,38 +475,26 @@ export default function Workbench() {
   const tickedIds = () => sheets.filter((s) => ticked.has(s.id)).map((s) => s.id);
 
 
-  /** Các dòng của mặt đang xem, kèm trạng thái NG tính lại tại chỗ.
+  /** Các dòng của mặt đang xem kèm「có cần soát không」và ô cần đặt con trỏ — dùng cho phím n/p.
    *
-   * Dùng cho phím n/p. Tính NG ở đây (không dùng `status` đã đóng băng) để sau
-   * khi người dùng sửa một ô thì phím n không còn dẫn về dòng đã xong.
+   * Lấy từ `analyzeRows` chứ không đọc `status` đóng băng của máy: sửa một ô là phím n thôi dẫn
+   * về dòng đã xong, và ✓ một dòng là dòng đó hết bị tính.
    */
   const flatRows = useMemo(() => {
     if (!active) return [];
     const data = store[active];
     if (!data) return [];
-    const out: { ref: TxRef; bad: boolean; field: "balance" | "description" }[] = [];
-    data.blocks.forEach((b, bi) => {
-      let prev: number | null = null;
-      b.rows.forEach((tx, ri) => {
-        let bad = false;
-        let field: "balance" | "description" = "balance";
-        if (tx.balance != null) {
-          if (prev != null) {
-            const want = prev - (tx.amount_out ?? 0) + (tx.amount_in ?? 0);
-            bad = want !== tx.balance;
-          }
-          prev = tx.balance;
-        } else if (tx.status === "check") {
-          bad = true;
-          field = "description";
-        }
-        out.push({ ref: { sheet: active, block: bi, row: ri }, bad, field });
-      });
-    });
-    return out;
+    return data.blocks.flatMap((b, bi) =>
+      analyzeRows(b.rows).map((info, ri) => ({
+        ref: { sheet: active, block: bi, row: ri } as TxRef,
+        bad: info.need,
+        field: info.field,
+      })),
+    );
   }, [active, store]);
 
-  const badCount = flatRows.filter((r) => r.bad).length;
+  // Cùng số với huy hiệu ở cột trái (cùng `perSheet`)
+  const badCount = active ? (perSheet[active]?.need_check ?? 0) : 0;
 
   /* Đặt con trỏ vào ô gây lệch — SAU khi React đã vẽ dòng mới.
      Không dùng requestAnimationFrame trong hàm xử lý: nó có thể chạy trước khi
@@ -530,14 +506,12 @@ export default function Workbench() {
       `[data-row="${ref.sheet}:${ref.block}:${ref.row}"]`,
     );
     tr?.scrollIntoView({ block: "nearest" });
-    const inputs = tr?.querySelectorAll<HTMLInputElement>("input");
-    // thứ tự ô trong hàng: ngày, [区分], 摘要, 出金, 入金, 残高, ...
-    const idx = field === "balance" ? (cols.kind ? 5 : 4) : cols.kind ? 2 : 1;
-    const el = inputs?.[idx];
+    // Tìm ô theo `data-field` chứ không theo số thứ tự: thêm/bớt cột (行, 区分…) không làm lệch
+    const el = tr?.querySelector<HTMLInputElement>(`input[data-field="${field}"]`);
     el?.focus();
     el?.select();
     setPendingFocus(null);
-  }, [pendingFocus, cols.kind]);
+  }, [pendingFocus]);
 
   // Show the geometry band as soon as it is ready, then replace it with a
   // content-matched band. The latter never moves an old sheet's highlight.
@@ -827,6 +801,12 @@ export default function Workbench() {
     // Toàn bộ luật nằm ở lib/review.ts (có test): ngày gõ tay đổi sang ISO, nhớ giá trị MÁY ĐỌC
     // vào `orig`, và trả lại đúng mảng cũ nếu không có gì đổi (gõ lại giá trị đang có).
     patchRows(ref.sheet, ref.block, (rows) => applyEdit(rows, ref.row, field, value));
+
+  /** Bấm ✓ / bỏ ✓「đã soát」của một dòng. Đi qua patchRows nên Ctrl+Z hoàn tác được và autosave tự lưu. */
+  const toggleReviewed: RowActionFn = (ref) => {
+    const now = Math.floor(Date.now() / 1000);       // lấy giờ NGOÀI hàm cập nhật state (React có thể gọi nó hai lần)
+    patchRows(ref.sheet, ref.block, (rows) => setReviewed(rows, ref.row, !rows[ref.row]?.reviewed, now));
+  };
 
   /** Xoá một dòng (có hỏi lại) — dùng khi model đọc thừa một dòng. */
   const deleteRow: RowActionFn = (ref) =>
@@ -1366,6 +1346,7 @@ export default function Workbench() {
               onModeChange={setMode}
               onEdit={editCell}
               onDeleteRow={deleteRow}
+              onToggleReviewed={toggleReviewed}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
               selected={selRow}

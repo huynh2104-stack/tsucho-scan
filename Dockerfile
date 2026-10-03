@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-rowmap.txt
 
 COPY api/ ./api/
 COPY prompts/ ./prompts/
-COPY core.py export.py extract.py validate.py ./
+COPY core.py export.py extract.py review.py validate.py ./
 COPY --from=web /web/out ./web/out
 
 # Ảnh sổ, file Excel và CSDL tài khoản nằm hết trong đây. Khi triển khai PHẢI

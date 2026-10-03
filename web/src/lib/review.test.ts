@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import type { Tx } from "./api.ts";
-import { DATE_MARK, applyDateEdit, applyEdit, nearDates, newRid, parseDateInput, parseYen, shown } from "./review.ts";
+import {
+  analyzeRows,
+  applyDateEdit,
+  applyEdit,
+  chainChecks,
+  focusField,
+  needsReview,
+  nearDates,
+  newRid,
+  openReasons,
+  parseDateInput,
+  parseReasons,
+  parseYen,
+  rowState,
+  setReviewed,
+  sheetStats,
+  shown,
+} from "./review.ts";
 
 // ── parseDateInput ───────────────────────────────────────────────────
 
@@ -95,36 +113,47 @@ test("gõ ngày đọc được: ghi ISO, dòng giữ nguyên trạng thái", ()
   assert.equal(rows[1].date, "2025-04-11");                         // không đụng bản gốc
 });
 
-test("gõ ngày không đọc được: date null, giữ chuỗi gõ, dòng chuyển sang cần soát", () => {
-  const r = applyDateEdit([tx()], 0, "tuần sau");
+test("gõ ngày không đọc được: date null, giữ chuỗi gõ; status/reason (dữ kiện của máy) KHÔNG đổi", () => {
+  const goc = tx();
+  const r = applyDateEdit([goc], 0, "tuần sau");
   assert.equal(r.date, null);
   assert.equal(r.date_raw, "tuần sau");
-  assert.equal(r.status, "check");
-  assert.equal(r.reason, DATE_MARK);
+  assert.deepEqual([r.status, r.reason], [goc.status, goc.reason]);
+  assert.equal(needsReview(r, "OK"), true);                          // nhưng dòng vẫn tự thành cần soát
+  assert.deepEqual(openReasons(r, "OK").map((x) => x.kind), ["date"]);
 });
 
-test("sửa lại thành ngày đúng thì gỡ lý do ngày, trả dòng về ok", () => {
+test("sửa lại thành ngày đúng: dòng hết cần soát mà không cần ai đụng vào status/reason", () => {
   const sai = applyDateEdit([tx()], 0, "tuần sau");
   const dung = applyDateEdit([sai], 0, "R7.4.11");
   assert.deepEqual([dung.date, dung.status, dung.reason], ["2025-04-11", "ok", ""]);
+  assert.equal(needsReview(dung, "OK"), false);
 });
 
-test("lý do 日付不明 của engine cũng được gỡ khi người dùng điền ngày đúng, lý do khác thì giữ", () => {
+test("lý do 日付不明 của engine hết hiệu lực khi có ngày đúng, lý do khác thì vẫn giữ dòng ở cần soát", () => {
   const engine = tx({ date: null, status: "check", reason: "日付不明" });
-  assert.equal(applyDateEdit([engine], 0, "2025-04-11").status, "ok");
-  const hai = tx({ date: null, status: "check", reason: "日付不明・低信頼度" });
-  const r = applyDateEdit([hai], 0, "2025-04-11");
-  assert.deepEqual([r.status, r.reason], ["check", "低信頼度"]);
+  const dung = applyDateEdit([engine], 0, "2025-04-11");
+  assert.deepEqual([dung.status, dung.reason], ["check", "日付不明"]);   // máy ghi gì giữ nguyên
+  assert.equal(needsReview(dung, "OK"), false);
+  const hai = applyDateEdit([tx({ date: null, status: "check", reason: "日付不明・低信頼度" })], 0, "2025-04-11");
+  assert.equal(hai.reason, "日付不明・低信頼度");
+  assert.deepEqual(openReasons(hai, "OK").map((x) => x.kind), ["lowconf"]);
+  assert.equal(needsReview(hai, "OK"), true);
 });
 
-test("gõ sai ngày trên dòng đã có lý do khác: thêm lý do, không mất lý do cũ", () => {
+test("gõ sai ngày trên dòng đã có lý do khác: lý do cũ giữ nguyên, thêm ngày vào danh sách còn mở", () => {
   const r = applyDateEdit([tx({ status: "check", reason: "低信頼度" })], 0, "???");
-  assert.equal(r.reason, `低信頼度・${DATE_MARK}`);
+  assert.equal(r.reason, "低信頼度");
+  assert.deepEqual(openReasons(r, "OK").map((x) => x.kind), ["date", "lowconf"]);
 });
 
-test("dòng ghi chú không bị tô vàng vì ngày trống", () => {
-  const r = applyDateEdit([tx({ is_note: true, status: "note" })], 0, "");
-  assert.deepEqual([r.date, r.status, r.reason ?? ""], [null, "note", ""]);
+test("xoá trắng ô ngày của dòng thường: cần soát; dòng ghi chú thì không", () => {
+  const trong = applyDateEdit([tx()], 0, "  ");
+  assert.deepEqual([trong.date, trong.date_raw], [null, null]);
+  assert.equal(needsReview(trong, "OK"), true);
+  const ghiChu = applyDateEdit([tx({ is_note: true, status: "note" })], 0, "");
+  assert.deepEqual([ghiChu.date, ghiChu.status, ghiChu.reason ?? ""], [null, "note", ""]);
+  assert.equal(needsReview(ghiChu, "―"), false);
 });
 
 test("nearDates bỏ qua dòng chưa có ngày hợp lệ", () => {
@@ -219,4 +248,147 @@ test("sửa dòng nào chỉ đổi dòng đó, các dòng khác giữ nguyên t
   assert.equal(out[0], rows[0]);
   assert.equal(out[2], rows[2]);
   assert.notEqual(out[1], rows[1]);
+});
+
+
+// ── Task 1.2: một định nghĩa「cần soát」— cùng bộ ca JSON với tests/test_review.py ──
+
+type Case = {
+  name: string;
+  rows?: Partial<Tx>[];
+  blocks?: Partial<Tx>[][];
+  expect: {
+    chk: string[];
+    need: boolean[];
+    state: string[];
+    focus?: (string | null)[];
+    open?: (string[] | null)[];
+    stats?: Record<string, number>;
+  };
+};
+type Fixture = {
+  defaults: Partial<Tx>;
+  cases: Case[];
+  reasons: { reason: string | null; kinds: string[]; params?: Record<string, number>[] }[];
+};
+
+const FIXTURE: Fixture = JSON.parse(
+  readFileSync(new URL("../../../tests/fixtures/review_cases.json", import.meta.url), "utf8"),
+);
+const full = (r: Partial<Tx>): Tx => ({ ...FIXTURE.defaults, ...r }) as Tx;
+
+test("bộ ca dùng chung đủ lớn", () => {
+  assert.ok(FIXTURE.cases.length >= 14);
+  assert.ok(FIXTURE.reasons.length >= 20);
+});
+
+for (const [i, c] of FIXTURE.cases.entries()) {
+  test(`ca dùng chung ${String(i + 1).padStart(2, "0")}: ${c.name}`, () => {
+    const blocks = (c.blocks ?? [c.rows ?? []]).map((b) => b.map(full));
+    const rows = blocks.flat();
+    const infos = blocks.flatMap((b) => analyzeRows(b));
+    for (const key of ["chk", "need", "state", "focus", "open"] as const) {
+      const want = c.expect[key];
+      if (want) assert.equal(want.length, rows.length, `expect.${key} lệch số dòng`);
+    }
+
+    assert.deepEqual(infos.map((x) => x.chk), c.expect.chk, "chk");
+    assert.deepEqual(infos.map((x) => x.need), c.expect.need, "need");
+    assert.deepEqual(infos.map((x) => x.state), c.expect.state, "state");
+    assert.deepEqual(infos.map((x) => x.need), infos.map((x) => x.state === "review"));
+
+    c.expect.focus?.forEach((want, k) => {
+      if (want !== null) assert.equal(infos[k].field, want, `focus dòng ${k}`);
+    });
+    if (c.expect.open) {
+      const got = blocks.flatMap((b) => {
+        const chk = chainChecks(b);
+        return b.map((tx, k) => openReasons(tx, chk[k]).map((r) => r.kind));
+      });
+      c.expect.open.forEach((want, k) => {
+        if (want !== null) assert.deepEqual(got[k], want, `open dòng ${k}`);
+      });
+    }
+    if (c.expect.stats) assert.deepEqual(sheetStats(blocks.map((b) => ({ rows: b }))), c.expect.stats, "stats");
+  });
+}
+
+for (const [i, c] of FIXTURE.reasons.entries()) {
+  test(`phân loại lý do ${String(i + 1).padStart(2, "0")}: ${JSON.stringify(c.reason)}`, () => {
+    const got = parseReasons(c.reason);
+    assert.deepEqual(got.map((r) => r.kind), c.kinds);
+    if (c.params) assert.deepEqual(got.map((r) => r.params), c.params);
+  });
+}
+
+test("parseReasons giữ nguyên chữ từng phần và bỏ khoảng trắng thừa", () => {
+  assert.deepEqual(parseReasons(" 低信頼度 ・日付不明 ").map((r) => r.text), ["低信頼度", "日付不明"]);
+});
+
+test("chainChecks / rowState / focusField gọi lẻ cho kết quả y hệt analyzeRows", () => {
+  const rows = [
+    full({ balance: 1000 }),
+    full({ amount_out: 100, balance: 999 }),
+    full({ amount_in: 50, balance: 1049, status: "check", reason: "低信頼度" }),
+  ];
+  const chk = chainChecks(rows);
+  const info = analyzeRows(rows);
+  rows.forEach((tx, k) => {
+    assert.equal(info[k].chk, chk[k]);
+    assert.equal(info[k].state, rowState(tx, chk[k]));
+    assert.equal(info[k].field, focusField(tx, chk[k]));
+    assert.equal(info[k].need, needsReview(tx, chk[k]));
+  });
+});
+
+test("đổi một ô thì dòng đó hết/lên cần soát ngay, các dòng khác không bị đụng", () => {
+  const rows = [
+    full({ balance: 1000 }),
+    full({ amount_out: 100, balance: 900 }),
+    full({ amount_in: 50, balance: 950 }),
+  ];
+  assert.equal(sheetStats([{ rows }]).need, 0);
+  const sai = applyEdit(rows, 1, "balance", 999);
+  assert.equal(sheetStats([{ rows: sai }]).need, 2);                // dòng sửa sai + dòng kế bị lệch theo
+  assert.deepEqual(sai[1].orig, { balance: 900 });
+  const dung = applyEdit(sai, 1, "balance", 900);
+  assert.equal(sheetStats([{ rows: dung }]).need, 0);               // sửa lại đúng ⇒ hết vàng
+  assert.equal("orig" in dung[1], false);
+});
+
+test("applyEdit không bao giờ đụng status/reason, kể cả khi sửa ô ngày", () => {
+  const rows = [full({ date: null, status: "check", reason: "日付不明・低信頼度" })];
+  for (const [f, v] of [["date", "2025/4/11"], ["description", "mới"], ["balance", 5]] as const) {
+    const out = applyEdit(rows, 0, f, v);
+    assert.equal(out[0].status, "check", f);
+    assert.equal(out[0].reason, "日付不明・低信頼度", f);
+  }
+});
+
+test("setReviewed: bấm ✓ rồi bỏ ✓, ghi/xoá hẳn hai khoá, không đụng bản gốc", () => {
+  const rows = [full({ rid: "a" }), full({ rid: "b" })];
+  const on = setReviewed(rows, 1, true, 1700000000);
+  assert.deepEqual([on[1].reviewed, on[1].reviewed_at], [true, 1700000000]);
+  assert.equal(on[0], rows[0]);
+  assert.equal("reviewed" in rows[1], false);
+  const off = setReviewed(on, 1, false, 1700000001);
+  assert.equal("reviewed" in off[1], false);
+  assert.equal("reviewed_at" in off[1], false);
+  assert.deepEqual(off[1], rows[1]);
+});
+
+test("setReviewed: đã ở đúng trạng thái, hoặc là dòng ghi chú, thì trả CHÍNH mảng cũ", () => {
+  const rows = [full({ is_note: true, status: "note" }), full({ reviewed: true, reviewed_at: 5 })];
+  assert.equal(setReviewed(rows, 0, true, 9), rows);                // ghi chú không có ✓
+  assert.equal(setReviewed(rows, 1, true, 9), rows);                // đã ✓ rồi: giữ nguyên thời điểm cũ
+  assert.equal(setReviewed(rows, 1, true, 9)[1].reviewed_at, 5);
+  assert.equal(setReviewed([full({})], 0, false, 9).length, 1);       // chưa ✓ mà bỏ ✓: không đổi
+  assert.equal(setReviewed(rows, 7, true, 9), rows);                // chỉ số lạ không nổ
+});
+
+test("✓ rồi sửa tiếp ô khác: vẫn giữ ✓ (người đã nhìn dòng này)", () => {
+  const rows = setReviewed([full({ balance: 100 })], 0, true, 1);
+  const out = applyEdit(rows, 0, "description", "khác");
+  assert.equal(out[0].reviewed, true);
+  assert.equal(rowState(out[0], "―"), "confirmed");
 });

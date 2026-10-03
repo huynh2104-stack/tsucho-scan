@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
-import { parseYen } from "@/lib/review";
+import { analyzeRows, isISO, openReasons, parseYen, type RowInfo } from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
@@ -30,38 +30,26 @@ export type TxRef = { sheet: string; block: number; row: number };
 export type EditFn = (ref: TxRef, field: EditField, value: string | number | null) => void;
 export type RowActionFn = (ref: TxRef) => void;
 
-/** Cột 検算 tính LẠI từ dữ liệu đang hiển thị — sửa ô là đổi ngay. */
-function checkColumn(rows: Tx[]): ("OK" | "NG" | "―")[] {
-  let prev: number | null = null;
-  return rows.map((t) => {
-    if (t.balance == null) return "―";
-    let out: "OK" | "NG" | "―" = "―";
-    if (prev != null) {
-      const want = prev - (t.amount_out ?? 0) + (t.amount_in ?? 0);
-      out = want === t.balance ? "OK" : "NG";
-    }
-    prev = t.balance;
-    return out;
-  });
-}
-
 function Th({
   jp,
   vn,
   align = "left",
   width,
+  pinRight = false,
 }: {
   jp: string;
   vn: string;
   align?: "left" | "right" | "center";
   width?: string;
+  /** Ghim sát mép phải khi bảng rộng hơn khung và phải cuộn ngang (cột nút ✓ / ×). */
+  pinRight?: boolean;
 }) {
   return (
     <th
       style={width ? { width } : undefined}
-      className={`sticky top-0 z-10 whitespace-nowrap border-b border-rule bg-head px-2 py-2 text-[12px] font-semibold text-headink ${
-        align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"
-      }`}
+      className={`sticky top-0 whitespace-nowrap border-b border-rule bg-head px-2 py-2 text-[12px] font-semibold text-headink ${
+        pinRight ? "right-0 z-20" : "z-10"
+      } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"}`}
     >
       {jp}
       {vn && <span className="ml-1 font-normal opacity-70">({vn})</span>}
@@ -182,6 +170,7 @@ function toTSV(root: HTMLElement, rect: Rect): string {
 /** Ô sửa được — trông như chữ thường cho tới khi bấm vào. */
 function Cell({
   value,
+  field,
   align = "left",
   money = false,
   tone,
@@ -192,6 +181,8 @@ function Cell({
   onCommit,
 }: {
   value: string;
+  /** Ô thuộc trường nào của dòng — phím n đặt con trỏ vào ô theo trường này (`data-field`). */
+  field?: EditField;
   align?: "left" | "right" | "center";
   money?: boolean;
   /** Ô chỉ để chép (cột 行) — không cho gõ, nhưng vẫn bôi đen được. */
@@ -214,6 +205,7 @@ function Cell({
     <input
       key={`${value}|${rev}`}
       data-cell
+      data-field={field}
       data-money={money ? "" : undefined}
       readOnly={readOnly}
       defaultValue={value}
@@ -276,7 +268,7 @@ function Row({
   tx,
   n,
   cols,
-  chk,
+  info,
   ref_,
   dim,
   sel,
@@ -285,12 +277,14 @@ function Row({
   t,
   onEdit,
   onDelete,
+  onToggleReviewed,
   onSelect,
 }: {
   tx: Tx;
   n: number;
   cols: OptCols;
-  chk: "OK" | "NG" | "―";
+  /** Kết quả của định nghĩa「cần soát」dùng chung (lib/review.ts) — Row không tự tính gì. */
+  info: RowInfo;
   ref_: TxRef;
   /** Đang lọc và dòng này không khớp → làm mờ thay vì ẩn, để không mất mạch sổ. */
   dim: boolean;
@@ -302,11 +296,20 @@ function Row({
   t: Dict;
   onEdit: EditFn;
   onDelete: RowActionFn;
+  onToggleReviewed: RowActionFn;
   onSelect: RowActionFn;
 }) {
-  const flag = tx.status === "check" || chk === "NG";
-  const fixed = tx.status === "fixed";
-  const note = tx.is_note;
+  const { chk, state } = info;
+  const flag = state === "review";
+  const fixed = state === "fixed";
+  const confirmed = state === "confirmed";
+  const note = state === "note";
+  // Ngày là thủ phạm (hỏng/trống) thì tô thêm ô ngày để mắt tìm ra ngay
+  const dateBad = flag && !isISO(tx.date);
+  // Cột 確認メモ của dòng vàng: chỉ những lý do CHƯA giải quyết (+ nhắn rõ dòng do người thêm)
+  const memo = flag
+    ? [...openReasons(tx, chk).map((r) => r.text), ...(tx.added ? [t.rowAddedNote] : [])].join("・")
+    : "";
 
   // Thứ tự các ô SỬA ĐƯỢC trong một dòng = toạ độ cột của vùng bôi đen.
   // Phải khớp đúng thứ tự <Cell> bên dưới, kể cả khi tắt/bật cột phụ.
@@ -325,6 +328,7 @@ function Row({
   return (
     <tr
       data-row={`${ref_.sheet}:${ref_.block}:${ref_.row}`}
+      data-state={state}
       onClick={() => onSelect(ref_)}
       /* Đi bằng bàn phím cũng phải kéo theo vệt đỏ trên ảnh, không thì gõ tới
          dòng nào mà ảnh vẫn đứng ở dòng cũ. Sự kiện focus có nổi bọt lên tr. */
@@ -347,9 +351,11 @@ function Row({
           onCommit={() => {}}
         />
       </td>
-      <td className="whitespace-nowrap px-1 py-0.5">
+      <td className={`whitespace-nowrap px-1 py-0.5 ${dateBad ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.date ?? tx.date_raw ?? ""}
+          field="date"
+          tone={dateBad ? "text-warnink" : ""}
           picked={on(cDate)}
           onCommit={(v) => onEdit(ref_, "date", v || null)}
         />
@@ -358,6 +364,7 @@ function Row({
         <td className="whitespace-nowrap px-1 py-0.5 text-[12.5px]">
           <Cell
             value={tx.kind ?? ""}
+            field="kind"
             picked={on(cKind)}
             onCommit={(v) => onEdit(ref_, "kind", v || null)}
           />
@@ -366,6 +373,7 @@ function Row({
       <td className={`px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.description ?? ""}
+          field="description"
           tone={flag ? "text-warnink" : ""}
           picked={on(cDesc)}
           onCommit={(v) => onEdit(ref_, "description", v || null)}
@@ -375,6 +383,7 @@ function Row({
       <td className={`whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_out)}
+          field="amount_out"
           align="right"
           money
           placeholder="–"
@@ -391,6 +400,7 @@ function Row({
       <td className={`whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_in)}
+          field="amount_in"
           align="right"
           money
           placeholder="–"
@@ -407,6 +417,7 @@ function Row({
       <td className={`whitespace-nowrap px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={yen(tx.balance)}
+          field="balance"
           align="right"
           money
           placeholder="–"
@@ -424,6 +435,7 @@ function Row({
         <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.store_code ?? ""}
+            field="store_code"
             picked={on(cStore)}
             onCommit={(v) => onEdit(ref_, "store_code", v || null)}
           />
@@ -433,6 +445,7 @@ function Row({
         <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.extra_text ?? ""}
+            field="extra_text"
             picked={on(cExtra)}
             onCommit={(v) => onEdit(ref_, "extra_text", v || null)}
           />
@@ -446,15 +459,42 @@ function Row({
       >
         {chk}
       </td>
-      <td className="max-w-[140px] truncate px-2 py-0.5 text-[11px]" title={tx.reason}>
-        {tx.status === "check" && <span className="text-warnink">⚠ {tx.reason}</span>}
+      <td className="max-w-[140px] truncate px-2 py-0.5 text-[11px]" title={tx.reason || undefined}>
+        {flag && memo && <span className="text-warnink">⚠ {memo}</span>}
         {fixed && <span className="text-inink">✓ {tx.reason}</span>}
+        {confirmed && <span className="text-okink">✓ {t.rowConfirmed}</span>}
       </td>
-      <td className="w-7 px-0.5">
+      {/* Ghim sát mép phải: bảng rộng hơn khung thì phải cuộn ngang mới tới cột này, mà ✓ là nút
+          hay bấm nhất — không được để nó nằm ngoài tầm mắt. Nền đặc để chữ cuộn phía dưới không lòi ra. */}
+      <td
+        className={`sticky right-0 z-[1] w-[52px] whitespace-nowrap border-l border-rule2 px-0.5 text-right ${
+          n % 2 === 0 ? "bg-band" : "bg-card"
+        }`}
+      >
+        {/* ✓ Đã soát: luôn hiện ở dòng cần soát / đã soát; dòng khác chỉ hiện khi rê chuột.
+            Dòng ghi chú (繰越…) không có ✓ vì không bao giờ cần soát. */}
+        {!note && (
+          <button
+            data-act="confirm"
+            onClick={() => onToggleReviewed(ref_)}
+            title={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
+            aria-label={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
+            aria-pressed={confirmed}
+            className={`mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-[12px] font-bold leading-none transition-opacity ${
+              confirmed
+                ? "bg-okbg text-okink"
+                : flag
+                  ? "border border-warnink/40 text-warnink hover:bg-okbg hover:text-okink"
+                  : "text-ink3 opacity-0 hover:bg-okbg hover:text-okink group-hover:opacity-100"
+            }`}
+          >
+            ✓
+          </button>
+        )}
         <button
           onClick={() => onDelete(ref_)}
           title={t.deleteRow}
-          className="flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
         >
           ×
         </button>
@@ -483,6 +523,7 @@ function AccountCard({
   filter,
   onEdit,
   onDeleteRow,
+  onToggleReviewed,
   onAddRow,
   onAutoBalance,
   selected,
@@ -505,6 +546,7 @@ function AccountCard({
   filter: string;
   onEdit: EditFn;
   onDeleteRow: RowActionFn;
+  onToggleReviewed: RowActionFn;
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
   selected: TxRef | null;
@@ -513,9 +555,10 @@ function AccountCard({
   rowBase: number;
   pick: (row: number, col: number) => boolean;
 }) {
-  const chk = checkColumn(rows);
+  // Một lượt tính cho cả khối: cột 検算, trạng thái từng dòng, số dòng cần soát
+  const infos = useMemo(() => analyzeRows(rows), [rows]);
   const real = rows.filter((r) => !r.is_note);
-  const needCheck = chk.filter((c) => c === "NG").length;
+  const needCheck = infos.filter((i) => i.need).length;
 
   const q = filter.trim().toLowerCase();
   const matches = (tx: Tx) =>
@@ -558,7 +601,7 @@ function AccountCard({
         )}
         {needCheck > 0 && (
           <span className="tnum rounded-md bg-warnbg px-2 py-0.5 text-[11px] font-semibold text-warnink">
-            {needCheck} NG
+            {t.stNeedCheck(needCheck)}
           </span>
         )}
       </header>
@@ -573,7 +616,7 @@ function AccountCard({
                 tx={tx}
                 n={i + 1}
                 cols={cols}
-                chk={chk[i]}
+                info={infos[i]}
                 ref_={refs[i]}
                 dim={!!q && !matches(tx)}
                 sel={
@@ -587,6 +630,7 @@ function AccountCard({
                 t={t}
                 onEdit={onEdit}
                 onDelete={onDeleteRow}
+                onToggleReviewed={onToggleReviewed}
                 onSelect={onSelectRow}
               />
             ))}
@@ -636,6 +680,7 @@ export default function ReviewPane({
   onModeChange,
   onEdit,
   onDeleteRow,
+  onToggleReviewed,
   onAddRow,
   onAutoBalance,
   selected,
@@ -650,6 +695,8 @@ export default function ReviewPane({
   onModeChange: (m: ViewMode) => void;
   onEdit: EditFn;
   onDeleteRow: RowActionFn;
+  /** Bấm ✓ / bỏ ✓ "đã soát" của một dòng. */
+  onToggleReviewed: RowActionFn;
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
   /** Dòng đang chọn — khung giữa khoanh đúng dải ảnh của dòng này. */
@@ -789,7 +836,7 @@ export default function ReviewPane({
         {cols.extra && <Th jp="備考" vn="" align="center" width="76px" />}
         <Th jp="検算" vn="" align="center" width="38px" />
         <Th jp="確認メモ" vn="" width="140px" />
-        <Th jp="" vn="" width="28px" />
+        <Th jp="" vn="" width="52px" pinRight />
       </tr>
     </thead>
   );
@@ -835,6 +882,7 @@ export default function ReviewPane({
         filter={filter}
         onEdit={onEdit}
         onDeleteRow={onDeleteRow}
+        onToggleReviewed={onToggleReviewed}
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
         selected={selected}

@@ -4,7 +4,7 @@ Mục đích: giám đốc Nhật (hoặc bất kỳ ai) bấm thử được to
 ảnh, chỉnh ảnh, soát kết quả, sửa ô, xuất Excel — mà không tốn một lượt gọi API
 nào và không cần đưa sổ thật lên.
 
-Dữ liệu là GIẢ LẬP, ảnh in rõ chữ「サンプル / DỮ LIỆU MẪU」để không ai nhầm với
+Dữ liệu là GIẢ LẬP, ảnh in rõ chữ「サンプル / SAMPLE」để không ai nhầm với
 sổ thật. Nhưng kết quả thì chạy qua ĐÚNG `validate_transactions` của engine —
 nên chuỗi số dư, ô vàng, ô tự sửa đều là hành vi thật, không phải dựng cảnh.
 """
@@ -51,9 +51,9 @@ _SHEET_A = [
 ]
 
 # Mặt thứ hai CỐ Ý in sai vài chỗ để người thử thấy engine kiểm tra kép làm việc.
-# Đã thử nhiều cách để tạo ra một dòng VÀNG (cần soát) trong sổ mẫu nhưng engine
-# tự sửa được hết — nên mẫu chỉ hiện ô XANH "đã tự sửa". Ô vàng xuất hiện khi quét
-# sổ thật (đo được: bộ p5-6 có 1 dòng vàng).
+# Làm lệch số dư để ra dòng VÀNG thì vô ích: engine tự sửa hết, chỉ hiện ô XANH "đã tự
+# sửa". Dòng vàng của mẫu đến từ chỗ khác — số thứ tự dòng in trên sổ bị nhảy cóc
+# (xem _NUMBERS_B): đúng loại cờ mà chỉ người mới gỡ được (bấm ✓).
 _SHEET_B = [
     ("07-05-02", "R", "繰越",              None,   None,    647_354, True),
     ("07-05-02", "R", "デンキリヨウキン",      12_340, None,   635_014, False),
@@ -67,6 +67,11 @@ _SHEET_B = [
     ("",         "R", "手数料",              550,    None,    751_264, False),
     ("07-05-31", "K", "利息",               None,   211,     751_475, False),
 ]
+
+# Số thứ tự dòng IN ở lề trái của sổ (cột 行). Mặt ② nhảy 05 → 07: thiếu số 06 nên engine
+# gắn 行抜けの疑い cho dòng 07 (証貸 5月). Số dư vẫn khớp từng đồng, nên đây là dòng vàng
+# DUY NHẤT của sổ mẫu và là dòng để thử nút ✓.
+_NUMBERS_B = [1, 2, 3, 4, 5, 7, 8, 9]
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -83,17 +88,19 @@ def _yen(v: int | None) -> str:
     return "" if v is None else f"{v:,}"
 
 
-def _draw_sheet(title: str, rows: list[tuple]) -> Image.Image:
+def _draw_sheet(title: str, rows: list[tuple], numbers: list[int] | None = None) -> Image.Image:
     img = Image.new("RGB", (W, H), (252, 250, 244))
     d = ImageDraw.Draw(img)
     f_title, f_head, f_body, f_stamp = _font(26), _font(19), _font(21), _font(34)
+    f_no = _font(16)
 
     d.text((MARGIN, 40), title, fill=(38, 62, 78), font=f_title)
     d.text((MARGIN, 78), "普通預金 / SAMPLE — 実在の口座ではありません",
            fill=(120, 130, 130), font=f_head)
 
-    # Dấu ĐÂY LÀ MẪU — in mờ, chéo, để không ai nhầm là sổ thật
-    d.text((W - 430, 46), "サンプル / DỮ LIỆU MẪU", fill=(206, 150, 150), font=f_stamp)
+    # Dấu ĐÂY LÀ MẪU — in mờ để không ai nhầm là sổ thật. Chỉ dùng chữ Nhật + Latin trơn:
+    # font tiếng Nhật không có Ữ/Ệ/Ẫ nên chữ Việt có dấu hiện thành ô vuông (và tràn mép phải).
+    d.text((W - 400, 46), "サンプル / SAMPLE", fill=(206, 150, 150), font=f_stamp)
 
     cols = [
         ("年月日", MARGIN, "l"),
@@ -107,12 +114,15 @@ def _draw_sheet(title: str, rows: list[tuple]) -> Image.Image:
         w = d.textlength(label, font=f_head)
         d.text((x - w if align == "r" else x, HEADER_Y - 30), label,
                fill=(38, 62, 78), font=f_head)
+    d.text((12, HEADER_Y - 28), "行", fill=(120, 130, 130), font=f_no)
     d.line((MARGIN, HEADER_Y - 4, W - MARGIN, HEADER_Y - 4), fill=(120, 140, 145), width=2)
 
     for i, (date, kind, desc, out_, in_, bal, _note) in enumerate(rows):
         y = HEADER_Y + 8 + i * ROW_H
         d.line((MARGIN, y + ROW_H - 6, W - MARGIN, y + ROW_H - 6),
                fill=(205, 212, 210), width=1)
+        no = numbers[i] if numbers else i + 1
+        d.text((10, y + 3), f"{no:02d}", fill=(120, 130, 130), font=f_no)
         d.text((MARGIN, y), date, fill=(30, 52, 66), font=f_body)
         d.text((MARGIN + 170, y), kind, fill=(30, 52, 66), font=f_body)
         d.text((MARGIN + 250, y), desc.rstrip("?"), fill=(30, 52, 66), font=f_body)
@@ -124,12 +134,16 @@ def _draw_sheet(title: str, rows: list[tuple]) -> Image.Image:
     return img
 
 
-def _to_tx(rows: list[tuple]) -> list[dict]:
-    """Đổi sang đúng dạng schema mà extract.py trả ra, rồi cho engine kiểm tra."""
+def _to_tx(rows: list[tuple], numbers: list[int] | None = None) -> list[dict]:
+    """Đổi sang đúng dạng schema mà extract.py trả ra, rồi cho engine kiểm tra.
+
+    `row_no` là SỐ NGUYÊN như extract.py trả (không phải chuỗi "05"): thiếu nó thì
+    `validate._flag_row_number_gaps` không chạy và sổ mẫu không bao giờ có dòng vàng.
+    """
     out = []
-    for n, (date, kind, desc, out_, in_, bal, note) in enumerate(rows, 1):
+    for i, (date, kind, desc, out_, in_, bal, note) in enumerate(rows):
         out.append({
-            "n": f"{n:02d}",
+            "row_no": numbers[i] if numbers else i + 1,
             "date_raw": date,
             "kind": kind,
             "description": desc.rstrip("?"),
@@ -147,16 +161,16 @@ def _to_tx(rows: list[tuple]) -> list[dict]:
 
 
 _SAMPLES = [
-    ("見本銀行 サンプル通帳 ①", _SHEET_A, "見本シティ銀行", "0000001"),
-    ("見本銀行 サンプル通帳 ②", _SHEET_B, "見本シティ銀行", "0000001"),
+    ("見本銀行 サンプル通帳 ①", _SHEET_A, None, "見本シティ銀行", "0000001"),
+    ("見本銀行 サンプル通帳 ②", _SHEET_B, _NUMBERS_B, "見本シティ銀行", "0000001"),
 ]
 
 
 def add_to(ws: workspace.Workspace) -> list[str]:
     """Thêm các mặt sổ mẫu + kết quả dựng sẵn. Không gọi model, không tốn phí."""
     added: list[str] = []
-    for i, (title, rows, bank, account) in enumerate(_SAMPLES, 1):
-        img = _draw_sheet(title, rows)
+    for i, (title, rows, numbers, bank, account) in enumerate(_SAMPLES, 1):
+        img = _draw_sheet(title, rows, numbers)
         sheet = workspace.Sheet(
             id=workspace.uuid.uuid4().hex[:10],
             name=workspace._unique_name(ws, f"サンプル通帳 {i}", None),
@@ -171,7 +185,7 @@ def add_to(ws: workspace.Workspace) -> list[str]:
         added.append(sheet.id)
 
         # Chạy qua ĐÚNG engine kiểm tra kép — ô vàng / tự sửa là hành vi thật
-        txs = validate_transactions(_to_tx(rows))
+        txs = validate_transactions(_to_tx(rows, numbers))
         for tx in txs:
             tx["sheet_id"] = sheet.id
         results.save_job(

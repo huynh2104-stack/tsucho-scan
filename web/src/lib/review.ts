@@ -1,10 +1,14 @@
 /**
- * Đọc & kiểm giá trị người dùng GÕ TAY vào bảng kết quả — logic THUẦN (không React, không
- * alias `@/`) để `npm test` chạy được bằng Node. Import giữa file .ts phải ghi đuôi `.ts`.
+ * Mọi luật THUẦN về dòng kết quả — không React, không alias `@/` để `npm test` chạy được bằng
+ * Node. Import giữa file .ts phải ghi đuôi `.ts`. Gồm ba nhóm:
  *
- * Vì sao có: trước đây ô ngày lưu nguyên chuỗi người gõ ("2025/4/11") rồi `export.py` gọi
- * `date.fromisoformat` → xuất Excel lỗi 500; ô tiền dùng `\d` nên số toàn góc của IME tiếng
- * Nhật ("１２３４") bị xoá thành rỗng mà không báo gì.
+ *  1. Đọc & kiểm giá trị người dùng GÕ TAY (ngày, số tiền). Trước đây ô ngày lưu nguyên chuỗi
+ *     người gõ ("2025/4/11") rồi `export.py` gọi `date.fromisoformat` → xuất Excel lỗi 500; ô
+ *     tiền dùng `\d` nên số toàn góc của IME tiếng Nhật ("１２３４") bị xoá thành rỗng.
+ *  2. Danh tính dòng & giá trị máy đọc (task 1.1): `rid`, `orig`, `inferred`.
+ *  3. MỘT định nghĩa duy nhất của「dòng này có cần soát không」(task 1.2). Bảng, bộ đếm, phím n
+ *     và huy hiệu cột trái đều gọi các hàm ở đây — không nơi nào được tự tính lại. Bản Python
+ *     tương ứng là `review.py` ở gốc repo; hai bản cùng đọc `tests/fixtures/review_cases.json`.
  */
 
 import type { EditField, Tx } from "./api.ts";
@@ -128,43 +132,20 @@ export function nearDates(rows: Pick<Tx, "date">[], index: number): NearDates {
   return { prev, next };
 }
 
-/** Lý do gắn cho dòng có ngày người dùng gõ mà máy không đọc được. Bắt đầu bằng `日付不明`
- *  — cùng tiền tố với lý do của engine (validate.py) nên bước gom định nghĩa "cần soát" ở
- *  task 1.2 coi nó là một loại với nhau. */
-export const DATE_MARK = "日付不明(手入力)";
-
-const DATE_REASON = /^日付不明/;
-const SEP = "・";
-
 /**
  * Người dùng sửa ô ngày của dòng `index`. Trả về dòng MỚI (không đụng `rows`).
  *
- * • đọc được → `date` = ISO, và gỡ lý do 日付不明 (cả của engine lẫn của lần gõ trước);
- * • không đọc được → `date: null`, `date_raw` = chuỗi vừa gõ (vẫn hiện trên ô), dòng chuyển
- *   sang "cần soát" (vàng). Xuất Excel/CSV không bao giờ đổ vì chuyện này.
- * Dòng ghi chú (繰越…) thì ngày để trống cũng được, không bị tô vàng.
+ * • đọc được → `date` = ISO;
+ * • không đọc được → `date: null`, `date_raw` = chuỗi vừa gõ (vẫn hiện trên ô). Xuất Excel/CSV
+ *   không bao giờ đổ vì chuyện này (ghi chuỗi gốc + tô vàng).
+ * Hàm này KHÔNG đụng `status`/`reason`: đó là dữ kiện của máy. Dòng còn cần soát hay không do
+ * `needsReview` suy ra (ngày không phải ISO ⇒ cần soát; điền được ngày đúng ⇒ lý do 日付不明 hết).
  */
 export function applyDateEdit(rows: Tx[], index: number, input: string): Tx {
   const tx = rows[index];
   const text = input.trim();
   const iso = text ? parseDateInput(text, nearDates(rows, index)) : null;
-
-  const parts = (tx.reason ?? "").split(SEP).filter(Boolean);
-  const rest = parts.filter((p) => !DATE_REASON.test(p));
-  const hadDateReason = rest.length !== parts.length;
-
-  if (iso) {
-    const resolved = hadDateReason && rest.length === 0 && tx.status === "check";
-    return { ...tx, date: iso, reason: rest.join(SEP), status: resolved ? "ok" : tx.status };
-  }
-  if (tx.is_note) return { ...tx, date: null, date_raw: text || null };
-  return {
-    ...tx,
-    date: null,
-    date_raw: text || null,
-    status: "check",
-    reason: [...rest, DATE_MARK].join(SEP),
-  };
+  return iso ? { ...tx, date: iso } : { ...tx, date: null, date_raw: text || null };
 }
 
 
@@ -252,4 +233,226 @@ export function parseYen(input: string): YenResult {
     return Number.isSafeInteger(n) ? { ok: true, value: n } : { ok: false };
   }
   return { ok: false };
+}
+
+
+// ── MỘT định nghĩa duy nhất của「cần soát」(task 1.2) ─────────────────
+//
+// `status` và `reason` là DỮ KIỆN CỦA MÁY, chụp lúc quét; giao diện không bao giờ sửa chúng.
+// Dòng nào cần soát được SUY RA ở đây từ: dòng + chuỗi số dư HIỆN TẠI + việc người đã làm (sửa
+// ô, bấm ✓). Trước đây bảng, bộ đếm, phím n, huy hiệu cột trái và file Excel mỗi nơi một kiểu
+// nên "Đã soát hết" hiện lên trong khi bảng còn dòng vàng. `review.py` là bản Python của phần
+// này; cả hai đọc cùng `tests/fixtures/review_cases.json`.
+//
+// Chuỗi lý do của engine (validate.py), nối bằng「・」, chia thành các loại:
+//
+//   loại     nhận dạng                         coi là đã giải quyết khi
+//   balance  bắt đầu bằng 残高不一致            chuỗi số dư hiện tại của dòng = OK
+//   date     bắt đầu bằng 日付不明              `date` là ISO hợp lệ
+//   nobal    残高が読取れず検証不可             dòng đã có `balance` và chuỗi = OK
+//   lowconf  低信頼度                          chỉ khi người bấm ✓
+//   rowgap   chứa 行抜けの疑い                  chỉ khi người bấm ✓
+//   fix      ghi chú tự sửa (…補正 / …分離 …)   không phải việc cần soát (chỉ để biết)
+//   other    chuỗi lạ                          chỉ khi người bấm ✓
+
+/** Kết quả cột 検算. "―" (U+2015) = không kiểm được. */
+export type Chain = "OK" | "NG" | "―";
+export type ReasonKind = "balance" | "date" | "nobal" | "lowconf" | "rowgap" | "fix" | "other";
+export type ReasonParams = { diff?: number; from?: number; to?: number; missing?: number };
+export type Reason = { kind: ReasonKind; text: string; params: ReasonParams };
+/** Thứ tự ưu tiên: note > confirmed > review > fixed > edited > ok. */
+export type RowState = "note" | "confirmed" | "review" | "fixed" | "edited" | "ok";
+/** Ô mà phím n đặt con trỏ vào. */
+export type FocusField = "balance" | "date" | "description";
+export type RowInfo = { chk: Chain; state: RowState; need: boolean; field: FocusField };
+export type SheetStats = { rows: number; need: number; fixed: number; confirmed: number; edited: number };
+
+const SEP = "・";
+const NOT_CHECKABLE: Chain = "―";
+
+/**
+ * Cột 検算 của MỘT khối dòng, tính lại từ số đang hiển thị.
+ *
+ * • dòng có 残高 và có mốc phía trước: trước − 出金 + 入金 = 残高 → "OK", lệch → "NG";
+ * • dòng không in 残高: "―", nhưng VẪN cộng dồn để so ở dòng có 残高 kế tiếp (giống engine);
+ * • dòng ghi chú (繰越…): "―" và không bao giờ NG, nhưng 残高 của nó VẪN là mốc cho dòng sau;
+ * • dòng đầu khối (chưa có mốc): "―".
+ */
+export function chainChecks(rows: Tx[]): Chain[] {
+  let running: number | null = null;
+  return rows.map((tx): Chain => {
+    if (tx.is_note) {
+      if (tx.balance != null) running = tx.balance;
+      return NOT_CHECKABLE;
+    }
+    const move = (tx.amount_in ?? 0) - (tx.amount_out ?? 0);
+    if (tx.balance == null) {
+      if (running != null) running += move;
+      return NOT_CHECKABLE;
+    }
+    const out: Chain = running == null ? NOT_CHECKABLE : running + move === tx.balance ? "OK" : "NG";
+    running = tx.balance;
+    return out;
+  });
+}
+
+// Ghi chú tự sửa của engine. Quy tắc chung「kết thúc bằng 補正 / 分離」đứng đầu để chuỗi tự sửa
+// mới theo cùng kiểu vẫn được nhận; các dòng sau liệt kê những chuỗi không theo kiểu đó.
+const FIX_PATTERNS: RegExp[] = [
+  /(補正|分離)$/,
+  /^金額を(入金|出金)列へ移動$/,
+  /^金額の列を入替$/,
+  /^残高を検算で補正(\(.*\))?$/,
+  /^日付は前行と同じ(\(.*\))?$/,
+  /^年を(前|後)行から補完$/,
+];
+const DIFF = /差額\s*([+-]?[0-9,]+)/;
+const GAP = /行番号\s*([0-9]+)\s*→\s*([0-9]+)\s*:\s*([0-9]+)\s*行抜けの疑い/;
+
+function kindOf(text: string): ReasonKind {
+  if (text.startsWith("残高不一致")) return "balance";
+  if (text.startsWith("残高が読取れず検証不可")) return "nobal";
+  if (text.startsWith("日付不明")) return "date";
+  if (text.startsWith("低信頼度")) return "lowconf";
+  if (text.includes("行抜けの疑い")) return "rowgap";
+  if (FIX_PATTERNS.some((p) => p.test(text))) return "fix";
+  return "other";
+}
+
+function paramsOf(kind: ReasonKind, text: string): ReasonParams {
+  if (kind === "balance") {
+    const m = text.match(DIFF);
+    const diff = m ? Number(m[1].replace(/,/g, "")) : NaN;
+    return Number.isFinite(diff) ? { diff } : {};
+  }
+  if (kind === "rowgap") {
+    const m = text.match(GAP);
+    if (m) return { from: Number(m[1]), to: Number(m[2]), missing: Number(m[3]) };
+  }
+  return {};
+}
+
+/** Chuỗi `reason` của máy → danh sách `{kind, text, params}` (bỏ phần tử rỗng). */
+export function parseReasons(reason: string | null | undefined): Reason[] {
+  const out: Reason[] = [];
+  for (const part of (reason ?? "").split(SEP)) {
+    const text = part.trim();
+    if (!text) continue;
+    const kind = kindOf(text);
+    out.push({ kind, text, params: paramsOf(kind, text) });
+  }
+  return out;
+}
+
+function resolved(r: Reason, tx: Tx, chk: Chain): boolean {
+  switch (r.kind) {
+    case "balance":
+      return chk === "OK";
+    case "date":
+      return isISO(tx.date);
+    case "nobal":
+      return tx.balance != null && chk === "OK";
+    default:
+      return r.kind === "fix";          // lowconf / rowgap / other: chỉ ✓ mới gỡ được
+  }
+}
+
+/**
+ * Các lý do CHƯA được giải quyết của dòng (thứ cần hiện ở cột 確認メモ).
+ *
+ * Chỉ xét lý do của máy khi `status === "check"`. Riêng ngày: dòng thường mà `date` không phải
+ * ISO (người xoá hoặc gõ hỏng — giao diện không còn gắn lý do vào dòng) thì thêm một lý do
+ * `date` tổng hợp để cột 確認メモ vẫn giải thích được vì sao dòng đang vàng.
+ */
+export function openReasons(tx: Tx, chk: Chain): Reason[] {
+  if (tx.is_note) return [];
+  const out = tx.status === "check" ? parseReasons(tx.reason).filter((r) => !resolved(r, tx, chk)) : [];
+  if (!isISO(tx.date) && !out.some((r) => r.kind === "date")) {
+    out.unshift({ kind: "date", text: "日付不明", params: {} });
+  }
+  return out;
+}
+
+/**
+ * Dòng này còn cần người soát không. Thứ tự luật (dừng ở luật đầu tiên khớp):
+ *
+ *  1. dòng ghi chú                                → không
+ *  2. người đã bấm ✓ (`reviewed`)                  → không   (✓ thắng mọi cờ, kể cả NG)
+ *  3. chuỗi số dư hiện tại lệch (NG)               → có
+ *  4. dòng người thêm tay (`added`), chưa ✓        → có      (máy chưa từng kiểm dòng này)
+ *  5. ngày trống / không phải ISO                  → có
+ *  6. `status !== "check"`                         → không
+ *  7. còn lý do chưa giải quyết (bảng ở trên)      → có
+ *  8. `status === "check"` mà không có lý do nào  → có
+ */
+export function needsReview(tx: Tx, chk: Chain): boolean {
+  if (tx.is_note) return false;
+  if (tx.reviewed) return false;
+  if (chk === "NG") return true;
+  if (tx.added) return true;
+  if (openReasons(tx, chk).length > 0) return true;
+  return tx.status === "check" && parseReasons(tx.reason).length === 0;
+}
+
+export function rowState(tx: Tx, chk: Chain): RowState {
+  if (tx.is_note) return "note";
+  if (tx.reviewed) return "confirmed";
+  if (needsReview(tx, chk)) return "review";
+  if (tx.status === "fixed") return "fixed";
+  if (Object.keys(tx.orig ?? {}).length > 0 || (tx.inferred?.length ?? 0) > 0) return "edited";
+  return "ok";
+}
+
+/** Ô mà phím n đặt con trỏ vào: chuỗi lệch → 残高; ngày hỏng → ngày; còn lại → 摘要. */
+export function focusField(tx: Tx, chk: Chain): FocusField {
+  if (chk === "NG") return "balance";
+  const kinds = new Set(openReasons(tx, chk).map((r) => r.kind));
+  if (kinds.has("balance")) return "balance";
+  if (kinds.has("date")) return "date";
+  if (kinds.has("nobal")) return "balance";
+  return "description";
+}
+
+/** Mỗi dòng của một khối → `{chk, state, need, field}`, tính chuỗi số dư đúng MỘT lượt. */
+export function analyzeRows(rows: Tx[]): RowInfo[] {
+  const chk = chainChecks(rows);
+  return rows.map((tx, i) => ({
+    chk: chk[i],
+    state: rowState(tx, chk[i]),
+    need: needsReview(tx, chk[i]),
+    field: focusField(tx, chk[i]),
+  }));
+}
+
+/** Thống kê một mặt sổ. Dòng ghi chú không được tính vào `rows`. */
+export function sheetStats(blocks: { rows: Tx[] }[]): SheetStats {
+  const s: SheetStats = { rows: 0, need: 0, fixed: 0, confirmed: 0, edited: 0 };
+  for (const b of blocks) {
+    for (const { state } of analyzeRows(b.rows)) {
+      if (state === "note") continue;
+      s.rows += 1;
+      if (state === "review") s.need += 1;
+      else if (state === "fixed" || state === "confirmed" || state === "edited") s[state] += 1;
+    }
+  }
+  return s;
+}
+
+/**
+ * Bấm ✓ / bỏ ✓ cho dòng `index`. `now` = epoch giây (truyền vào để test được). Trả về CHÍNH
+ * `rows` nếu không có gì đổi (dòng ghi chú, hoặc đã ở đúng trạng thái đó) — để chỗ gọi khỏi tạo
+ * bước Ctrl+Z / lượt autosave rỗng. Bỏ ✓ thì xoá hẳn cả hai khoá cho dữ liệu gọn.
+ */
+export function setReviewed(rows: Tx[], index: number, on: boolean, now: number): Tx[] {
+  const tx = rows[index];
+  if (!tx || tx.is_note || !!tx.reviewed === on) return rows;
+  let next: Tx;
+  if (on) {
+    next = { ...tx, reviewed: true, reviewed_at: now };
+  } else {
+    next = { ...tx };
+    delete next.reviewed;
+    delete next.reviewed_at;
+  }
+  return rows.map((t, i) => (i === index ? next : t));
 }

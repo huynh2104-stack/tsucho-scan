@@ -1,0 +1,428 @@
+{
+  "_doc": [
+    "Bộ ca DÙNG CHUNG cho định nghĩa 'cần soát' (task 1.2).",
+    "Hai bộ test cùng đọc file này: tests/test_review.py (review.py) và web/src/lib/review.test.ts (review.ts).",
+    "Sửa luật ở một bản mà không sửa bản kia thì một trong hai test sẽ đỏ.",
+    "Mỗi ca là MỘT khối dòng (rows) hoặc nhiều khối (blocks); dòng nào thiếu trường thì lấy từ 'defaults'.",
+    "expect.chk/need/state/open/focus là danh sách theo thứ tự dòng (đã gộp các khối); phần tử null = không kiểm.",
+    "Ký hiệu 検算 'không kiểm được' là U+2015 (viết \\u2015)."
+  ],
+  "defaults": {
+    "date": "2025-04-11",
+    "date_raw": "07-04-11",
+    "kind": null,
+    "description": "x",
+    "extra_text": null,
+    "store_code": null,
+    "amount_out": null,
+    "amount_in": null,
+    "balance": null,
+    "status": "ok",
+    "reason": "",
+    "is_note": false,
+    "sheet_id": null
+  },
+  "cases": [
+    {
+      "name": "chuỗi số dư khớp: không cờ nào",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900},
+        {"amount_in": 50, "balance": 950}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, false, false],
+        "state": ["ok", "ok", "ok"],
+        "stats": {"rows": 3, "need": 0, "fixed": 0, "confirmed": 0, "edited": 0}
+      }
+    },
+    {
+      "name": "người sửa sai một số dư: dòng đó và dòng kế đều NG, con trỏ vào ô 残高",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 999, "orig": {"balance": 900}},
+        {"amount_in": 50, "balance": 950}
+      ],
+      "expect": {
+        "chk": ["―", "NG", "NG"],
+        "need": [false, true, true],
+        "state": ["ok", "review", "review"],
+        "focus": [null, "balance", "balance"],
+        "stats": {"rows": 3, "need": 2, "fixed": 0, "confirmed": 0, "edited": 0}
+      }
+    },
+    {
+      "name": "残高不一致 chưa sửa: vẫn cần soát",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 1340, "status": "check", "reason": "残高不一致(差額 +440)"}
+      ],
+      "expect": {
+        "chk": ["―", "NG"],
+        "need": [false, true],
+        "state": ["ok", "review"],
+        "open": [[], ["balance"]],
+        "focus": [null, "balance"]
+      }
+    },
+    {
+      "name": "残高不一致 được người sửa đúng: hết vàng, thành 'đã sửa'",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "残高不一致(差額 +440)", "orig": {"balance": 1340}}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, false],
+        "state": ["ok", "edited"],
+        "open": [[], []],
+        "stats": {"rows": 2, "need": 0, "fixed": 0, "confirmed": 0, "edited": 1}
+      }
+    },
+    {
+      "name": "日付不明 hết khi dòng đã có ngày ISO",
+      "rows": [
+        {"balance": 1000, "date": null, "date_raw": "07-0?-11", "status": "check", "reason": "日付不明"},
+        {"amount_out": 100, "balance": 900, "date": "2025-04-11", "date_raw": "07-0?-11", "status": "check", "reason": "日付不明", "orig": {"date": "07-0?-11"}}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [true, false],
+        "state": ["review", "edited"],
+        "open": [["date"], []],
+        "focus": ["date", null]
+      }
+    },
+    {
+      "name": "行抜けの疑い: chuỗi khớp vẫn phải bấm ✓ mới hết",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "行番号 3→5: 1行抜けの疑い"},
+        {"amount_out": 100, "balance": 800, "status": "check", "reason": "行番号 5→7: 1行抜けの疑い", "reviewed": true, "reviewed_at": 1700000000}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, true, false],
+        "state": ["ok", "review", "confirmed"],
+        "open": [[], ["rowgap"], ["rowgap"]],
+        "focus": [null, "description", null]
+      }
+    },
+    {
+      "name": "reviewed thắng NG",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 999, "reviewed": true, "reviewed_at": 1700000000}
+      ],
+      "expect": {
+        "chk": ["―", "NG"],
+        "need": [false, false],
+        "state": ["ok", "confirmed"],
+        "stats": {"rows": 2, "need": 0, "fixed": 0, "confirmed": 1, "edited": 0}
+      }
+    },
+    {
+      "name": "dòng ghi chú 繰越 có số dư: hiện '―' nhưng vẫn làm mốc cho dòng sau; không bao giờ cần soát",
+      "rows": [
+        {"is_note": true, "status": "note", "description": "繰越", "balance": 5000},
+        {"amount_out": 100, "balance": 4900},
+        {"is_note": true, "status": "check", "reason": "残高不一致(差額 +2,100)", "description": "繰越", "balance": 7000},
+        {"amount_in": 50, "balance": 7050}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "―", "OK"],
+        "need": [false, false, false, false],
+        "state": ["note", "ok", "note", "ok"],
+        "stats": {"rows": 2, "need": 0, "fixed": 0, "confirmed": 0, "edited": 0}
+      }
+    },
+    {
+      "name": "dòng đầu khối có lý do balance (chk '―'): không kiểm được nên vẫn vàng",
+      "rows": [
+        {"balance": 1000, "status": "check", "reason": "残高不一致(差額 +100)"},
+        {"amount_out": 100, "balance": 900}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [true, false],
+        "state": ["review", "ok"],
+        "open": [["balance"], []],
+        "focus": ["balance", null]
+      }
+    },
+    {
+      "name": "dòng máy tự sửa (fixed) giữ màu xanh, không tính là cần soát",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "fixed", "reason": "残高を検算で補正(印字読取 906,810)"},
+        {"amount_in": 50, "balance": 950, "status": "fixed", "reason": "日付は前行と同じ(印字なし)"}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, false, false],
+        "state": ["ok", "fixed", "fixed"],
+        "open": [[], [], []],
+        "stats": {"rows": 3, "need": 0, "fixed": 2, "confirmed": 0, "edited": 0}
+      }
+    },
+    {
+      "name": "dòng người đã sửa tay (có orig) mà không có cờ: 'edited', không tô",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "description": "フリコミ", "orig": {"description": "ﾌﾘｺﾐ"}}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, false],
+        "state": ["ok", "edited"],
+        "stats": {"rows": 2, "need": 0, "fixed": 0, "confirmed": 0, "edited": 1}
+      }
+    },
+    {
+      "name": "nobal: cả sổ không đọc được số dư; chỉ dòng đã có số dư VÀ nối đúng chuỗi mới hết",
+      "rows": [
+        {"amount_out": 100, "status": "check", "reason": "残高が読取れず検証不可"},
+        {"balance": 5000, "status": "check", "reason": "残高が読取れず検証不可", "orig": {"balance": null}},
+        {"amount_out": 100, "balance": 4900, "status": "check", "reason": "残高が読取れず検証不可", "orig": {"balance": null}},
+        {"amount_in": 10, "status": "check", "reason": "残高が読取れず検証不可"}
+      ],
+      "expect": {
+        "chk": ["―", "―", "OK", "―"],
+        "need": [true, true, false, true],
+        "state": ["review", "review", "edited", "review"],
+        "open": [["nobal"], ["nobal"], [], ["nobal"]],
+        "focus": ["balance", "balance", null, "balance"]
+      }
+    },
+    {
+      "name": "status check mà không có lý do nào: vẫn cần soát",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": ""}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, true],
+        "state": ["ok", "review"],
+        "open": [[], []],
+        "focus": [null, "description"]
+      }
+    },
+    {
+      "name": "ô số dư máy tự suy ra (inferred): không cờ, nhưng đánh dấu là 'edited'",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "inferred": ["balance"]},
+        {"amount_in": 50, "balance": 950}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, false, false],
+        "state": ["ok", "edited", "ok"],
+        "stats": {"rows": 3, "need": 0, "fixed": 0, "confirmed": 0, "edited": 1}
+      }
+    },
+    {
+      "name": "dòng không in số dư vẫn cộng dồn vào chuỗi (dòng phí ゆうちょ)",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100},
+        {"amount_out": 50, "balance": 850}
+      ],
+      "expect": {
+        "chk": ["―", "―", "OK"],
+        "need": [false, false, false],
+        "state": ["ok", "ok", "ok"]
+      }
+    },
+    {
+      "name": "dòng người thêm tay (added) chưa ✓: cần soát; đã ✓ thì xong; dòng trống thì con trỏ vào ô ngày",
+      "rows": [
+        {"balance": 1000},
+        {"added": true, "amount_out": 100, "balance": 900},
+        {"added": true, "amount_in": 50, "balance": 950, "reviewed": true, "reviewed_at": 1700000000},
+        {"added": true, "date": null, "date_raw": null}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK", "―"],
+        "need": [false, true, false, true],
+        "state": ["ok", "review", "confirmed", "review"],
+        "focus": [null, "description", null, "date"]
+      }
+    },
+    {
+      "name": "người gõ ngày hỏng, máy không ghi lý do: vẫn cần soát (ô ngày); ✓ thì thôi",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "date": null, "date_raw": "tuần sau", "orig": {"date": "2025-04-11"}},
+        {"amount_in": 50, "balance": 950, "date": null, "date_raw": "???", "reviewed": true, "reviewed_at": 1700000000}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, true, false],
+        "state": ["ok", "review", "confirmed"],
+        "open": [[], ["date"], ["date"]],
+        "focus": [null, "date", null]
+      }
+    },
+    {
+      "name": "status check nhưng mọi lý do đều là loại tự sửa: không phải việc cần soát",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "残高から取扱店を分離・金額を出金列へ移動"}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, false],
+        "state": ["ok", "ok"],
+        "open": [[], []]
+      }
+    },
+    {
+      "name": "lý do lạ (other): chỉ ✓ mới gỡ được",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "何かの警告"},
+        {"amount_out": 100, "balance": 800, "status": "check", "reason": "何かの警告", "reviewed": true, "reviewed_at": 1700000000}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, true, false],
+        "state": ["ok", "review", "confirmed"],
+        "open": [[], ["other"], ["other"]],
+        "focus": [null, "description", null]
+      }
+    },
+    {
+      "name": "低信頼度: chuỗi khớp vẫn phải ✓ (chữ mờ chỉ mắt người xác nhận được)",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "低信頼度"}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, true],
+        "state": ["ok", "review"],
+        "open": [[], ["lowconf"]],
+        "focus": [null, "description"]
+      }
+    },
+    {
+      "name": "lý do ghép: số dư đã khớp nhưng 低信頼度 còn nguyên ⇒ vẫn cần soát",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "status": "check", "reason": "残高不一致(差額 +10)・低信頼度", "orig": {"balance": 910}}
+      ],
+      "expect": {
+        "chk": ["―", "OK"],
+        "need": [false, true],
+        "state": ["ok", "review"],
+        "open": [[], ["lowconf"]]
+      }
+    },
+    {
+      "name": "dữ liệu cũ: 日付不明(手入力) coi như 日付不明",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 900, "date": null, "date_raw": "tuần sau", "status": "check", "reason": "日付不明(手入力)"},
+        {"amount_in": 50, "balance": 950, "date": "2025-04-12", "date_raw": "tuần sau", "status": "check", "reason": "日付不明(手入力)", "orig": {"date": "tuần sau"}}
+      ],
+      "expect": {
+        "chk": ["―", "OK", "OK"],
+        "need": [false, true, false],
+        "state": ["ok", "review", "edited"],
+        "open": [[], ["date"], []]
+      }
+    },
+    {
+      "name": "vừa NG vừa ngày hỏng: con trỏ vào 残高 trước",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 999, "date": null, "date_raw": "?"}
+      ],
+      "expect": {
+        "chk": ["―", "NG"],
+        "need": [false, true],
+        "state": ["ok", "review"],
+        "open": [[], ["date"]],
+        "focus": [null, "balance"]
+      }
+    },
+    {
+      "name": "hai khối không nối chuỗi với nhau (dòng đầu mỗi khối là '―'); đếm đúng mọi trạng thái",
+      "blocks": [
+        [
+          {"balance": 1000},
+          {"amount_out": 100, "balance": 900, "status": "fixed", "reason": "金額の列を入替"},
+          {"amount_out": 100, "balance": 999}
+        ],
+        [
+          {"balance": 5000},
+          {"amount_out": 100, "balance": 4900, "orig": {"description": "A"}},
+          {"is_note": true, "status": "note", "balance": 4900},
+          {"amount_out": 100, "balance": 4800, "reviewed": true, "reviewed_at": 1700000000}
+        ]
+      ],
+      "expect": {
+        "chk": ["―", "OK", "NG", "―", "OK", "―", "OK"],
+        "need": [false, false, true, false, false, false, false],
+        "state": ["ok", "fixed", "review", "ok", "edited", "note", "confirmed"],
+        "stats": {"rows": 6, "need": 1, "fixed": 1, "confirmed": 1, "edited": 1}
+      }
+    },
+    {
+      "name": "dòng đã fixed nhưng người làm vỡ chuỗi: NG thắng, thành review",
+      "rows": [
+        {"balance": 1000},
+        {"amount_out": 100, "balance": 950, "status": "fixed", "reason": "残高を検算で補正"}
+      ],
+      "expect": {
+        "chk": ["―", "NG"],
+        "need": [false, true],
+        "state": ["ok", "review"]
+      }
+    },
+    {
+      "name": "dòng ghi chú dù có lý do (低信頼度) vẫn là note: không cần soát, không tính vào số dòng",
+      "rows": [
+        {"is_note": true, "status": "check", "reason": "低信頼度", "balance": null}
+      ],
+      "expect": {
+        "chk": ["―"],
+        "need": [false],
+        "state": ["note"],
+        "open": [[]],
+        "stats": {"rows": 0, "need": 0, "fixed": 0, "confirmed": 0, "edited": 0}
+      }
+    }
+  ],
+  "reasons": [
+    {"reason": "", "kinds": []},
+    {"reason": "・・", "kinds": []},
+    {"reason": "残高不一致(差額 +1,000)", "kinds": ["balance"], "params": [{"diff": 1000}]},
+    {"reason": "残高不一致(差額 -440)", "kinds": ["balance"], "params": [{"diff": -440}]},
+    {"reason": "日付不明", "kinds": ["date"]},
+    {"reason": "日付不明(手入力)", "kinds": ["date"]},
+    {"reason": "残高が読取れず検証不可", "kinds": ["nobal"]},
+    {"reason": "低信頼度", "kinds": ["lowconf"]},
+    {"reason": "行番号 4→6: 1行抜けの疑い", "kinds": ["rowgap"], "params": [{"from": 4, "to": 6, "missing": 1}]},
+    {"reason": "行番号 3→8: 4行抜けの疑い", "kinds": ["rowgap"], "params": [{"from": 3, "to": 8, "missing": 4}]},
+    {"reason": "金額を入金列へ移動", "kinds": ["fix"]},
+    {"reason": "金額を出金列へ移動", "kinds": ["fix"]},
+    {"reason": "金額の列を入替", "kinds": ["fix"]},
+    {"reason": "残高から取扱店を分離", "kinds": ["fix"]},
+    {"reason": "残高と取扱店を入替補正", "kinds": ["fix"]},
+    {"reason": "残高を検算で補正(印字読取 906,810)", "kinds": ["fix"]},
+    {"reason": "残高を検算で補正", "kinds": ["fix"]},
+    {"reason": "残高の行ずれを自動補正", "kinds": ["fix"]},
+    {"reason": "日付は前行と同じ(印字なし)", "kinds": ["fix"]},
+    {"reason": "年を前行から補完", "kinds": ["fix"]},
+    {"reason": "年を後行から補完", "kinds": ["fix"]},
+    {"reason": "未知の補正", "kinds": ["fix"]},
+    {"reason": "何かの警告", "kinds": ["other"]},
+    {"reason": "残高不一致(差額 +440)・低信頼度・残高を検算で補正", "kinds": ["balance", "lowconf", "fix"]},
+    {"reason": " 低信頼度 ・日付不明 ", "kinds": ["lowconf", "date"]},
+    {"reason": null, "kinds": []}
+  ]
+}

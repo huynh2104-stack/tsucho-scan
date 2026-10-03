@@ -20,7 +20,8 @@ TSUCHO_DATA_DIR là thư mục tạm — KHÔNG đụng `.data` thật — FastA
 
 Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["tsucho.lang"]):
   1 đăng ký e2e@test.local · 2 bấm「Bỏ qua」hướng dẫn · 3「Thử với sổ mẫu」→ bảng có dòng
-  4 sửa 1 ô 残高 thành số sai → bộ đếm "Còn N dòng" tăng → Ctrl+Z → về như cũ
+  4 sửa 1 ô 残高 thành số sai → bộ đếm "Còn N dòng", huy hiệu cột trái và số dòng vàng cùng tăng,
+    phím n nhảy vào ô 残高 → gõ lại số đúng thì hết vàng → sai lần nữa → Ctrl+Z → về như cũ
   5 hộp Xuất file → tải .xlsx → mở bằng openpyxl thấy sheet + dòng dữ liệu
   6 F5 → kết quả còn nguyên (và server đã lưu bản sau Ctrl+Z)
   7 tải PDF 4 trang cố ý đặt sai chiều → thanh tiến độ hiện, máy tự xoay đúng cả 4 trang
@@ -28,6 +29,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
   8 gõ ngày kiểu 2025/4/12, ngày vô nghĩa, số toàn góc ０１２３, ▲500 → xuất Excel không lỗi
   9 trình duyệt tiếng Nhật mở lần đầu → giao diện tiếng Nhật; tiếng Pháp → tiếng Anh
  10 mỗi dòng có rid; ô đã sửa nhớ giá trị máy đọc (orig); F5 rồi sửa ô khác vẫn không mất orig
+ 11 mặt ② của sổ mẫu có đúng 1 dòng vàng thật (số thứ tự nhảy 05→07): bộ đếm, huy hiệu cột trái,
+    phím n khớp nhau; ✓ → hết vàng → Ctrl+Z → ✓ lại → F5 vẫn còn ✓ (server lưu reviewed)
 """
 from __future__ import annotations
 
@@ -66,6 +69,8 @@ EDIT_ROW = 3
 WRONG_BALANCE = "999"
 SAMPLE_BALANCES = (22061, 751475)   # số dư đầu mặt 1 và số dư cuối mặt 2 — phải có trong file Excel
 SAMPLE_SHEET_NAME = "サンプル通帳 1"   # tên mặt sổ mẫu thứ nhất (api/sample.py)
+SHEET2_NAME = "サンプル通帳 2"          # mặt thứ hai: có 1 dòng vàng thật
+GAP_DESC = "証貸 5月"                   # dòng đó (số thứ tự in nhảy 05 → 07 ⇒ 行抜けの疑い)
 
 
 # ── tiện ích ──────────────────────────────────────────────────────────
@@ -113,6 +118,28 @@ def need_review(pg) -> int:
         if m:
             return int(m.group(1))
     return -1
+
+
+def rail_need(pg, name: str) -> int | None:
+    """Số dòng cần soát ghi trên thẻ mặt sổ `name` ở cột trái (thuộc tính data-need), None nếu chưa có."""
+    v = pg.locator('[data-tour="rail"] li', has_text=name).first.get_attribute("data-need")
+    return None if v is None else int(v)
+
+
+def review_rows(pg) -> int:
+    """Số dòng đang ở trạng thái "cần soát" trong bảng (mặt sổ đang xem)."""
+    return pg.locator('tr[data-row][data-state="review"]').count()
+
+
+def focused(pg) -> dict | None:
+    """Ô nhập đang giữ con trỏ: {field, state, row}; None nếu con trỏ không ở trong bảng."""
+    return pg.evaluate("""() => {
+        const a = document.activeElement;
+        if (!a || !a.matches('input[data-cell]')) return null;
+        const tr = a.closest('tr');
+        return {field: a.dataset.field || null, state: tr.dataset.state,
+                row: Array.from(document.querySelectorAll('tr[data-row]')).indexOf(tr)};
+    }""")
 
 
 def balance_cell(pg, row: int = EDIT_ROW):
@@ -190,22 +217,44 @@ def step_sample(pg, base: str, ctx: dict) -> str:
 def step_edit_undo(pg, base: str, ctx: dict) -> str:
     wait_until(lambda: need_review(pg) >= 0, "bộ đếm cần soát")
     before = need_review(pg)
+    assert before == 0, f"mặt 1 của sổ mẫu phải sạch mà bộ đếm báo còn {before} dòng"
+    assert rail_need(pg, SAMPLE_SHEET_NAME) == 0 and review_rows(pg) == 0, "huy hiệu/số dòng vàng không khớp bộ đếm"
     orig = balance_cell(pg).input_value()
     assert orig, f"dòng {EDIT_ROW} không có số dư để sửa — sổ mẫu đã đổi?"
     ctx["orig_balance"] = orig
 
-    cell = balance_cell(pg)
-    cell.click()
-    cell.press("Control+a")
-    cell.type(WRONG_BALANCE)
-    cell.press("Enter")                                            # Enter = rời ô = ghi giá trị
+    def type_balance(text):
+        cell = balance_cell(pg)
+        cell.click()
+        cell.press("Control+a")
+        cell.type(text)
+        cell.press("Enter")                                        # Enter = rời ô = ghi giá trị
+
+    type_balance(WRONG_BALANCE)
     after = wait_until(lambda: (n := need_review(pg)) > before and n, "bộ đếm tăng sau khi sửa sai số dư")
     assert balance_cell(pg).input_value() == WRONG_BALANCE, "ô không giữ số vừa gõ"
+    # Task 1.2: bộ đếm, huy hiệu cột trái và số dòng vàng trong bảng PHẢI là một con số
+    wait_until(lambda: (rail_need(pg, SAMPLE_SHEET_NAME), review_rows(pg)) == (after, after),
+               f"huy hiệu cột trái và số dòng vàng cùng báo {after} như bộ đếm")
 
+    pg.keyboard.press("n")                                         # nhảy tới dòng cần soát kế tiếp
+    at = wait_until(lambda: focused(pg), "phím n đặt con trỏ vào một ô")
+    assert at["field"] == "balance" and at["state"] == "review", f"phím n phải vào ô 残高 của dòng vàng, thực tế {at}"
+
+    type_balance(orig)                                             # sửa lại ĐÚNG ⇒ hết vàng (không cần Ctrl+Z)
+    wait_until(lambda: need_review(pg) == 0, "gõ lại số đúng thì bộ đếm về 0")
+    assert (rail_need(pg, SAMPLE_SHEET_NAME), review_rows(pg)) == (0, 0), "sửa đúng rồi mà vẫn còn vàng"
+    pg.locator("body").click(position={"x": 5, "y": 5})            # bỏ con trỏ khỏi ô
+    pg.keyboard.press("n")
+    assert focused(pg) is None, "hết dòng cần soát mà phím n vẫn đặt con trỏ vào ô nào đó"
+
+    type_balance(WRONG_BALANCE)
+    wait_until(lambda: need_review(pg) == after, f"sai lần nữa: bộ đếm lại {after}")
     pg.keyboard.press("Control+z")
     wait_until(lambda: need_review(pg) == before, f"bộ đếm về {before} sau Ctrl+Z")
     wait_until(lambda: balance_cell(pg).input_value() == orig, f"ô 残高 trở lại {orig} sau Ctrl+Z")
-    return f"bộ đếm {before} → {after} → {before}; ô {orig} → {WRONG_BALANCE} → {orig}"
+    return (f"bộ đếm {before} → {after} → {before}; huy hiệu cột trái và dòng vàng khớp; phím n vào ô 残高; "
+            f"ô {orig} → {WRONG_BALANCE} → {orig}")
 
 
 def step_export(pg, base: str, ctx: dict) -> str:
@@ -394,6 +443,67 @@ def step_orig_survives_reload(pg, base: str, ctx: dict) -> str:
     return f"{len(rids)} dòng có rid bền; orig còn nguyên sau F5; dòng 5 nhớ máy đọc {goc!r}"
 
 
+def sheet_rows(pg, base: str, name: str) -> list[dict]:
+    """Các dòng của mặt sổ mẫu tên `name` theo SERVER."""
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+    data = pg.request.get(f"{base}/api/ws/{ws_id}").json()
+    sheet = next(s for s in data["sheets"] if s["name"] == name)
+    return data["results"][sheet["id"]]["blocks"][0]["rows"]
+
+
+def step_review_definition(pg, base: str, ctx: dict) -> str:
+    """Task 1.2: mặt ② có đúng một dòng vàng thật; bộ đếm, huy hiệu, phím n và nút ✓ nói cùng một chuyện."""
+    def open_sheet2():
+        pg.get_by_text(SHEET2_NAME).first.click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+
+    def agree(n: int, what: str):
+        wait_until(lambda: (need_review(pg), rail_need(pg, SHEET2_NAME), review_rows(pg)) == (n, n, n),
+                   f"{what}: bộ đếm, huy hiệu cột trái và số dòng vàng cùng là {n}")
+
+    open_sheet2()
+    agree(1, "mặt ② lúc mới mở")
+    row = pg.locator('tr[data-row][data-state="review"]').first
+    assert row.locator('input[data-field="description"]').input_value() == GAP_DESC, "dòng vàng không phải dòng 証貸 5月"
+    assert "行抜けの疑い" in row.inner_text(), f"cột 確認メモ không nói lý do: {row.inner_text()!r}"
+
+    pg.locator("body").click(position={"x": 5, "y": 5})
+    pg.keyboard.press("n")
+    at = wait_until(lambda: focused(pg), "phím n đặt con trỏ vào dòng vàng")
+    assert at["state"] == "review" and at["field"] == "description", f"phím n phải vào ô 摘要 của dòng vàng, thực tế {at}"
+
+    row.locator('button[data-act="confirm"]').click()
+    agree(0, "sau khi bấm ✓")
+    assert pg.locator('tr[data-row][data-state="confirmed"]').count() == 1, "dòng đã ✓ phải có trạng thái confirmed"
+    assert "Đã soát" in pg.locator('tr[data-row][data-state="confirmed"]').first.inner_text(), "cột 確認メモ không ghi Đã soát"
+    assert need_review(pg) == 0 and pg.get_by_text(VI["allChecked"]).count() >= 1
+
+    pg.keyboard.press("Control+z")
+    agree(1, "Ctrl+Z hoàn tác ✓")
+    pg.locator('tr[data-row][data-state="review"] button[data-act="confirm"]').first.click()
+    agree(0, "bấm ✓ lại")
+
+    def server_reviewed():
+        r = next(x for x in sheet_rows(pg, base, SHEET2_NAME) if x["description"] == GAP_DESC)
+        return r if r.get("reviewed") is True and isinstance(r.get("reviewed_at"), (int, float)) else None
+
+    saved = wait_until(server_reviewed, "server đã lưu reviewed + reviewed_at (autosave)", timeout=15)
+    assert saved["status"] == "check" and "行抜け" in saved["reason"], "✓ không được sửa status/reason của máy"
+
+    pg.reload()
+    open_sheet2()
+    agree(0, "sau F5")
+    assert pg.locator('tr[data-row][data-state="confirmed"]').count() == 1, "sau F5 dòng ✓ mất trạng thái"
+
+    pg.locator('tr[data-row][data-state="confirmed"] button[data-act="confirm"]').first.click()   # bỏ ✓
+    agree(1, "bỏ ✓")
+    wait_until(lambda: not next(x for x in sheet_rows(pg, base, SHEET2_NAME) if x["description"] == GAP_DESC).get("reviewed"),
+               "server xoá reviewed sau khi bỏ ✓", timeout=15)
+    pg.locator('tr[data-row][data-state="review"] button[data-act="confirm"]').first.click()
+    agree(0, "✓ lần cuối")
+    return "mặt ② có 1 dòng vàng (行抜けの疑い) · bộ đếm = huy hiệu = số dòng vàng · n vào ô 摘要 · ✓/Ctrl+Z/F5/bỏ ✓ đều đúng"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -405,6 +515,7 @@ STEPS = [
     ("8. Gõ ngày/số kiểu lạ → Excel không lỗi", step_manual_input),
     ("9. Ngôn ngữ theo trình duyệt", step_language_from_browser),
     ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
+    ("11. Dòng vàng thật + ✓ (một định nghĩa 'cần soát')", step_review_definition),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

@@ -48,3 +48,36 @@ def test_dockerfile_cai_font_cjk_dung_voi_duong_dan_sample_tim():
     docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "fonts-ipafont-gothic" in docker
     assert "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf" in sample._FONT_CANDIDATES
+
+
+def test_dockerfile_chep_du_moi_module_goc_ma_may_chu_import():
+    """Module .py ở gốc repo mà api/ (hoặc một module đã được chép) import phải có trong dòng COPY của
+    Dockerfile — thiếu thì máy chủ trên Docker chết ngay lúc khởi động với ModuleNotFoundError, mà
+    chạy trên máy dev thì không bao giờ thấy lỗi này."""
+    import ast
+    import re
+
+    docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    m = re.search(r"^COPY\s+((?:[\w.\-]+\.py\s+)+)\./?\s*$", docker, re.M)
+    assert m, "không thấy dòng COPY các module .py ở gốc trong Dockerfile"
+    copied = {Path(x).stem for x in m.group(1).split()}
+    root_modules = {p.stem for p in ROOT.glob("*.py")}
+
+    def imports(path: Path) -> set[str]:
+        out = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                out |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                out.add(node.module.split(".")[0])
+        return out & root_modules
+
+    need: set[str] = set()
+    for f in (ROOT / "api").glob("*.py"):
+        need |= imports(f)
+    todo = list(need | copied)
+    while todo:                                   # module gốc import module gốc khác
+        for dep in imports(ROOT / f"{todo.pop()}.py") - need:
+            need.add(dep)
+            todo.append(dep)
+    assert not (need - copied), f"Dockerfile thiếu COPY: {sorted(need - copied)}"

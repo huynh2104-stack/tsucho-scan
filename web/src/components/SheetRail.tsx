@@ -150,7 +150,8 @@ export default function SheetRail({
                       : null;
 
         return (
-          <li key={s.id}>
+          /* data-need: số dòng cần soát theo định nghĩa chung (lib/review.ts) — E2E đối chiếu với bộ đếm */
+          <li key={s.id} data-need={ps ? ps.need_check : undefined}>
             <div
               draggable={editing !== s.id}
               onDragStart={(e) => {

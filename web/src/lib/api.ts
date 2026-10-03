@@ -157,6 +157,9 @@ export type PerSheet = {
   rows: number;
   need_check: number;
   fixed: number;
+  /** Chỉ có khi web tự tính (`sheetStats` trong lib/review.ts); bản server gửi kèm lần quét thì không. */
+  confirmed?: number;
+  edited?: number;
 };
 
 export type ScanPayload = {

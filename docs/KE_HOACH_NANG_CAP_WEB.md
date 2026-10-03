@@ -403,7 +403,7 @@ Thêm vào E2E: sửa một ô → F5 → `orig` vẫn còn (đọc qua API).
 
 #### Task 1.3 — Hành động ✓ Đã soát `Mặc định` `M`
 **Làm gì**
-- **Theo dòng**:
+- **Theo dòng** *(nút ✓ đã làm sẵn ở 1.2, xem ghi chú 1.2; ở đây còn chữ「✓ Đã soát」/「✎ đã sửa tay」ở cột 確認メモ và các bước dưới)*:
   - nút ✓ ở cột cuối, cạnh nút ×. Luôn hiện ở dòng cần soát; dòng khác chỉ hiện khi rê chuột;
   - bấm lại để bỏ xác nhận;
   - `reviewed=true, reviewed_at=now`, đi qua `patchRows`, nên Ctrl+Z hoàn tác được và autosave tự lưu.
@@ -1032,13 +1032,13 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 0.3 + nhập file thông minh (03/10) — pytest **252 passed** · `npm test` **23 pass** · build xanh · E2E `smoke.py` **9/9 bước** (~15 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.2 (03/10) — pytest **320 passed** · `npm test` **94 pass** · build xanh · E2E `smoke.py` **11/11 bước** (~15 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
 - [x] 0.3 Năm sửa lỗi nhỏ (xong 03/10/2026)
 - [x] 1.1 Danh tính dòng + giá trị máy đọc (xong 03/10/2026)
-- [ ] 1.2 Một định nghĩa "cần soát"
+- [x] 1.2 Một định nghĩa "cần soát" (xong 03/10/2026)
 - [ ] 1.3 ✓ Đã soát
 - [ ] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A**
 - [ ] 1.5 Lý do dễ hiểu + gợi ý sửa
@@ -1130,6 +1130,22 @@ Quan sát khi viết E2E (không sửa):
 - `web/src/lib/review.ts`: `applyEdit` (đường sửa ô DUY NHẤT: ngày → ISO, ghi `orig` lần đầu sửa ô, xoá khỏi `orig` khi sửa về đúng giá trị máy, bỏ nhãn `inferred` của ô người đã tự gõ, trả đúng mảng cũ nếu không đổi), `newRid` (dùng `getRandomValues`, không dùng `randomUUID`), `shown`. `page.tsx`: `editCell` gọi `applyEdit`; `addRow` đặt `rid` + `added: true`; `autoBalance` ghi `inferred: ["balance"]` và không tạo bước hoàn tác khi chẳng suy được ô nào.
 - Với ô ngày, `orig.date` ghi **giá trị đang hiện** (ngày ISO của máy, hoặc chữ gốc nếu máy không đọc được ngày) để sau này khôi phục được cả hai trường `date`/`date_raw`.
 - Chưa đổi hành vi hiển thị (đúng như kế hoạch). `applyDateEdit` của 0.3 vẫn đang gắn `status/reason` cho ngày hỏng — 1.2 chuyển sang suy ra để giao diện không bao giờ sửa hai trường này.
+
+**Task 1.2 — xong 03/10/2026** (pytest **320 passed** = 262 + 58 · `npm test` **94 pass** · build xanh · E2E **11/11 bước**, bước 4 mở rộng và thêm bước 11):
+- **Bảng lý do của engine** (lập bằng cách quét AST `validate.py`; `tests/test_review.py` báo đỏ nếu engine sinh thêm một chuỗi mà bảng chưa biết):
+  - *cần soát*: `残高不一致(差額 ±N)` → `balance` · `日付不明` → `date` · `残高が読取れず検証不可` → `nobal` · `低信頼度` → `lowconf` · `行番号 a→b: n行抜けの疑い` → `rowgap`;
+  - *tự sửa* (`fix`, chỉ để biết): `金額を入金列へ移動` · `金額を出金列へ移動` · `金額の列を入替` · `残高から取扱店を分離` · `残高と取扱店を入替補正` · `残高を検算で補正(印字読取 N)` và `残高を検算で補正` · `残高の行ずれを自動補正` · `日付は前行と同じ(印字なし)` · `年を前行から補完` / `年を後行から補完`.
+  - **Quy tắc「kết thúc bằng 補正 / 分離」của kế hoạch chưa đủ**: `残高を検算で補正(印字読取 N)`, `日付は前行と同じ(…)`, `年を…補完`, `金額…移動`, `金額の列を入替` đều không kết thúc như vậy. Giữ quy tắc chung (để chuỗi tự sửa mới theo cùng kiểu vẫn được nhận) và thêm mẫu cho từng chuỗi còn lại.
+- **Hai luật ngoài kế hoạch** (cần vì giao diện không còn sửa `status/reason`): (a) dòng `added` chưa ✓ → cần soát (1.3 đã viết "dòng thêm có `added: true` nên cần ✓" nhưng luật 1.2 chưa có); (b) `date` không phải ISO (người xoá trắng hoặc gõ chữ vô nghĩa vào dòng vốn ổn) → cần soát dù máy không ghi lý do nào — `openReasons` thêm một lý do `date` tổng hợp để cột 確認メモ giải thích được. Thứ tự luật đầy đủ nằm trong docstring `needsReview` (cả `review.ts` lẫn `review.py`).
+- **Cột 検算 sửa hai chỗ so với bản cũ** (`checkColumn` đã bỏ): dòng không in 残高 nay vẫn cộng dồn vào chuỗi như engine (bản cũ bỏ qua nên dòng phí ゆうちょ kéo theo NG giả ở dòng sau), và dòng ghi chú hiện「―」chứ không OK/NG (nhưng 残高 của nó vẫn là mốc cho dòng sau).
+- **`applyDateEdit` không còn sửa `status/reason`** (đúng nguyên tắc 1.1). Hệ quả tạm thời tới 1.4: gõ ngày đúng cho dòng `日付不明` thì màn hình hết vàng, nhưng **file Excel/CSV vẫn lấy `status` đóng băng của máy** nên dòng đó vẫn vàng + 要確認 trong file (ở 0.3 nó được gỡ). 1.4 sửa dứt điểm bằng `review.py`. Cũng vì vậy `api/jobs.py` (`per_sheet`, `totals` của một lần quét) chưa đổi; web không dùng chúng.
+- **Sổ mẫu**: `_to_tx` đặt `row_no` số nguyên; mặt ② in số thứ tự 1,2,3,4,5,**7**,8,9 ⇒ engine gắn `行番号 5→7: 1行抜けの疑い` cho dòng 証貸 5月: **đúng MỘT dòng vàng thật**, chuỗi số dư vẫn khớp từng đồng (`tests/test_review.py` giữ điều này). Ảnh sổ mẫu nay in cột 行 ở lề trái để ảnh khớp dữ liệu. Tiện tay sửa dấu mờ trên ảnh: 「DỮ LIỆU MẪU」có Ữ/Ệ/Ẫ mà font Nhật không có ⇒ hiện ô vuông và tràn mép phải; đổi thành 「サンプル / SAMPLE」.
+- **Giao diện**: bộ đếm「Còn N dòng」, huy hiệu cột trái (`data-need` trên thẻ), số dòng vàng trong bảng và phím n cùng đi qua `analyzeRows` nên không lệch được (E2E đối chiếu cả ba). `n` chọn ô bằng `data-field` ⇒ **hết lệch một ô** (E2E kiểm ô đang focus: 残高 khi chuỗi lệch, 摘要 với `行抜け`). Đầu thẻ sổ đếm「N dòng cần soát」thay cho「N NG」. Ô ngày tô vàng khi ngày là thủ phạm. Cột 確認メモ chỉ liệt kê lý do **chưa** giải quyết (+「Dòng thêm tay — chưa soát」); dòng đã ✓ ghi「✓ Đã soát」.
+- **Làm sớm từ 1.3** (không có nó thì dòng vàng của sổ mẫu không gỡ được): nút ✓ theo dòng (luôn hiện ở dòng cần soát/đã soát, còn lại hiện khi rê chuột; bấm lại để bỏ; đi qua `patchRows` ⇒ Ctrl+Z và autosave chạy; `setReviewed` trong `review.ts`). Cột nút ✓/× **ghim sát mép phải** (`sticky`): bảng rộng hơn khung thì phải cuộn ngang mới tới được, mà ✓ là nút hay bấm nhất. Phần 1.3 còn lại: `Ctrl+Enter`, 「Xác nhận cả mặt sổ」, ↺ khôi phục giá trị máy, thêm dòng đúng chỗ, chữ「✎ đã sửa tay」ở cột 確認メモ.
+- **Dockerfile**: thêm `review.py` vào dòng `COPY` + test `test_dockerfile_chep_du_moi_module_goc_ma_may_chu_import` (module ở gốc mà `api/` import nhưng Dockerfile không chép thì máy chủ Docker chết ngay lúc khởi động — chạy trên máy dev không bao giờ thấy). 1.4 sẽ import `review` từ `export.py`.
+- **Kiểm test có răng**: cố ý đổi 5 luật trong `review.ts` (bỏ luật `reviewed`, bỏ `added`, ghi chú không làm mốc, không cộng dồn, ✓ không cần cho lowconf) và 4 luật trong `review.py` ⇒ cả hai bộ test đỏ đúng chỗ; đã trả lại.
+- **Quyết định nhỏ, chờ anh gật/lắc**: dòng đã ✓ rồi sửa tiếp một ô vẫn giữ ✓ (người đã nhìn dòng này; và ✓ thắng cả NG theo kế hoạch). Nếu muốn「sửa là mất ✓」thì đổi một chỗ trong `applyEdit`.
+- Chưa làm (đúng phạm vi): bộ đếm vẫn đếm mặt sổ **đang xem**, phím n không nhảy sang mặt khác; Excel/CSV chờ 1.4.
 
 ---
 
