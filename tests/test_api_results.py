@@ -198,3 +198,47 @@ def test_api_tra_400_khi_rid_sai(client):
     ok = client.put(f"/api/ws/{wid}/results/s1",
                     json={"blocks": [{"meta": {}, "rows": [_row("A", 1)]}]})
     assert ok.status_code == 200 and RID.match(ok.json()["blocks"][0]["rows"][0]["rid"])
+
+
+# ── Task 1.6: 「Không phải lỗi」cho chỗ đứt chuỗi số dư giữa các mặt sổ ──────────────────
+
+def test_link_ok_duoc_luu_giu_khi_khong_truyen_va_xoa_bang_none(ws):
+    blocks = [{"meta": {}, "rows": [_row("A", 1)]}]
+    results.save_edits(ws.id, "s1", blocks, link_ok={"prev": "s0", "diff": -729414})
+    assert results.load_all(ws.id)["s1"]["link_ok"] == {"prev": "s0", "diff": -729414}
+
+    results.save_edits(ws.id, "s1", blocks)                          # client cũ không gửi: giữ nguyên
+    assert results.load_all(ws.id)["s1"]["link_ok"] == {"prev": "s0", "diff": -729414}
+
+    results.save_edits(ws.id, "s1", blocks, link_ok=None)            # bỏ xác nhận
+    assert "link_ok" not in results.load_all(ws.id)["s1"]
+
+
+def test_quet_lai_mat_so_thi_mat_link_ok(ws):
+    results.save_edits(ws.id, "s1", [{"meta": {}, "rows": [_row("A", 1)]}], link_ok={"prev": "s0", "diff": 5})
+    _quet(ws, _row("B", 2))
+    assert "link_ok" not in results.load_all(ws.id)["s1"]
+
+
+@pytest.mark.parametrize("bad", ["co", {"prev": "s0"}, {"prev": 1, "diff": 5}, {"prev": "", "diff": 5},
+                                 {"prev": "s0", "diff": 1.5}, {"prev": "s0", "diff": True}, {"prev": "x" * 65, "diff": 1}])
+def test_link_ok_sai_dinh_dang_bi_tu_choi_va_khong_ghi_gi(ws, bad):
+    with pytest.raises(ValueError, match="link_ok"):
+        results.save_edits(ws.id, "s1", [{"meta": {}, "rows": [_row("A", 1)]}], link_ok=bad)
+    assert "s1" not in results.load_all(ws.id)
+
+
+def test_api_put_nhan_link_ok_va_tra_400_khi_sai(client):
+    from test_api_auth import register
+
+    register(client)
+    wid = client.post("/api/ws").json()["id"]
+    w = workspace.load(wid)
+    w.sheets.append(workspace.Sheet(id="s1", name="a", origin="a.png"))
+    w.save()
+    url = f"/api/ws/{wid}/results/s1"
+    rows = [{"meta": {}, "rows": [_row("A", 1)]}]
+    assert client.put(url, json={"blocks": rows, "link_ok": {"prev": "s0", "diff": 7}}).json()["link_ok"] == {"prev": "s0", "diff": 7}
+    assert client.put(url, json={"blocks": rows}).json()["link_ok"] == {"prev": "s0", "diff": 7}     # không gửi ⇒ giữ
+    assert "link_ok" not in client.put(url, json={"blocks": rows, "link_ok": None}).json()
+    assert client.put(url, json={"blocks": rows, "link_ok": {"prev": "s0", "diff": "x"}}).status_code == 400

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import type { Tx } from "./api.ts";
+import type { SheetResult, Tx } from "./api.ts";
 import {
   analyzeRows,
   applyDateEdit,
@@ -15,6 +15,7 @@ import {
   explainReason,
   focusField,
   insertRowAfter,
+  isAlarm,
   ngCount,
   needsReview,
   nearDates,
@@ -27,6 +28,7 @@ import {
   rowState,
   setAllReviewed,
   setReviewed,
+  sheetLinks,
   sheetStats,
   shown,
   suggestFixes,
@@ -676,4 +678,115 @@ test("applyFix addrow: chèn dòng sót NGAY TRÊN dòng NG, mượn ngày, bala
 test("gợi ý: dòng đang KHỚP chuỗi thì dù có thể 'sửa' cho khớp thêm vẫn không được gợi ý", () => {
   const rows = [full({ balance: 1000 }), full({ amount_out: 100, balance: 900 }), full({ amount_out: 50, balance: 850 })];
   assert.deepEqual(suggestFixes(rows, 1), []);                                  // dòng kế khớp với 900 nhưng dòng này đã đúng
+});
+
+
+// ── Task 1.6: kiểm chỗ nối số dư giữa các mặt sổ ─────────────────────
+
+const meta = (account_no: string | null = "A1", bank_name: string | null = null) => ({
+  bank_name, store_no: null, account_no, holder: null,
+});
+const result = (id: string, rows: Partial<Tx>[], m = meta(), extra: Partial<SheetResult> = {}): SheetResult => ({
+  sheet_id: id, job_id: "j", scanned_at: 0, model: null, cached: null, cost_usd: null,
+  blocks: [{ meta: m, rows: rows.map(full) }], ...extra,
+});
+const ids = (...names: string[]) => names.map((id) => ({ id }));
+
+test("sheetLinks: hai mặt nối đúng — số dư cuối của A cộng trừ các dòng đầu của B ra đúng số dư in", () => {
+  const store = {
+    a: result("a", [{ balance: 1000 }, { amount_out: 100, balance: 900 }]),
+    b: result("b", [{ amount_out: 50, balance: 850 }, { amount_in: 10, balance: 860 }]),
+  };
+  const [l] = sheetLinks(ids("a", "b"), store);
+  assert.deepEqual([l.from, l.to, l.status, l.diff, l.via, l.sameBook, l.dismissed], ["a", "b", "ok", null, "chain", true, false]);
+  assert.equal(isAlarm(l), false);
+});
+
+test("sheetLinks: đứt chuỗi — báo mức chênh = số dư in − số dư tính được; chỉ báo động khi chắc cùng sổ", () => {
+  const store = {
+    a: result("a", [{ balance: 1000 }]),
+    b: result("b", [{ amount_out: 50, balance: 1000 }]),                          // phải là 950
+  };
+  const [l] = sheetLinks(ids("a", "b"), store);
+  assert.deepEqual([l.status, l.diff, l.sameBook], ["break", 50, true]);
+  assert.equal(isAlarm(l), true);
+  const khongBiaTrang = { a: result("a", [{ balance: 1000 }], meta(null)), b: result("b", [{ amount_out: 50, balance: 1000 }], meta(null)) };
+  const [w] = sheetLinks(ids("a", "b"), khongBiaTrang);
+  assert.deepEqual([w.status, w.diff, w.sameBook], ["break", 50, false]);       // vẫn thấy, nhưng không phải báo động
+  assert.equal(isAlarm(w), false);
+});
+
+test("sheetLinks: khác số tài khoản (hoặc khác ngân hàng) thì không kiểm", () => {
+  const khacSo = { a: result("a", [{ balance: 1000 }], meta("A1")), b: result("b", [{ balance: 5 }], meta("B2")) };
+  assert.equal(sheetLinks(ids("a", "b"), khacSo)[0].status, "different");
+  const khacBank = { a: result("a", [{ balance: 1000 }], meta(null, "福岡銀行")), b: result("b", [{ balance: 5 }], meta(null, "西日本シティ銀行")) };
+  assert.equal(sheetLinks(ids("a", "b"), khacBank)[0].status, "different");
+  const motBenThieu = { a: result("a", [{ balance: 1000 }], meta(null, "福岡銀行")), b: result("b", [{ balance: 5 }], meta(null, null)) };
+  assert.equal(sheetLinks(ids("a", "b"), motBenThieu)[0].status, "break");      // thiếu thông tin thì không loại trừ
+});
+
+test("sheetLinks: B mở đầu bằng 繰越 có số dư — bằng số dư cuối của A là nối chắc chắn, lệch là đứt", () => {
+  const a = result("a", [{ balance: 1000 }, { amount_out: 100, balance: 900 }]);
+  const ok = sheetLinks(ids("a", "b"), { a, b: result("b", [{ is_note: true, status: "note", balance: 900 }, { amount_out: 1, balance: 899 }]) })[0];
+  assert.deepEqual([ok.status, ok.via], ["ok", "carry"]);
+  const lech = sheetLinks(ids("a", "b"), { a, b: result("b", [{ is_note: true, status: "note", balance: 950 }]) })[0];
+  assert.deepEqual([lech.status, lech.diff, lech.via], ["break", 50, null]);
+  // 繰越 không in số dư thì bỏ qua và đi tiếp tới dòng có số dư
+  const khongSo = sheetLinks(ids("a", "b"), { a, b: result("b", [{ is_note: true, status: "note" }, { amount_out: 1, balance: 899 }]) })[0];
+  assert.deepEqual([khongSo.status, khongSo.via], ["ok", "chain"]);
+});
+
+test("sheetLinks: không có số dư ở A hoặc ở B thì 'không kiểm được' chứ không bịa", () => {
+  const khongA = { a: result("a", [{ amount_out: 1 }]), b: result("b", [{ balance: 5 }]) };
+  assert.equal(sheetLinks(ids("a", "b"), khongA)[0].status, "unknown");
+  const khongB = { a: result("a", [{ balance: 1000 }]), b: result("b", [{ amount_out: 1 }, { amount_in: 2 }]) };
+  assert.equal(sheetLinks(ids("a", "b"), khongB)[0].status, "unknown");
+});
+
+test("sheetLinks: dòng không in số dư ở cuối A và ở đầu B vẫn được cộng dồn", () => {
+  const store = {
+    a: result("a", [{ balance: 1000 }, { amount_out: 100, balance: 900 }, { amount_out: 20 }]),     // cuối A = 880
+    b: result("b", [{ amount_out: 30 }, { amount_in: 5, balance: 855 }]),                          // 880 - 30 + 5
+  };
+  assert.equal(sheetLinks(ids("a", "b"), store)[0].status, "ok");
+});
+
+test("sheetLinks: chỉ xét cặp LIỀN NHAU trong danh sách mà cả hai đã có kết quả", () => {
+  const store = {
+    a: result("a", [{ balance: 1000 }]),
+    c: result("c", [{ amount_out: 100, balance: 900 }]),
+    d: result("d", [{ balance: 900 }]),
+  };
+  // b chưa quét: a–b và b–c bỏ qua, a–c KHÔNG được tính vì không liền nhau
+  const links = sheetLinks(ids("a", "b", "c", "d"), store);
+  assert.deepEqual(links.map((l) => [l.from, l.to, l.status]), [["c", "d", "ok"]]);
+  assert.deepEqual(sheetLinks(ids("a"), store), []);
+  assert.deepEqual(sheetLinks([], {}), []);
+});
+
+test("sheetLinks: mặt có nhiều sổ — lấy khối CUỐI của A và khối ĐẦU của B", () => {
+  const a: SheetResult = { ...result("a", [{ balance: 77 }], meta("X")), blocks: [
+    { meta: meta("X"), rows: [full({ balance: 77 })] },
+    { meta: meta("A1"), rows: [full({ balance: 1000 })] },
+  ] };
+  const b: SheetResult = { ...result("b", [{ amount_out: 100, balance: 900 }], meta("A1")), blocks: [
+    { meta: meta("A1"), rows: [full({ amount_out: 100, balance: 900 })] },
+    { meta: meta("Z"), rows: [full({ balance: 5 })] },
+  ] };
+  const [l] = sheetLinks(ids("a", "b"), { a, b });
+  assert.deepEqual([l.status, l.sameBook], ["ok", true]);
+});
+
+test("sheetLinks: 'Không phải lỗi' chỉ có hiệu lực với ĐÚNG mặt trước và ĐÚNG mức chênh", () => {
+  const a = result("a", [{ balance: 1000 }]);
+  const b = (link_ok: { prev: string; diff: number } | null) =>
+    result("b", [{ amount_out: 50, balance: 1000 }], meta(), { link_ok });
+  assert.equal(sheetLinks(ids("a", "b"), { a, b: b({ prev: "a", diff: 50 }) })[0].dismissed, true);
+  assert.equal(isAlarm(sheetLinks(ids("a", "b"), { a, b: b({ prev: "a", diff: 50 }) })[0]), false);
+  assert.equal(sheetLinks(ids("a", "b"), { a, b: b({ prev: "z", diff: 50 }) })[0].dismissed, false);   // đổi mặt trước
+  assert.equal(sheetLinks(ids("a", "b"), { a, b: b({ prev: "a", diff: 49 }) })[0].dismissed, false);    // chỗ đứt đã khác
+  assert.equal(sheetLinks(ids("a", "b"), { a, b: b(null) })[0].dismissed, false);
+  // đổi thứ tự: mặt đứng trước B là mặt khác ⇒ xác nhận cũ hết hiệu lực
+  const c = result("c", [{ balance: 400 }]);
+  assert.equal(sheetLinks(ids("c", "b"), { c, b: b({ prev: "a", diff: 50 }) })[0].dismissed, false);
 });

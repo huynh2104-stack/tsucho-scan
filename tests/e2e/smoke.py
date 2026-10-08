@@ -37,6 +37,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     出金 → số đúng, 残高 → số đúng (tự sang dòng cần soát kế), đổi cột 出金↔入金, thêm dòng sót (Ctrl+Z hoàn tác)
  14 xác nhận cả hai mặt sổ → xuất Excel: 0 ô vàng ở bảng dữ liệu, 検証レベル bắt đầu bằng 検証済 hoặc
     残高チェーン検証済, cột 確認メモ ghi 確認済, chú thích hoàn toàn tiếng Nhật
+ 15 chỗ nối số dư giữa hai mặt sổ liền nhau: đúng thứ tự → «nối liền»; đổi thứ tự → «đứt chuỗi» (dải vàng, chip ⛓✕
+    ở cột trái, chip ⚠ ở thanh công cụ); 「Không phải lỗi」sống qua F5; trả thứ tự lại → «nối liền»
 """
 from __future__ import annotations
 
@@ -758,6 +760,82 @@ def step_export_confirmed(pg, base: str, ctx: dict) -> str:
     return " · ".join(seen)
 
 
+def step_sheet_links(pg, base: str, ctx: dict) -> str:
+    """Task 1.6: kiểm chỗ nối số dư giữa hai mặt sổ liền nhau (sổ mẫu: mặt ② mở bằng 繰越 = số dư cuối mặt ①)."""
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+
+    def workspace():
+        return pg.request.get(f"{base}/api/ws/{ws_id}").json()
+
+    sheets = workspace()["sheets"]
+    order = [x["id"] for x in sheets]
+    by_name = {x["name"]: x["id"] for x in sheets}
+    s1, s2 = by_name[SAMPLE_SHEET_NAME], by_name[SHEET2_NAME]
+
+    def open_sheet(name):
+        pg.get_by_text(name).first.click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+
+    def strip():
+        return pg.locator("[data-link]").first
+
+    def chips():
+        return pg.locator("[data-link-chip]").count()
+
+    def server_link_ok():
+        return next(r for r in workspace()["results"].values() if r["sheet_id"] == s1).get("link_ok")
+
+    # 1. Đúng thứ tự: nối liền, không có chip nào
+    open_sheet(SHEET2_NAME)
+    wait_until(lambda: strip().get_attribute("data-link") == "ok", "mặt ② nối liền với mặt ①")
+    assert f"Nối liền với「{SAMPLE_SHEET_NAME}」" in strip().inner_text(), strip().inner_text()
+    assert chips() == 0 and pg.locator("[data-links-badge]").count() == 0
+
+    # 2. Đổi thứ tự hai mặt: mặt ① đứng sau mặt ② ⇒ số dư đầu mặt ① (22,061) không nối với số dư cuối mặt ② (751,475)
+    new_order = [s2, s1] + [i for i in order if i not in (s1, s2)]
+    assert pg.request.post(f"{base}/api/ws/{ws_id}/reorder", data={"sheet_ids": new_order}).ok
+    pg.reload()
+    open_sheet(SAMPLE_SHEET_NAME)
+    wait_until(lambda: strip().get_attribute("data-link") == "break", "đổi thứ tự thì báo đứt chuỗi")
+    text = strip().inner_text()
+    assert "Đứt chuỗi với mặt trước" in text and "-729,414" in text, text
+    wait_until(lambda: chips() == 1, "thẻ mặt ① ở cột trái có chip ⛓✕")
+    badge = pg.locator("[data-links-badge]")
+    wait_until(lambda: badge.count() == 1 and badge.inner_text().strip() == "⚠ 1 chỗ đứt", "thanh công cụ báo 1 chỗ đứt")
+    assert need_review(pg) == 0, "chỗ đứt tính riêng, không cộng vào số dòng cần soát"
+
+    # 3. Chip ⚠: sang dạng danh sách
+    badge.click()
+    wait_until(lambda: pg.get_by_role("button", name=re.compile("Gộp danh sách")).get_attribute("aria-pressed") == "true",
+               "bấm chip thì sang dạng danh sách")
+    pg.get_by_role("button", name=re.compile("Trang hiện tại")).click()
+
+    # 4. 「Không phải lỗi」: hết chip, sống qua F5, bỏ xác nhận được
+    strip().get_by_role("button", name="Không phải lỗi").click()
+    wait_until(lambda: strip().get_attribute("data-link") == "dismissed" and chips() == 0
+               and pg.locator("[data-links-badge]").count() == 0, "bấm Không phải lỗi thì hết báo động")
+    wait_until(lambda: server_link_ok() == {"prev": s2, "diff": -729414}, "server lưu link_ok (mặt trước + mức chênh)", timeout=15)
+    pg.reload()
+    open_sheet(SAMPLE_SHEET_NAME)
+    wait_until(lambda: strip().get_attribute("data-link") == "dismissed", "sau F5 vẫn là đã xác nhận")
+    assert chips() == 0
+    strip().get_by_role("button", name="Bỏ xác nhận").click()
+    wait_until(lambda: strip().get_attribute("data-link") == "break" and chips() == 1, "bỏ xác nhận thì báo lại")
+    wait_until(lambda: server_link_ok() is None, "server xoá link_ok", timeout=15)
+
+    # 5. Xác nhận lại rồi trả đúng thứ tự: chỗ nối thật thì «nối liền», mặt đứng đầu danh sách không có dải nào
+    strip().get_by_role("button", name="Không phải lỗi").click()
+    wait_until(lambda: server_link_ok() is not None, "lưu lại xác nhận", timeout=15)
+    assert pg.request.post(f"{base}/api/ws/{ws_id}/reorder", data={"sheet_ids": order}).ok
+    pg.reload()
+    open_sheet(SHEET2_NAME)
+    wait_until(lambda: strip().get_attribute("data-link") == "ok", "trả đúng thứ tự thì nối liền")
+    assert chips() == 0 and pg.locator("[data-links-badge]").count() == 0
+    open_sheet(SAMPLE_SHEET_NAME)
+    assert pg.locator("[data-link]").count() == 0, "mặt ① đứng đầu danh sách: không có mặt trước nên không có dải nào"
+    return "đúng thứ tự: nối liền · đổi thứ tự: dải đứt + ⛓✕ + chip ⚠ (không cộng vào số dòng) · Không phải lỗi sống qua F5 và bỏ được · trả đúng thứ tự thì nối liền"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -773,6 +851,7 @@ STEPS = [
     ("12. ↺, Ctrl+Enter, xác nhận cả mặt, chèn dòng đúng chỗ", step_review_actions),
     ("13. Lý do tiếng Việt + gợi ý sửa một chạm", step_fix_suggestions),
     ("14. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
+    ("15. Chỗ nối số dư giữa các mặt sổ", step_sheet_links),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

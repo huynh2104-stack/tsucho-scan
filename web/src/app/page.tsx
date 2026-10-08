@@ -56,14 +56,17 @@ import {
   blankRow,
   explainOpen,
   insertRowAfter,
+  isAlarm,
   ngCount,
   restoreField,
   setAllReviewed,
   setReviewed,
+  sheetLinks,
   sheetStats,
   suggestFixes,
   type Fix,
   type FocusField,
+  type SheetLink,
 } from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
@@ -355,6 +358,13 @@ export default function Workbench() {
     }
     return out;
   }, [store]);
+
+  /* Chỗ nối số dư giữa các mặt sổ LIỀN NHAU trong danh sách (task 1.6): khoá theo mặt sổ được kiểm.
+     `alarms` = chỗ đứt đáng báo động (chắc cùng một sổ, chưa bấm「Không phải lỗi」) — tính riêng,
+     không cộng vào số dòng cần soát. */
+  const links = useMemo(() => sheetLinks(sheets, store), [sheets, store]);
+  const linkByTo = useMemo(() => Object.fromEntries(links.map((l) => [l.to, l])), [links]);
+  const alarms = useMemo(() => links.filter(isAlarm), [links]);
 
   /* Lưới an toàn cho lớp phủ kéo-thả: mọi nhánh con đều có thể gọi
      stopPropagation (thẻ mặt sổ làm vậy để trang không xử lý lại), nên onDrop
@@ -816,7 +826,7 @@ export default function Workbench() {
     setSaveState("saving");
     try {
       for (const sid of dirty) {
-        await saveSheetResult(wsId, sid, snapshot[sid].blocks);
+        await saveSheetResult(wsId, sid, snapshot[sid].blocks, snapshot[sid].link_ok ?? null);
         savedRef.current[sid] = snapshot[sid];
       }
       setSaveState("saved");
@@ -890,6 +900,27 @@ export default function Workbench() {
   /** Nút ↺: trả một ô về giá trị MÁY ĐỌC (và xoá nó khỏi `orig`). */
   const restoreCell: RestoreFn = (ref, field) =>
     patchRows(ref.sheet, ref.block, (rows) => restoreField(rows, ref.row, field));
+
+  /** 「Không phải lỗi」cho một chỗ đứt chuỗi: nhớ ở file kết quả của mặt sổ được kiểm, kèm mặt trước và
+   *  mức chênh (đổi thứ tự hoặc sửa số làm chỗ đứt khác đi thì xác nhận cũ hết hiệu lực). Hoàn tác được. */
+  const dismissLink = (l: SheetLink) =>
+    commitStore((prev) => {
+      const r = prev[l.to];
+      if (!r || l.diff == null) return prev;
+      return { ...prev, [l.to]: { ...r, link_ok: { prev: l.from, diff: l.diff } } };
+    });
+  const undismissLink = (to: string) =>
+    commitStore((prev) => {
+      const r = prev[to];
+      return r?.link_ok ? { ...prev, [to]: { ...r, link_ok: null } } : prev;
+    });
+  /** Bấm chip「⚠ N chỗ đứt」: sang dạng danh sách và cuộn tới mặt sổ có chỗ đứt đầu tiên. */
+  const goFirstBreak = () => {
+    if (!alarms.length) return;
+    setMode("list");
+    setActive(alarms[0].to);
+    setPane("result");
+  };
 
   /** Bấm một gợi ý sửa. Là một lần sửa như mọi lần khác (Ctrl+Z hoàn tác được). */
   const applyFixAt = (ref: TxRef, fix: Fix) => {
@@ -1251,6 +1282,7 @@ export default function Workbench() {
               active={active}
               states={states}
               perSheet={perSheet}
+              brokenLinks={new Set(alarms.map((l) => l.to))}
               onToggle={toggle}
               onToggleRange={toggleRange}
               onActivate={(id) => {
@@ -1420,6 +1452,16 @@ export default function Workbench() {
                   nên cú bấm nút nhỏ (✓, ↺, ×) ở dòng chưa chọn bị trượt: nhấn xuống một nơi, nhả ra nơi khác.
                   Nay là một khung co giãn (basis 0) tự cắt bớt chữ, không bao giờ ép xuống dòng. */}
               <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden whitespace-nowrap">
+                {alarms.length > 0 && (
+                  <button
+                    data-links-badge
+                    onClick={goFirstBreak}
+                    title={t.linksBadgeHint(alarms.length)}
+                    className="tnum flex-none rounded-md bg-warnbg px-2 py-0.5 text-[11.5px] font-semibold text-warnink hover:brightness-95"
+                  >
+                    {t.linksBadge(alarms.length)}
+                  </button>
+                )}
                 {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng đã lưu, nên nói rõ ra. */}
                 {saveState !== "idle" && (
                   <span
@@ -1469,6 +1511,9 @@ export default function Workbench() {
               onConfirmAll={confirmAll}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
+              links={linkByTo}
+              onDismissLink={dismissLink}
+              onUndismissLink={undismissLink}
               selected={selRow}
               onSelectRow={(ref) => { setSelRow(ref); setActive(ref.sheet); }}
             />

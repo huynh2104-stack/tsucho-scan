@@ -26,7 +26,9 @@ import {
   isISO,
   parseReasons,
   parseYen,
+  signedNum,
   type RowInfo,
+  type SheetLink,
 } from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 
@@ -573,6 +575,65 @@ function Row({
   );
 }
 
+/** Dải mảnh báo chỗ nối số dư với mặt sổ đứng ngay trước (task 1.6). CAO CỐ ĐỊNH (h-8): dải đổi từ
+ *  «nối liền» sang «đứt» khi người dùng vừa sửa một số mà cao thấp khác nhau thì cả bảng bên dưới
+ *  giật đúng lúc đang nhấn chuột. Trạng thái không kiểm được / khác sổ thì không hiện gì. */
+function LinkStrip({
+  link,
+  fromName,
+  t,
+  onDismiss,
+  onUndismiss,
+}: {
+  link: SheetLink;
+  fromName: string;
+  t: Dict;
+  onDismiss: (l: SheetLink) => void;
+  onUndismiss: (to: string) => void;
+}) {
+  if (link.status !== "ok" && link.status !== "break") return null;
+  const box =
+    "mx-2.5 mt-2.5 flex h-8 flex-none items-center gap-2 overflow-hidden whitespace-nowrap rounded-lg border px-3 text-[11.5px]";
+  const btn =
+    "flex-none rounded-md border border-rule bg-card px-2 py-0.5 text-[11px] font-semibold text-ink2 hover:border-accentmid hover:text-ink";
+  if (link.status === "ok") {
+    return (
+      <div data-link="ok" className={`${box} border-rule2 bg-card2 text-ink3`}>
+        <span className="truncate">{t.linkOk(fromName)}</span>
+      </div>
+    );
+  }
+  const diff = signedNum(link.diff ?? 0);
+  if (link.dismissed) {
+    return (
+      <div data-link="dismissed" className={`${box} border-rule2 bg-card2 text-ink3`}>
+        <span className="min-w-0 flex-1 truncate">{t.linkDismissed}</span>
+        <button className={btn} onClick={() => onUndismiss(link.to)}>
+          {t.linkUndismiss}
+        </button>
+      </div>
+    );
+  }
+  if (!link.sameBook) {
+    // Ảnh chụp lẻ không có số tài khoản: lệch là chuyện thường, chỉ nói nhẹ nhàng
+    const text = t.linkWeak(diff);
+    return (
+      <div data-link="weak" title={text} className={`${box} border-rule2 bg-card2 text-ink3`}>
+        <span className="truncate">{text}</span>
+      </div>
+    );
+  }
+  const text = t.linkBreak(diff);
+  return (
+    <div data-link="break" title={text} className={`${box} border-warnedge bg-warnbg font-medium text-warnink`}>
+      <span className="min-w-0 flex-1 truncate">{text}</span>
+      <button className={btn} onClick={() => onDismiss(link)}>
+        {t.linkNotError}
+      </button>
+    </div>
+  );
+}
+
 /** Một thẻ sổ: đầu thẻ, bảng, chân thẻ có tổng.
  *
  * ĐỊNH NGHĨA Ở MỨC MODULE, không lồng trong ReviewPane: component khai báo bên
@@ -783,6 +844,9 @@ export default function ReviewPane({
   onConfirmAll,
   onAddRow,
   onAutoBalance,
+  links,
+  onDismissLink,
+  onUndismissLink,
   selected,
   onSelectRow,
 }: {
@@ -803,6 +867,10 @@ export default function ReviewPane({
   /** Chèn một dòng trống ngay dưới dòng `ref`. */
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
+  /** Kết quả kiểm chỗ nối với mặt sổ đứng trước, khoá theo id mặt sổ ĐƯỢC kiểm (xem `sheetLinks`). */
+  links: Record<string, SheetLink>;
+  onDismissLink: (link: SheetLink) => void;
+  onUndismissLink: (sheetId: string) => void;
   /** Dòng đang chọn — khung giữa khoanh đúng dải ảnh của dòng này. */
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
@@ -970,7 +1038,8 @@ export default function ReviewPane({
     const source = sheet
       ? sheet.origin + (sheet.page ? ` · ${t.pageLabel(sheet.page)}` : "")
       : sheetId;
-    return data.blocks.map((block, bi) => (
+    const link = links[sheetId];
+    const cards = data.blocks.map((block, bi) => (
       <AccountCard
         key={`${sheetId}-${bi}`}
         meta={block.meta}
@@ -998,6 +1067,20 @@ export default function ReviewPane({
         pick={pick}
       />
     ));
+    return (
+      <>
+        {link && (
+          <LinkStrip
+            link={link}
+            fromName={sheetName[link.from] ?? link.from}
+            t={t}
+            onDismiss={onDismissLink}
+            onUndismiss={onUndismissLink}
+          />
+        )}
+        {cards}
+      </>
+    );
   };
 
   if (scanned.length === 0) {

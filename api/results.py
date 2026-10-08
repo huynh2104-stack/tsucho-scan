@@ -72,6 +72,25 @@ def ensure_rids(blocks: list[dict]) -> bool:
     return changed
 
 
+# `save_edits(link_ok=...)` không truyền = GIỮ nguyên giá trị đã lưu (client cũ không biết trường này)
+_KEEP = object()
+
+
+def validate_link_ok(value) -> None:
+    """`link_ok` = {"prev": id mặt sổ đứng trước, "diff": mức chênh} (task 1.6) hoặc None để xoá."""
+    if value is None:
+        return
+    ok = (
+        isinstance(value, dict)
+        and isinstance(value.get("prev"), str)
+        and 0 < len(value["prev"]) <= 64
+        and isinstance(value.get("diff"), int)
+        and not isinstance(value["diff"], bool)
+    )
+    if not ok:
+        raise ValueError("link_ok không hợp lệ")
+
+
 def validate_rows(blocks: list[dict]) -> None:
     """Kiểm tối thiểu dữ liệu người dùng gửi lên. Mọi khoá khác của dòng được GIỮ NGUYÊN
     (orig, reviewed, inferred…, kể cả khoá của phiên bản sau này) để không mất công soát."""
@@ -124,7 +143,7 @@ def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> No
             )
 
 
-def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
+def save_edits(ws_id: str, sheet_id: str, blocks: list[dict], link_ok=_KEEP) -> dict:
     """Ghi đè các dòng của MỘT mặt sổ bằng bản người dùng đang thấy trên màn hình.
 
     Giữ nguyên phần metadata của lần quét (model, chi phí, thời điểm quét) và
@@ -133,8 +152,14 @@ def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
 
     Không có hàm này thì công soát chỉ nằm trong bộ nhớ trình duyệt: F5, đăng
     xuất, hay rớt mạng là mất sạch (bug người dùng báo 31/07/2026).
+
+    `link_ok`: người đã bấm「Không phải lỗi」cho chỗ đứt chuỗi số dư với mặt sổ đứng trước (task 1.6).
+    Không truyền thì giữ nguyên giá trị đã lưu; truyền None thì xoá; quét lại mặt sổ (`save_job`)
+    ghi file mới nên cũng mất — dữ liệu đã khác thì xác nhận cũ không còn nghĩa.
     """
     validate_rows(blocks)
+    if link_ok is not _KEEP:
+        validate_link_ok(link_ok)
     ensure_rids(blocks)                    # client cũ chưa gửi rid thì bù ở đây
     path = _path(ws_id, sheet_id)
     with _LOCK:
@@ -151,6 +176,10 @@ def save_edits(ws_id: str, sheet_id: str, blocks: list[dict]) -> dict:
             "blocks": blocks,
             "edited_at": time.time(),
         }
+        if link_ok is None:
+            data.pop("link_ok", None)
+        elif link_ok is not _KEEP:
+            data["link_ok"] = link_ok
         _write_atomic(path, data)
     return data
 

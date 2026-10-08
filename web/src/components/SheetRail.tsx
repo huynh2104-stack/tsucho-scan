@@ -61,6 +61,7 @@ export default function SheetRail({
   active,
   states,
   perSheet,
+  brokenLinks,
   onToggle,
   onToggleRange,
   onActivate,
@@ -74,6 +75,8 @@ export default function SheetRail({
   active: string | null;
   states: Record<string, ScanState>;
   perSheet: Record<string, PerSheet>;
+  /** Mặt sổ có chuỗi số dư ĐỨT với mặt đứng ngay trước (chắc cùng một sổ, chưa bấm「Không phải lỗi」). */
+  brokenLinks: Set<string>;
   onToggle: (id: string) => void;
   onToggleRange: (id: string) => void;
   onActivate: (id: string) => void;
@@ -297,6 +300,15 @@ export default function SheetRail({
                         className={`rounded px-1.5 py-px font-semibold ${status.cls}`}
                       >
                         {status.label}
+                      </span>
+                    )}
+                    {brokenLinks.has(s.id) && (
+                      <span
+                        data-link-chip
+                        className="rounded bg-warnbg px-1 font-semibold text-warnink"
+                        title={t.linkRailTip}
+                      >
+                        ⛓✕
                       </span>
                     )}
                     {autoDone && s.auto && (

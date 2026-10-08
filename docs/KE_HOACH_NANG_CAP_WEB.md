@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.5 (08/10) — pytest **345 passed** · `npm test` **120 pass** · build xanh · E2E `smoke.py` **14/14 bước** (~30 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.6 (08/10) — pytest **355 passed** · `npm test` **129 pass** · build xanh · E2E `smoke.py` **15/15 bước** (~35 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1042,7 +1042,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.3 ✓ Đã soát (xong 08/10/2026)
 - [x] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A** (xong 08/10/2026)
 - [x] 1.5 Lý do dễ hiểu + gợi ý sửa (xong 08/10/2026)
-- [ ] 1.6 Nối số dư giữa các mặt
+- [x] 1.6 Nối số dư giữa các mặt (xong 08/10/2026)
 - [ ] 1.7 Ảnh chụp trùng trang
 - [ ] 2.1 Backend hồ sơ
 - [ ] 2.2 Trang hồ sơ
@@ -1174,6 +1174,13 @@ Quan sát khi viết E2E (không sửa):
 - **Áp xong thì tự sang dòng cần soát kế** — tính SAU khi bảng vẽ lại (`jumpNext` + effect): dùng dữ liệu cũ thì sẽ nhảy nhầm vào dòng kế vừa hết lệch theo (sửa 残高 một dòng là dòng kế cũng hết NG). Dòng còn cờ khác thì ở lại và đặt con trỏ vào ô cần xem; thêm dòng sót thì con trỏ vào 摘要 của dòng mới.
 - Tests: 14 test TS mới (giải thích ba thứ tiếng, mức lệch thật, ghi chú tự sửa, từng phương án có ca đúng + ca không được gợi ý — ví dụ (2) không ra khi dòng kế không khớp hoặc không có dòng sau —, thứ tự/giới hạn, không gợi ý cho dòng khớp/đã ✓/ghi chú, `applyFix` làm hết NG và ghi `orig`, dòng sót đặt đúng chỗ). Cố ý bẻ 5 luật: bằng chứng hai phía, khoảng cách chữ số, mức lệch lấy từ chuỗi (thay vì 差額) thì test đỏ đúng chỗ; luật «chỉ dòng NG» lúc đầu KHÔNG bị bắt nên đã thêm test «dòng đang khớp không được gợi ý»; giới hạn 3 phương án không bẻ được vì về mặt toán học không bao giờ có 4 (giữ làm lưới an toàn). E2E bước 13 dùng sổ mẫu: 出金 1,700→1,100, 残高 → 2,108,211 (tự nhảy sang dòng kế), đổi cột, thêm dòng sót + Ctrl+Z.
 - Python không đổi (gợi ý chỉ là việc của giao diện; Excel không cần).
+
+**Task 1.6 — xong 08/10/2026** (pytest **355** (+10) · `npm test` **129** (+9) · build xanh · E2E **15/15 bước**, thêm bước 15).
+- **`sheetLinks(sheets, store)`** (`review.ts`) làm đúng kế hoạch: mỗi cặp mặt sổ liền nhau trong danh sách mà cả hai đã có kết quả (cặp cách một mặt chưa quét thì không xét); lấy số dư cuối khối CUỐI của A (kể cả 繰越, cộng dồn cả dòng không in 残高 ở cuối), đi xuôi khối ĐẦU của B tới dòng đầu có số dư; B mở bằng 繰越 có số dư thì so thẳng (`via: "carry"`); kết quả `ok` / `break` (kèm chênh = số dư in − số dư tính được) / `different` (cả hai có số tài khoản khác nhau, hoặc cả hai có tên ngân hàng khác nhau) / `unknown`.
+- **Phát hiện khi đo trên dữ liệu thật của anh — và quyết định khác kế hoạch**: bộ 33 ảnh chụp 通帳2 (nhiều sổ khác nhau xếp lẫn) cho **25/31 cặp liền nhau «đứt chuỗi»**; không có kết quả nào có số tài khoản (không có trang bìa). Nếu báo động hết thì cột trái và thanh công cụ ngập cảnh báo giả. Nên thêm cờ `sameBook` (cả hai mặt ghi số tài khoản và GIỐNG nhau): **chỉ chỗ đứt `sameBook` mới là «báo động»** (dải vàng + nút「Không phải lỗi」, chip ⛓✕ ở cột trái, chip「⚠ N chỗ đứt」ở thanh công cụ). Chỗ đứt mà không biết có cùng sổ không thì chỉ hiện một dải xám nhạt «Chưa nối với mặt trước (chênh ¥…) — sổ không ghi số tài khoản nên chưa biết hai mặt có liền nhau không», không chip, không đếm. «Nối liền» thì hiện cho cả hai loại (khớp đúng là bằng chứng mạnh). Bộ 48 mặt sổ (9 mặt đã quét) cũng không có số tài khoản: 2 chỗ nối liền, 1 chỗ đứt (chênh 89,790) ở dạng nhạt.
+- **「Không phải lỗi」lưu khác kế hoạch một chút**: kế hoạch ghi `link_ok: bool`; làm vậy thì đổi thứ tự hoặc xoá mặt trước là chỗ đứt MỚI bị che âm thầm. Nay `link_ok = {prev: id mặt trước, diff: mức chênh}` ở file kết quả của mặt B, và chỉ có hiệu lực khi đúng mặt trước và đúng mức chênh. `PUT /api/ws/:ws/results/:sheet` nhận thêm `link_ok` (có khoá thì ghi, `null` thì xoá, vắng mặt thì GIỮ nguyên — client cũ không mất xác nhận; sai định dạng → 400); quét lại mặt sổ thì mất (dữ liệu mới). Bấm「Không phải lỗi」/「Bỏ xác nhận」đi qua `commitStore` nên Ctrl+Z hoàn tác được và autosave tự lưu.
+- **Giao diện**: dải mảnh ở ĐẦU kết quả của mặt B, cả chế độ trang lẫn chế độ danh sách (đặt trong `cardsOf` nên dùng chung). **Chiều cao cố định** (`h-8`, chữ cắt bớt, tooltip có đủ câu): dải đổi từ «nối liền» sang «đứt» khi người dùng vừa sửa một số mà cao thấp khác nhau thì cả bảng giật đúng lúc đang nhấn chuột — chính lỗi đã gặp ở 1.3. Chip「⚠ N chỗ đứt」nằm trong cụm trạng thái không-bao-giờ-xuống-dòng của thanh công cụ (không phải ngay sau bộ đếm) vì cùng lý do; bấm vào thì sang dạng danh sách và cuộn tới chỗ đứt đầu tiên. Bộ đếm「Còn N dòng」không đổi: chỗ đứt tính riêng. Sổ mẫu: mặt ② mở bằng 繰越 647,354 = số dư cuối mặt ① nên hiện «nối liền»; đổi thứ tự hai mặt thì «đứt», chênh ¥-729,414.
+- Tests: 9 test TS cho `sheetLinks` (nối đúng; đứt + sameBook; khác sổ/khác ngân hàng; 繰越 bằng/lệch/không in số dư; không có số dư; cộng dồn dòng không in số dư; chỉ cặp liền nhau; nhiều sổ trong một mặt; `link_ok` đúng/sai mặt trước/sai mức chênh) và 10 pytest cho `link_ok` (lưu/giữ/xoá, quét lại thì mất, 7 kiểu sai định dạng, qua HTTP). E2E bước 15: đúng thứ tự → nối liền; đổi thứ tự bằng API → dải vàng + chip ⛓✕ + chip ⚠ (số dòng cần soát vẫn 0); chip ⚠ sang dạng danh sách; Không phải lỗi sống qua F5, bỏ xác nhận được; trả thứ tự → nối liền, mặt đứng đầu không có dải.
 
 ---
 

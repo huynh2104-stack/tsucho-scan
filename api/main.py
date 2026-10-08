@@ -528,8 +528,10 @@ def save_result(
         if not isinstance(b, dict) or not isinstance(b.get("rows"), list):
             raise HTTPException(400, "Khối dòng không đúng định dạng")
 
+    # Có khoá `link_ok` (kể cả null) thì ghi/xoá; không có thì giữ nguyên bản đã lưu
+    extra = {"link_ok": body["link_ok"]} if "link_ok" in body else {}
     try:
-        return results.save_edits(ws_id, sheet_id, blocks)
+        return results.save_edits(ws_id, sheet_id, blocks, **extra)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 

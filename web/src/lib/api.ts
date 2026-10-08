@@ -69,6 +69,11 @@ export type AccountMeta = {
 /** Một khối dòng cùng một sổ, trong phạm vi một mặt sổ. */
 export type SheetBlock = { meta: AccountMeta; rows: Tx[] };
 
+/** Người đã bấm「Không phải lỗi」cho chỗ đứt chuỗi số dư giữa mặt sổ này và mặt đứng ngay trước nó
+ *  (task 1.6). Nhớ cả mặt trước và mức chênh: đổi thứ tự/xoá mặt trước hoặc sửa số làm chỗ đứt khác đi
+ *  thì xác nhận cũ hết hiệu lực, không âm thầm che một lỗi mới. */
+export type LinkOk = { prev: string; diff: number };
+
 /** Kết quả đã lưu của MỘT mặt sổ — tích luỹ qua nhiều lần quét. */
 export type SheetResult = {
   sheet_id: string;
@@ -78,6 +83,8 @@ export type SheetResult = {
   cached: boolean | null;
   cost_usd: number | null;
   blocks: SheetBlock[];
+  /** Xem `LinkOk`. Lưu cùng file kết quả của mặt sổ này; quét lại mặt sổ thì mất (dữ liệu mới). */
+  link_ok?: LinkOk | null;
 };
 
 export type ResultStore = Record<string, SheetResult>;
@@ -403,11 +410,16 @@ export const renameSheet = (wsId: string, sheetId: string, name: string) =>
  * Trước đây các ô sửa chỉ nằm trong bộ nhớ trình duyệt nên F5 hay đăng nhập lại
  * là mất sạch công soát — dùng hàm này để autosave.
  */
-export const saveSheetResult = (wsId: string, sheetId: string, blocks: SheetBlock[]) =>
+export const saveSheetResult = (
+  wsId: string,
+  sheetId: string,
+  blocks: SheetBlock[],
+  linkOk: LinkOk | null = null,
+) =>
   fetch(`${API}/api/ws/${wsId}/results/${sheetId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ blocks }),
+    body: JSON.stringify({ blocks, link_ok: linkOk }),
     ...CRED,
   }).then(asJson<SheetResult>);
 

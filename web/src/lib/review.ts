@@ -11,7 +11,7 @@
  *     tương ứng là `review.py` ở gốc repo; hai bản cùng đọc `tests/fixtures/review_cases.json`.
  */
 
-import type { EditField, Tx } from "./api.ts";
+import type { EditField, ResultStore, Tx } from "./api.ts";
 import { DICT, type Dict, type Lang } from "./dict.ts";
 
 // ── Ngày ─────────────────────────────────────────────────────────────
@@ -715,4 +715,115 @@ export function applyFix(rows: Tx[], i: number, fix: Fix): Tx[] {
       return insertRowAfter(rows, i - 1, row);
     }
   }
+}
+
+
+// ── Nối số dư giữa các mặt sổ (task 1.6) ──────────────────────────────
+//
+// Engine chỉ nối chuỗi số dư trong MỘT lần quét. Quét trang 1–5 hôm nay và trang 6–10 hôm sau thì
+// chỗ nối giữa hai lần không ai kiểm, mà đó lại là chỗ hay thiếu trang, sai thứ tự hoặc sót dòng.
+
+export const signedNum = signed;
+
+/** Kết quả kiểm chỗ nối giữa hai mặt sổ liền nhau trong danh sách. */
+export type LinkStatus = "ok" | "break" | "different" | "unknown";
+export type SheetLink = {
+  /** Mặt sổ đứng trước (A) và mặt sổ được kiểm (B). */
+  from: string;
+  to: string;
+  status: LinkStatus;
+  /** `break` thì là số dư in ở B − số dư tính được từ cuối A; còn lại null. */
+  diff: number | null;
+  /** `carry` = B mở đầu bằng dòng 繰越 có số dư (chắc chắn nhất); `chain` = cộng trừ các dòng trên đường đi. */
+  via: "carry" | "chain" | null;
+  /** Hai mặt cùng một số tài khoản (cả hai đều ghi số tài khoản và giống nhau): CHẮC là cùng một sổ. */
+  sameBook: boolean;
+  /** Người đã bấm「Không phải lỗi」đúng cho chỗ đứt này (cùng mặt trước, cùng mức chênh). */
+  dismissed: boolean;
+};
+
+/** Chỗ đứt đáng báo động: chắc là cùng một sổ, chuỗi lại không nối, và người chưa bảo「không phải lỗi」.
+ *  Ảnh chụp lẻ không có trang bìa thì không có số tài khoản nên không biết hai mặt có chung sổ hay không:
+ *  chuỗi lệch ở đó là chuyện bình thường (đo trên bộ 33 ảnh: 25/31 cặp liền nhau lệch), chỉ hiện nhạt. */
+export const isAlarm = (l: SheetLink) => l.status === "break" && l.sameBook && !l.dismissed;
+
+/** Số dư cuối của một khối dòng (kể cả dòng ghi chú 繰越); cộng dồn cả dòng không in 残高 ở cuối. */
+function endBalance(rows: Tx[]): number | null {
+  let running: number | null = null;
+  for (const tx of rows) {
+    if (tx.is_note) {
+      if (tx.balance != null) running = tx.balance;
+      continue;
+    }
+    if (tx.balance != null) running = tx.balance;
+    else if (running != null) running += (tx.amount_in ?? 0) - (tx.amount_out ?? 0);
+  }
+  return running;
+}
+
+/**
+ * Kiểm chỗ nối của mọi cặp mặt sổ LIỀN NHAU trong danh sách mà cả hai đã có kết quả.
+ *
+ * • khác sổ (cả hai có số tài khoản và khác nhau; hoặc cả hai có tên ngân hàng và khác nhau) → `different`, không kiểm;
+ * • lấy số dư cuối của khối cuối mặt A, đi xuôi khối đầu mặt B tới dòng đầu tiên có số dư, cộng trừ
+ *   các giao dịch trên đường đi: khớp → `ok`, lệch → `break` (kèm mức chênh), không có số dư → `unknown`;
+ * • B mở đầu bằng dòng 繰越 có số dư: so thẳng với số dư cuối của A (`via: "carry"`).
+ */
+export function sheetLinks(sheets: { id: string }[], store: ResultStore): SheetLink[] {
+  const out: SheetLink[] = [];
+  for (let k = 1; k < sheets.length; k++) {
+    const a = store[sheets[k - 1].id]?.blocks;
+    const bRes = store[sheets[k].id];
+    const b = bRes?.blocks;
+    if (!a?.length || !b?.length) continue;
+    const blockA = a[a.length - 1];
+    const blockB = b[0];
+    if (!blockA.rows.length || !blockB.rows.length) continue;
+
+    const ma = blockA.meta;
+    const mb = blockB.meta;
+    const link = (status: LinkStatus, diff: number | null = null, via: SheetLink["via"] = null): SheetLink => ({
+      from: sheets[k - 1].id,
+      to: sheets[k].id,
+      status,
+      diff,
+      via,
+      sameBook: ma.account_no != null && ma.account_no === mb.account_no,
+      dismissed:
+        status === "break" && bRes.link_ok?.prev === sheets[k - 1].id && bRes.link_ok?.diff === diff,
+    });
+
+    if (
+      (ma.account_no != null && mb.account_no != null && ma.account_no !== mb.account_no) ||
+      (ma.bank_name != null && mb.bank_name != null && ma.bank_name !== mb.bank_name)
+    ) {
+      out.push(link("different"));
+      continue;
+    }
+
+    const end = endBalance(blockA.rows);
+    if (end == null) {
+      out.push(link("unknown"));
+      continue;
+    }
+
+    let running = end;
+    let verdict: SheetLink | null = null;
+    for (const [j, tx] of blockB.rows.entries()) {
+      if (tx.is_note) {
+        if (tx.balance != null) {
+          verdict = tx.balance === running ? link("ok", null, j === 0 ? "carry" : "chain") : link("break", tx.balance - running);
+          break;
+        }
+        continue;
+      }
+      running += (tx.amount_in ?? 0) - (tx.amount_out ?? 0);
+      if (tx.balance != null) {
+        verdict = tx.balance === running ? link("ok", null, "chain") : link("break", tx.balance - running);
+        break;
+      }
+    }
+    out.push(verdict ?? link("unknown"));
+  }
+  return out;
 }
