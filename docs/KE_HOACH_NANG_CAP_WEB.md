@@ -1032,14 +1032,14 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.2 (03/10) — pytest **320 passed** · `npm test` **94 pass** · build xanh · E2E `smoke.py` **11/11 bước** (~15 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.3 (08/10) — pytest **320 passed** · `npm test` **106 pass** · build xanh · E2E `smoke.py` **12/12 bước** (~20 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
 - [x] 0.3 Năm sửa lỗi nhỏ (xong 03/10/2026)
 - [x] 1.1 Danh tính dòng + giá trị máy đọc (xong 03/10/2026)
 - [x] 1.2 Một định nghĩa "cần soát" (xong 03/10/2026)
-- [ ] 1.3 ✓ Đã soát
+- [x] 1.3 ✓ Đã soát (xong 08/10/2026)
 - [ ] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A**
 - [ ] 1.5 Lý do dễ hiểu + gợi ý sửa
 - [ ] 1.6 Nối số dư giữa các mặt
@@ -1146,6 +1146,15 @@ Quan sát khi viết E2E (không sửa):
 - **Kiểm test có răng**: cố ý đổi 5 luật trong `review.ts` (bỏ luật `reviewed`, bỏ `added`, ghi chú không làm mốc, không cộng dồn, ✓ không cần cho lowconf) và 4 luật trong `review.py` ⇒ cả hai bộ test đỏ đúng chỗ; đã trả lại.
 - **Quyết định nhỏ, chờ anh gật/lắc**: dòng đã ✓ rồi sửa tiếp một ô vẫn giữ ✓ (người đã nhìn dòng này; và ✓ thắng cả NG theo kế hoạch). Nếu muốn「sửa là mất ✓」thì đổi một chỗ trong `applyEdit`.
 - Chưa làm (đúng phạm vi): bộ đếm vẫn đếm mặt sổ **đang xem**, phím n không nhảy sang mặt khác; Excel/CSV chờ 1.4.
+
+**Task 1.3 — xong 08/10/2026** (pytest **320** không đổi vì task này chỉ ở web · `npm test` **106 pass** (+12) · build xanh · E2E **12/12 bước**, thêm bước 12):
+- **Đã làm đủ mục kế hoạch**: ↺ khôi phục giá trị máy đọc (nút nhỏ ở góc ô đã sửa, hiện khi rê chuột, tooltip「Máy đọc: …」; đi qua `applyEdit` nên `orig` tự dọn); cột 確認メモ ghi「✎ đã sửa tay」(tooltip liệt kê `年月日: 2025-04-11 → 2025-04-12`…) và「✓ Đã soát」(kèm ✎ nếu có ô đã sửa); `Ctrl+Enter`; `Ctrl+Shift+Enter`; 「✓ Xác nhận cả mặt sổ」; 「+ Thêm dòng」chèn ngay dưới dòng đang chọn. Hàm thuần mới trong `review.ts` (đều có test): `setAllReviewed`, `ngCount`, `blankRow`, `insertRowAfter`, `restoreField`, `editChanges`.
+- **`Ctrl+Enter`** bắt ở `keydown` của window trước nhánh `typing` (như Ctrl+Z) và `Cell` không còn nuốt Enter khi có Ctrl/Meta. Luôn **đặt** ✓ (không phải bật/tắt, khác nút ✓), **ghi nốt chữ đang gõ dở trước khi ✓**, rồi nhảy tới dòng cần soát kế (bỏ qua chính dòng vừa ✓ vì bảng chưa kịp vẽ lại); không còn dòng nào thì con trỏ ở lại chỗ cũ. Ô nhập NGOÀI bảng (lọc, đổi tên, tên sổ) không bị bắt. `Ctrl+Shift+Enter` chèn dòng trống dưới dòng chứa con trỏ rồi đặt con trỏ vào ô ngày của nó (nút「+ Thêm dòng」cũng vậy).
+- **「Xác nhận cả mặt sổ」theo từng thẻ sổ** (một mặt có thể chứa nhiều sổ): thẻ duy nhất ghi「Xác nhận cả mặt sổ」, mặt có nhiều sổ ghi「Xác nhận cả sổ này」và chỉ tác động thẻ đó. Chỉ hỏi lại khi còn dòng NG chưa ✓ (đúng kế hoạch; các lý do khác như 低信頼度/行抜け thì ✓ luôn vì đó chính là mục đích). Nút mờ đi khi mọi dòng đã ✓. Hoàn tác được bằng Ctrl+Z.
+- **Lỗi có thật bắt được nhờ E2E (có từ trước, không phải do 1.3)**: chọn một dòng làm hiện chữ「khung đỏ: vị trí ước lượng…」ở thanh công cụ; khi thanh hẹp nó bị đẩy xuống dòng thứ hai và **cả bảng tụt xuống một nấc ngay giữa lúc đang nhấn chuột** ⇒ nhấn xuống nút nhỏ (✓, ↺, ×) ở dòng CHƯA chọn, nhả ra ở ô nhập bên dưới ⇒ trình duyệt bỏ cú bấm (đã đo: `mouseup` rơi vào `INPUT`). Bấm lần hai thì ăn vì dòng đã được chọn. Sửa: cụm trạng thái bên phải thanh công cụ (đã lưu / vị trí ước lượng) là một khung co giãn, tự cắt chữ, không bao giờ ép thanh xuống dòng.
+- **Khác kế hoạch / cần biết**: (1) hướng dẫn 7 bước sửa lời ở bước 5 (nhắc ✓ và Ctrl+Enter) nên **`VERSION` của tour tăng 1→2: người đã xem sẽ thấy hướng dẫn mở lại một lần**; (2) không có "bảng phím tắt" nào trong giao diện để thêm vào, nên phím tắt mới nằm ở tooltip nút ✓ / 「+ Thêm dòng」 và lời hướng dẫn bước 5; (3) dòng chỉ có ô do máy tự tính (`inferred`, không có `orig`) ghi「✎ máy tự tính」chứ không ghi「đã sửa tay」(vì không ai sửa tay).
+- **E2E bước 12** dựa vào trạng thái mặt ① sau bước 8 và 10 (dòng 1 có 出金 gõ thành 1,234 ⇒ NG, dòng 2 có ngày "tuần sau" ⇒ 2 dòng vàng): ↺ trả hai ô về máy đọc ⇒ hết vàng, server dọn `orig`; Ctrl+Enter khi đang gõ dở; hộp thoại nói「2 dòng số dư lệch」, Escape thì không xác nhận gì, đồng ý thì 11 dòng confirmed và ghi chú vẫn là note; Ctrl+Z; chèn dòng bằng nút và bằng phím; ✓ hai dòng chèn; F5 vẫn đủ 14 dòng, `added` + `reviewed` còn nguyên.
+- Còn lại của giai đoạn 1: 1.4 (Excel/CSV theo định nghĩa chung — vẫn đang dùng `status` đóng băng), rồi 1.5–1.7.
 
 ---
 

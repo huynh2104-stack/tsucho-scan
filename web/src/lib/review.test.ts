@@ -7,8 +7,12 @@ import {
   analyzeRows,
   applyDateEdit,
   applyEdit,
+  blankRow,
   chainChecks,
+  editChanges,
   focusField,
+  insertRowAfter,
+  ngCount,
   needsReview,
   nearDates,
   newRid,
@@ -16,7 +20,9 @@ import {
   parseDateInput,
   parseReasons,
   parseYen,
+  restoreField,
   rowState,
+  setAllReviewed,
   setReviewed,
   sheetStats,
   shown,
@@ -391,4 +397,129 @@ test("✓ rồi sửa tiếp ô khác: vẫn giữ ✓ (người đã nhìn dòn
   const out = applyEdit(rows, 0, "description", "khác");
   assert.equal(out[0].reviewed, true);
   assert.equal(rowState(out[0], "―"), "confirmed");
+});
+
+
+// ── Task 1.3: xác nhận cả mặt, chèn dòng đúng chỗ, khôi phục giá trị máy ───────
+
+test("setAllReviewed: ✓ mọi dòng chưa ✓ trừ dòng ghi chú; giữ nguyên dòng đã ✓ (kể cả giờ cũ)", () => {
+  const rows = [
+    full({ is_note: true, status: "note" }),
+    full({ rid: "a" }),
+    full({ rid: "b", reviewed: true, reviewed_at: 5 }),
+    full({ rid: "c" }),
+  ];
+  const out = setAllReviewed(rows, 99);
+  assert.equal(out[0], rows[0]);
+  assert.equal(out[2], rows[2]);                                    // đã ✓ thì không đụng
+  assert.deepEqual([out[1].reviewed, out[1].reviewed_at], [true, 99]);
+  assert.deepEqual([out[3].reviewed, out[3].reviewed_at], [true, 99]);
+  assert.equal("reviewed" in rows[1], false);                       // không đụng bản gốc
+});
+
+test("setAllReviewed: không còn dòng nào để ✓ thì trả CHÍNH mảng cũ", () => {
+  const rows = [full({ is_note: true, status: "note" }), full({ reviewed: true, reviewed_at: 5 })];
+  assert.equal(setAllReviewed(rows, 99), rows);
+  assert.equal(setAllReviewed([], 99).length, 0);
+});
+
+test("xác nhận cả mặt: mọi dòng thành confirmed kể cả dòng NG và dòng 行抜け; số cần soát về 0", () => {
+  const rows = [
+    full({ balance: 1000 }),
+    full({ amount_out: 100, balance: 999 }),
+    full({ amount_out: 100, balance: 899, status: "check", reason: "行番号 3→5: 1行抜けの疑い" }),
+  ];
+  assert.equal(sheetStats([{ rows }]).need, 2);
+  const out = setAllReviewed(rows, 1);
+  assert.deepEqual(sheetStats([{ rows: out }]), { rows: 3, need: 0, fixed: 0, confirmed: 3, edited: 0 });
+});
+
+test("ngCount: chỉ đếm dòng chưa ✓ mà chuỗi số dư NG (ghi chú và dòng đã ✓ thì không)", () => {
+  const rows = [
+    full({ balance: 1000 }),
+    full({ amount_out: 100, balance: 999 }),                        // NG
+    full({ amount_out: 100, balance: 5, reviewed: true }),          // NG nhưng đã ✓
+    full({ is_note: true, status: "note", balance: 77 }),
+    full({ amount_out: 1, balance: 76 }),                           // OK (mốc là dòng ghi chú)
+  ];
+  assert.equal(ngCount(rows), 1);
+  assert.equal(ngCount([]), 0);
+});
+
+test("blankRow: dòng người thêm có rid moi, added=true, mọi ô trống; xin rid thì dùng rid đó", () => {
+  const a = blankRow("s1");
+  const b = blankRow("s1");
+  assert.match(a.rid ?? "", /^[0-9a-f]{12}$/);
+  assert.notEqual(a.rid, b.rid);
+  assert.deepEqual([a.added, a.sheet_id, a.date, a.balance, a.status, a.reason], [true, "s1", null, null, "ok", ""]);
+  assert.equal(blankRow(null, "xyz").rid, "xyz");
+  assert.equal(needsReview(a, "―"), true);                          // chưa ✓ ⇒ cần soát
+});
+
+test("insertRowAfter: chèn NGAY DƯỚI dòng chỉ định, các dòng khác giữ nguyên tham chiếu", () => {
+  const rows = [full({ rid: "a" }), full({ rid: "b" }), full({ rid: "c" })];
+  const moi = blankRow("s", "n");
+  const out = insertRowAfter(rows, 1, moi);
+  assert.deepEqual(out.map((r) => r.rid), ["a", "b", "n", "c"]);
+  assert.equal(out[0], rows[0]);
+  assert.equal(out[3], rows[2]);
+  assert.equal(rows.length, 3);                                     // không đụng bản gốc
+});
+
+test("insertRowAfter: dòng cuối hoặc vượt cuối = thêm vào cuối; -1 = lên đầu; mảng rỗng chạy được", () => {
+  const rows = [full({ rid: "a" }), full({ rid: "b" })];
+  assert.deepEqual(insertRowAfter(rows, 1, blankRow("s", "n")).map((r) => r.rid), ["a", "b", "n"]);
+  assert.deepEqual(insertRowAfter(rows, 99, blankRow("s", "n")).map((r) => r.rid), ["a", "b", "n"]);
+  assert.deepEqual(insertRowAfter(rows, -1, blankRow("s", "n")).map((r) => r.rid), ["n", "a", "b"]);
+  assert.deepEqual(insertRowAfter([], 0, blankRow("s", "n")).map((r) => r.rid), ["n"]);
+});
+
+test("restoreField: trả ô số về giá trị máy đọc và xoá khoá khỏi orig (hết orig thì bỏ hẳn)", () => {
+  const sua = applyEdit([full({ balance: 1000, description: "A" })], 0, "balance", 1200);
+  const sua2 = applyEdit(sua, 0, "description", "B");
+  const r1 = restoreField(sua2, 0, "balance");
+  assert.equal(r1[0].balance, 1000);
+  assert.deepEqual(r1[0].orig, { description: "A" });
+  const r2 = restoreField(r1, 0, "description");
+  assert.equal(r2[0].description, "A");
+  assert.equal("orig" in r2[0], false);
+  assert.equal(rowState(r2[0], "―"), "ok");                         // hết dấu vết sửa tay
+});
+
+test("restoreField: ô ngày — máy đọc ISO thì ra ISO, máy không đọc được thì ra lại chữ gốc, máy để trống thì trống", () => {
+  const iso = applyEdit([full({ date: "2025-04-11" })], 0, "date", "2025/4/12");
+  assert.equal(restoreField(iso, 0, "date")[0].date, "2025-04-11");
+  const hong = applyEdit([full({ date: null, date_raw: "07-0?-11" })], 0, "date", "2025-04-11");
+  const lai = restoreField(hong, 0, "date")[0];
+  assert.deepEqual([lai.date, lai.date_raw, "orig" in lai], [null, "07-0?-11", false]);
+  const trong = applyEdit([full({ date: null, date_raw: null })], 0, "date", "2025-04-11");
+  const lai2 = restoreField(trong, 0, "date")[0];
+  assert.deepEqual([lai2.date, lai2.date_raw, "orig" in lai2], [null, null, false]);
+});
+
+test("restoreField: ô máy để trống (null) khôi phục về trống; ô chưa từng sửa thì trả CHÍNH mảng cũ", () => {
+  const sua = applyEdit([full({ amount_in: null })], 0, "amount_in", 500);
+  assert.equal(restoreField(sua, 0, "amount_in")[0].amount_in, null);
+  const rows = [full({ balance: 5 })];
+  assert.equal(restoreField(rows, 0, "balance"), rows);
+  assert.equal(restoreField(rows, 9, "balance"), rows);
+});
+
+test("restoreField giữ nguyên ✓ và các ô khác của dòng", () => {
+  const rows = setReviewed(applyEdit([full({ balance: 10, description: "x" })], 0, "balance", 20), 0, true, 7);
+  const out = restoreField(rows, 0, "balance")[0];
+  assert.deepEqual([out.balance, out.description, out.reviewed, out.reviewed_at], [10, "x", true, 7]);
+});
+
+test("editChanges: liệt kê máy đọc → hiện tại theo thứ tự cột; dòng chưa sửa thì rỗng", () => {
+  let rows = [full({ date: "2025-04-11", description: "A", balance: 100 })];
+  rows = applyEdit(rows, 0, "balance", 150);
+  rows = applyEdit(rows, 0, "date", "2025/4/12");
+  rows = applyEdit(rows, 0, "description", null);
+  assert.deepEqual(editChanges(rows[0]), [
+    { field: "date", from: "2025-04-11", to: "2025-04-12" },
+    { field: "description", from: "A", to: null },
+    { field: "balance", from: 100, to: 150 },
+  ]);
+  assert.deepEqual(editChanges(full({})), []);
 });

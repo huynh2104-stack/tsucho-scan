@@ -25,7 +25,7 @@ import {
 import { useAuth } from "@/lib/auth";
 
 /** Đổi số này khi viết lại nội dung hướng dẫn → mọi người được xem bản mới. */
-const VERSION = 1;
+const VERSION = 2;
 
 const keyFor = (userId: string) => `tsucho.tour.v${VERSION}.${userId}`;
 

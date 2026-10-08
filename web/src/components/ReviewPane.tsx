@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict } from "@/lib/i18n";
-import { analyzeRows, isISO, openReasons, parseYen, type RowInfo } from "@/lib/review";
+import { FIELD_LABEL, analyzeRows, editChanges, isISO, openReasons, parseYen, type RowInfo } from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
@@ -29,6 +29,8 @@ export type ViewMode = "page" | "list";
 export type TxRef = { sheet: string; block: number; row: number };
 export type EditFn = (ref: TxRef, field: EditField, value: string | number | null) => void;
 export type RowActionFn = (ref: TxRef) => void;
+/** Trả một ô về giá trị MÁY ĐỌC (nút ↺). */
+export type RestoreFn = (ref: TxRef, field: EditField) => void;
 
 function Th({
   jp,
@@ -228,7 +230,7 @@ function Cell({
       }}
       onKeyDown={(e) => {
         const el = e.currentTarget;
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
           el.blur();
           return;
         }
@@ -278,6 +280,7 @@ function Row({
   onEdit,
   onDelete,
   onToggleReviewed,
+  onRestore,
   onSelect,
 }: {
   tx: Tx;
@@ -297,6 +300,7 @@ function Row({
   onEdit: EditFn;
   onDelete: RowActionFn;
   onToggleReviewed: RowActionFn;
+  onRestore: RestoreFn;
   onSelect: RowActionFn;
 }) {
   const { chk, state } = info;
@@ -306,6 +310,36 @@ function Row({
   const note = state === "note";
   // Ngày là thủ phạm (hỏng/trống) thì tô thêm ô ngày để mắt tìm ra ngay
   const dateBad = flag && !isISO(tx.date);
+  const fmt = (v: string | number | null | undefined) =>
+    v == null || v === "" ? t.emptyValue : typeof v === "number" ? yen(v) : String(v);
+  // Những ô người đã sửa: máy đọc → hiện tại (lời chú ở cột 確認メモ)
+  const changes = editChanges(tx);
+  const hasOrig = changes.length > 0;
+  const editTip = changes.map((c) => `${FIELD_LABEL[c.field]}: ${fmt(c.from)} → ${fmt(c.to)}`).join("\n");
+  /** Nút ↺ nhỏ ở góc ô, chỉ hiện khi rê chuột vào ô ĐÃ BỊ SỬA: bấm để trả về giá trị máy đọc. */
+  const restore = (f: EditField, side: "l" | "r" = "r") => {
+    const o = tx.orig;
+    if (!o || !(f in o)) return null;
+    return (
+      <button
+        type="button"
+        tabIndex={-1}
+        data-act="restore"
+        data-restore={f}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRestore(ref_, f);
+        }}
+        title={t.restoreTitle(fmt(o[f]))}
+        aria-label={t.restoreTitle(fmt(o[f]))}
+        className={`absolute top-0 ${
+          side === "l" ? "left-0" : "right-0"
+        } z-[1] flex h-4 w-4 items-center justify-center rounded border border-rule bg-card text-[11px] leading-none text-accent opacity-0 transition-opacity hover:bg-accentpale focus:opacity-100 group-hover/c:opacity-100`}
+      >
+        ↺
+      </button>
+    );
+  };
   // Cột 確認メモ của dòng vàng: chỉ những lý do CHƯA giải quyết (+ nhắn rõ dòng do người thêm)
   const memo = flag
     ? [...openReasons(tx, chk).map((r) => r.text), ...(tx.added ? [t.rowAddedNote] : [])].join("・")
@@ -351,7 +385,7 @@ function Row({
           onCommit={() => {}}
         />
       </td>
-      <td className={`whitespace-nowrap px-1 py-0.5 ${dateBad ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${dateBad ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.date ?? tx.date_raw ?? ""}
           field="date"
@@ -359,18 +393,20 @@ function Row({
           picked={on(cDate)}
           onCommit={(v) => onEdit(ref_, "date", v || null)}
         />
+        {restore("date")}
       </td>
       {cols.kind && (
-        <td className="whitespace-nowrap px-1 py-0.5 text-[12.5px]">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[12.5px]">
           <Cell
             value={tx.kind ?? ""}
             field="kind"
             picked={on(cKind)}
             onCommit={(v) => onEdit(ref_, "kind", v || null)}
           />
+          {restore("kind")}
         </td>
       )}
-      <td className={`px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.description ?? ""}
           field="description"
@@ -378,9 +414,10 @@ function Row({
           picked={on(cDesc)}
           onCommit={(v) => onEdit(ref_, "description", v || null)}
         />
+        {restore("description")}
       </td>
       {/* Rút = đỏ, Gửi = xanh ngọc. Ô trống hiện gạch ngang cho dễ dò */}
-      <td className={`whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
+      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_out)}
           field="amount_out"
@@ -396,8 +433,9 @@ function Row({
             onEdit(ref_, "amount_out", r.value);
           }}
         />
+        {restore("amount_out", "l")}
       </td>
-      <td className={`whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
+      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_in)}
           field="amount_in"
@@ -413,8 +451,9 @@ function Row({
             onEdit(ref_, "amount_in", r.value);
           }}
         />
+        {restore("amount_in", "l")}
       </td>
-      <td className={`whitespace-nowrap px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={yen(tx.balance)}
           field="balance"
@@ -430,25 +469,28 @@ function Row({
             onEdit(ref_, "balance", r.value);
           }}
         />
+        {restore("balance", "l")}
       </td>
       {cols.store && (
-        <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.store_code ?? ""}
             field="store_code"
             picked={on(cStore)}
             onCommit={(v) => onEdit(ref_, "store_code", v || null)}
           />
+          {restore("store_code")}
         </td>
       )}
       {cols.extra && (
-        <td className="whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
           <Cell
             value={tx.extra_text ?? ""}
             field="extra_text"
             picked={on(cExtra)}
             onCommit={(v) => onEdit(ref_, "extra_text", v || null)}
           />
+          {restore("extra_text")}
         </td>
       )}
       <td
@@ -459,10 +501,21 @@ function Row({
       >
         {chk}
       </td>
-      <td className="max-w-[140px] truncate px-2 py-0.5 text-[11px]" title={tx.reason || undefined}>
+      <td
+        className="max-w-[140px] truncate px-2 py-0.5 text-[11px]"
+        title={[editTip, tx.reason].filter(Boolean).join("\n") || undefined}
+      >
         {flag && memo && <span className="text-warnink">⚠ {memo}</span>}
         {fixed && <span className="text-inink">✓ {tx.reason}</span>}
-        {confirmed && <span className="text-okink">✓ {t.rowConfirmed}</span>}
+        {confirmed && (
+          <span className="text-okink">
+            ✓ {t.rowConfirmed}
+            {hasOrig ? " ✎" : ""}
+          </span>
+        )}
+        {state === "edited" && (
+          <span className="text-ink2">✎ {hasOrig ? t.rowEdited : t.rowInferred}</span>
+        )}
       </td>
       {/* Ghim sát mép phải: bảng rộng hơn khung thì phải cuộn ngang mới tới cột này, mà ✓ là nút
           hay bấm nhất — không được để nó nằm ngoài tầm mắt. Nền đặc để chữ cuộn phía dưới không lòi ra. */}
@@ -477,7 +530,7 @@ function Row({
           <button
             data-act="confirm"
             onClick={() => onToggleReviewed(ref_)}
-            title={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
+            title={confirmed ? t.rowUnconfirmTitle : `${t.rowConfirmTitle} (Ctrl+Enter)`}
             aria-label={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
             aria-pressed={confirmed}
             className={`mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-[12px] font-bold leading-none transition-opacity ${
@@ -524,6 +577,8 @@ function AccountCard({
   onEdit,
   onDeleteRow,
   onToggleReviewed,
+  onRestore,
+  onConfirmAll,
   onAddRow,
   onAutoBalance,
   selected,
@@ -547,6 +602,9 @@ function AccountCard({
   onEdit: EditFn;
   onDeleteRow: RowActionFn;
   onToggleReviewed: RowActionFn;
+  onRestore: RestoreFn;
+  onConfirmAll: (sheet: string, block: number) => void;
+  /** Chèn một dòng trống NGAY DƯỚI dòng `ref`. */
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
   selected: TxRef | null;
@@ -559,6 +617,16 @@ function AccountCard({
   const infos = useMemo(() => analyzeRows(rows), [rows]);
   const real = rows.filter((r) => !r.is_note);
   const needCheck = infos.filter((i) => i.need).length;
+  // Mọi dòng thật đã ✓ rồi thì nút「Xác nhận cả mặt sổ」không còn việc gì để làm
+  const allConfirmed = real.every((r) => r.reviewed);
+  // 「+ Thêm dòng」chèn ngay dưới dòng đang chọn (nếu nó nằm trong thẻ này), không thì xuống cuối
+  const insertAfter =
+    selected &&
+    selected.sheet === refs[0]?.sheet &&
+    selected.block === refs[0]?.block &&
+    selected.row < refs.length
+      ? selected
+      : refs[refs.length - 1];
 
   const q = filter.trim().toLowerCase();
   const matches = (tx: Tx) =>
@@ -631,6 +699,7 @@ function AccountCard({
                 onEdit={onEdit}
                 onDelete={onDeleteRow}
                 onToggleReviewed={onToggleReviewed}
+                onRestore={onRestore}
                 onSelect={onSelectRow}
               />
             ))}
@@ -640,7 +709,7 @@ function AccountCard({
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-card2 px-3 py-2">
         <button
-          onClick={() => onAddRow(refs[refs.length - 1])}
+          onClick={() => insertAfter && onAddRow(insertAfter)}
           className="rounded-lg border border-dashed border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accent hover:text-accent"
           title={t.addRowHint}
         >
@@ -652,6 +721,15 @@ function AccountCard({
           className="rounded-lg border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink"
         >
           {t.autoBalance}
+        </button>
+        <button
+          data-act="confirm-all"
+          onClick={() => onConfirmAll(refs[0].sheet, refs[0].block)}
+          disabled={allConfirmed}
+          title={t.confirmAllHint}
+          className="rounded-lg border border-okink/40 px-2 py-1 text-[11.5px] font-medium text-okink hover:bg-okbg disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          ✓ {ofTotal > 1 ? t.confirmAllBook : t.confirmAll}
         </button>
         <span className="flex-1" />
         <span className="tnum text-[11.5px] text-ink3">
@@ -681,6 +759,8 @@ export default function ReviewPane({
   onEdit,
   onDeleteRow,
   onToggleReviewed,
+  onRestore,
+  onConfirmAll,
   onAddRow,
   onAutoBalance,
   selected,
@@ -697,6 +777,10 @@ export default function ReviewPane({
   onDeleteRow: RowActionFn;
   /** Bấm ✓ / bỏ ✓ "đã soát" của một dòng. */
   onToggleReviewed: RowActionFn;
+  onRestore: RestoreFn;
+  /** 「Xác nhận cả mặt sổ」: ✓ mọi dòng của một khối (có hỏi lại nếu còn dòng NG). */
+  onConfirmAll: (sheet: string, block: number) => void;
+  /** Chèn một dòng trống ngay dưới dòng `ref`. */
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
   /** Dòng đang chọn — khung giữa khoanh đúng dải ảnh của dòng này. */
@@ -883,6 +967,8 @@ export default function ReviewPane({
         onEdit={onEdit}
         onDeleteRow={onDeleteRow}
         onToggleReviewed={onToggleReviewed}
+        onRestore={onRestore}
+        onConfirmAll={onConfirmAll}
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
         selected={selected}

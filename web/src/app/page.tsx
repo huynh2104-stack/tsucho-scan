@@ -49,7 +49,18 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { analyzeRows, applyEdit, newRid, setReviewed, sheetStats, type FocusField } from "@/lib/review";
+import {
+  analyzeRows,
+  applyEdit,
+  blankRow,
+  insertRowAfter,
+  ngCount,
+  restoreField,
+  setAllReviewed,
+  setReviewed,
+  sheetStats,
+  type FocusField,
+} from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
 import DropZone from "@/components/DropZone";
@@ -59,6 +70,7 @@ import SheetViewer from "@/components/SheetViewer";
 import ReviewPane, {
   type EditFn,
   type OptCols,
+  type RestoreFn,
   type RowActionFn,
   type TxRef,
   type ViewMode,
@@ -93,6 +105,15 @@ function flatRowIndex(store: ResultStore, sheetId: string | null, ref: TxRef): n
     i += data.blocks[b].rows.length;
   }
   return -1;
+}
+
+/** "sheet:block:row" (thuộc tính `data-row` của <tr>) → địa chỉ dòng. */
+function parseRowKey(key: string | undefined): TxRef | null {
+  if (!key) return null;
+  const [sheet, block, row] = key.split(":");
+  const b = Number(block);
+  const r = Number(row);
+  return sheet && Number.isInteger(b) && Number.isInteger(r) ? { sheet, block: b, row: r } : null;
 }
 
 export default function Workbench() {
@@ -551,25 +572,26 @@ export default function Workbench() {
    * Chỉ cuộn tới thì màu vàng đã làm được rồi; giá trị nằm ở chỗ gõ được ngay
    * mà không phải với chuột tìm đúng ô.
    */
-  const jumpBad = (dir: 1 | -1) => {
-    if (flatRows.length === 0) return;
-    const cur = selRow
+  const jumpBad = (dir: 1 | -1, from: TxRef | null = selRow, skipFrom = false): boolean => {
+    if (flatRows.length === 0) return false;
+    const cur = from
       ? flatRows.findIndex(
           (r) =>
-            r.ref.sheet === selRow.sheet &&
-            r.ref.block === selRow.block &&
-            r.ref.row === selRow.row,
+            r.ref.sheet === from.sheet && r.ref.block === from.block && r.ref.row === from.row,
         )
       : -1;
     for (let k = 1; k <= flatRows.length; k++) {
       const i =
         (cur + dir * k + flatRows.length * 2) % flatRows.length;
       if (!flatRows[i].bad) continue;
+      // Vừa ✓ xong dòng `from` mà bảng chưa vẽ lại: nó vẫn còn "bad" trong flatRows, đừng nhảy về chính nó
+      if (skipFrom && i === cur) continue;
       const { ref, field } = flatRows[i];
       setSelRow(ref);
       setPendingFocus({ ref, field });   // effect bên dưới sẽ focus sau khi vẽ
-      return;
+      return true;
     }
+    return false;
   };
 
   /** Chỉnh ảnh CHỈ tác động mặt đang xem. */
@@ -819,27 +841,47 @@ export default function Workbench() {
         patchRows(ref.sheet, ref.block, (rows) => rows.filter((_, i) => i !== ref.row)),
     });
 
-  /** Thêm dòng trống — dùng khi máy bỏ sót dòng (chuỗi số dư không bắt được). */
-  const addRow = (ref: TxRef) =>
-    patchRows(ref.sheet, ref.block, (rows) => [
-      ...rows,
-      {
-        rid: newRid(),
-        added: true,           // không có giá trị máy đọc; cần người xác nhận
-        date: null,
-        date_raw: null,
-        kind: null,
-        description: null,
-        extra_text: null,
-        store_code: null,
-        amount_out: null,
-        amount_in: null,
-        balance: null,
-        status: "ok",
-        reason: "",
-        sheet_id: ref.sheet,
-      },
-    ]);
+  /** Chèn một dòng trống NGAY DƯỚI dòng `ref` — dùng khi máy bỏ sót dòng (chuỗi số dư không bắt
+   *  được). Dòng mới có `added: true` nên cần ✓; con trỏ nhảy vào ô ngày của nó để gõ luôn. */
+  const addRow = (ref: TxRef) => {
+    const row = blankRow(ref.sheet);       // tạo NGOÀI hàm cập nhật state (React có thể gọi nó hai lần)
+    patchRows(ref.sheet, ref.block, (rows) => insertRowAfter(rows, ref.row, row));
+    const made: TxRef = { sheet: ref.sheet, block: ref.block, row: ref.row + 1 };
+    setSelRow(made);
+    setPendingFocus({ ref: made, field: "date" });
+  };
+
+  /** Nút ↺: trả một ô về giá trị MÁY ĐỌC (và xoá nó khỏi `orig`). */
+  const restoreCell: RestoreFn = (ref, field) =>
+    patchRows(ref.sheet, ref.block, (rows) => restoreField(rows, ref.row, field));
+
+  /** 「✓ Xác nhận cả mặt sổ」: ✓ mọi dòng của một khối. Còn dòng NG thì hỏi lại trước. */
+  const confirmAll = (sheetId: string, block: number) => {
+    const rows = store[sheetId]?.blocks[block]?.rows;
+    if (!rows) return;
+    const todo = rows.filter((r) => !r.is_note && !r.reviewed).length;
+    if (todo === 0) return;
+    const now = Math.floor(Date.now() / 1000);
+    const run = () => patchRows(sheetId, block, (rs) => setAllReviewed(rs, now));
+    const ng = ngCount(rows);
+    if (ng === 0) return run();
+    setConfirm({
+      title: t.confirmAllTitle,
+      message: t.confirmAllMsg(todo),
+      warning: t.confirmAllNg(ng),
+      label: t.confirmAll,
+      run,
+    });
+  };
+
+  /** Ctrl+Enter: ✓ dòng đang đứng, rồi nhảy tới dòng cần soát kế tiếp. Trả true nếu đã nhảy được. */
+  const confirmAndNext = (ref: TxRef | null): boolean => {
+    if (ref) {
+      const now = Math.floor(Date.now() / 1000);
+      patchRows(ref.sheet, ref.block, (rows) => setReviewed(rows, ref.row, true, now));
+    }
+    return jumpBad(1, ref ?? selRow, true);
+  };
 
   /** Suy số dư còn trống từ chuỗi: trước − rút + gửi. Không sửa ô đã có số. */
   const autoBalance = (sheetId: string, blockIndex: number) =>
@@ -862,7 +904,8 @@ export default function Workbench() {
 
   /* Phím tắt toàn cục.
      Ctrl+Z hoàn tác bảng, Ctrl+Shift+Z / Ctrl+Y làm lại, n/p nhảy dòng cần
-     soát, Ctrl+A chọn tất cả mặt sổ, Escape bỏ chọn.
+     soát, Ctrl+Enter ✓ dòng đang đứng rồi nhảy tiếp, Ctrl+Shift+Enter chèn dòng
+     trống bên dưới, Ctrl+A chọn tất cả mặt sổ, Escape bỏ chọn.
      n/p bị bỏ qua khi đang gõ trong ô, nếu không sẽ không đánh được chữ "n". */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -880,6 +923,21 @@ export default function Workbench() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redoEdit();
+        return;
+      }
+      // Ctrl+Enter / Ctrl+Shift+Enter cũng phải bắt TRƯỚC nhánh `typing`: lúc soát con trỏ thường
+      // đang nằm trong một ô của bảng. Ô nhập NGOÀI bảng (lọc, đổi tên, tên sổ) thì bỏ qua.
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        const tr = el?.closest("tr[data-row]") as HTMLElement | null;
+        if (typing && !tr) return;
+        e.preventDefault();
+        if (typing) el?.blur();                     // ghi nốt chữ đang gõ dở trước đã
+        const ref = tr ? parseRowKey(tr.dataset.row) : selRow;
+        if (e.shiftKey) {
+          if (ref) addRow(ref);
+        } else if (!confirmAndNext(ref) && typing) {
+          el?.focus();                              // không còn dòng nào để nhảy tới: giữ con trỏ ở chỗ cũ
+        }
         return;
       }
       if (typing) return;
@@ -1307,32 +1365,37 @@ export default function Workbench() {
               >
                 {badCount > 0 ? t.badLeft(badCount) : t.allChecked}
               </span>
-              <span className="flex-1" />
-              {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng
-                  đã lưu, nên từ giờ nói rõ ra. */}
-              {saveState !== "idle" && (
-                <span
-                  className={`text-[10.5px] ${
-                    saveState === "error" ? "font-semibold text-danger" : "text-ink3"
-                  }`}
-                >
-                  {saveState === "saving"
-                    ? t.saveSaving
-                    : saveState === "saved"
-                      ? `✓ ${t.saveSaved}`
-                      : t.saveFailed}
-                </span>
-              )}
-              {highlight && (
-                <span className="text-[10.5px] text-ink3">
-                  {highlight.method === "content" ? t.rowLinkExact : t.rowLinkEstimated}
-                </span>
-              )}
-              {selRow?.sheet === active && !highlight && anchorRows !== "[]" && (
-                <span role="status" className="text-[10.5px] text-ink3">
-                  {mappedRows?.key === rowMapKey ? t.rowLinkUnavailable : t.rowLinkLoading}
-                </span>
-              )}
+              {/* Cụm trạng thái bên phải KHÔNG được làm thanh công cụ xuống dòng. Trước đây mỗi chữ ở đây
+                  là một phần tử riêng; chọn một dòng là hiện「vị trí ước lượng…」, thanh bị đẩy xuống dòng
+                  thứ hai và cả bảng bên dưới tụt xuống một nấc NGAY GIỮA lúc người dùng đang nhấn chuột,
+                  nên cú bấm nút nhỏ (✓, ↺, ×) ở dòng chưa chọn bị trượt: nhấn xuống một nơi, nhả ra nơi khác.
+                  Nay là một khung co giãn (basis 0) tự cắt bớt chữ, không bao giờ ép xuống dòng. */}
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden whitespace-nowrap">
+                {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng đã lưu, nên nói rõ ra. */}
+                {saveState !== "idle" && (
+                  <span
+                    className={`flex-none text-[10.5px] ${
+                      saveState === "error" ? "font-semibold text-danger" : "text-ink3"
+                    }`}
+                  >
+                    {saveState === "saving"
+                      ? t.saveSaving
+                      : saveState === "saved"
+                        ? `✓ ${t.saveSaved}`
+                        : t.saveFailed}
+                  </span>
+                )}
+                {highlight && (
+                  <span className="truncate text-[10.5px] text-ink3">
+                    {highlight.method === "content" ? t.rowLinkExact : t.rowLinkEstimated}
+                  </span>
+                )}
+                {selRow?.sheet === active && !highlight && anchorRows !== "[]" && (
+                  <span role="status" className="truncate text-[10.5px] text-ink3">
+                    {mappedRows?.key === rowMapKey ? t.rowLinkUnavailable : t.rowLinkLoading}
+                  </span>
+                )}
+              </div>
             </div>
           )}
           <div className="min-h-0 flex-1">
@@ -1347,6 +1410,8 @@ export default function Workbench() {
               onEdit={editCell}
               onDeleteRow={deleteRow}
               onToggleReviewed={toggleReviewed}
+              onRestore={restoreCell}
+              onConfirmAll={confirmAll}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
               selected={selRow}

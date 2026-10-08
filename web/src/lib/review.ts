@@ -456,3 +456,80 @@ export function setReviewed(rows: Tx[], index: number, on: boolean, now: number)
   }
   return rows.map((t, i) => (i === index ? next : t));
 }
+
+
+// ── Hành động quanh「đã soát」(task 1.3) ──────────────────────────────
+
+/** Bấm ✓ cho MỌI dòng chưa ✓ của một khối (trừ dòng ghi chú). Trả về CHÍNH `rows` nếu chẳng có
+ *  dòng nào cần đổi, để chỗ gọi khỏi tạo bước Ctrl+Z / lượt autosave rỗng. */
+export function setAllReviewed(rows: Tx[], now: number): Tx[] {
+  let changed = false;
+  const out = rows.map((tx) => {
+    if (tx.is_note || tx.reviewed) return tx;
+    changed = true;
+    return { ...tx, reviewed: true, reviewed_at: now };
+  });
+  return changed ? out : rows;
+}
+
+/** Số dòng CHƯA ✓ mà chuỗi số dư hiện tại đang lệch (NG) — thứ cần cảnh báo trước khi xác nhận cả mặt sổ. */
+export function ngCount(rows: Tx[]): number {
+  const chk = chainChecks(rows);
+  return rows.filter((tx, i) => !tx.is_note && !tx.reviewed && chk[i] === "NG").length;
+}
+
+/** Dòng trống do người thêm tay: máy chưa từng đọc nên `added: true` và cần ✓ mới hết cờ. */
+export function blankRow(sheetId: string | null, rid: string = newRid()): Tx {
+  return {
+    rid,
+    added: true,
+    date: null,
+    date_raw: null,
+    kind: null,
+    description: null,
+    extra_text: null,
+    store_code: null,
+    amount_out: null,
+    amount_in: null,
+    balance: null,
+    status: "ok",
+    reason: "",
+    sheet_id: sheetId,
+  };
+}
+
+/** Chèn `row` NGAY DƯỚI dòng `index` (index ≥ cuối → thêm vào cuối; index < 0 → lên đầu). */
+export function insertRowAfter(rows: Tx[], index: number, row: Tx): Tx[] {
+  const at = Math.min(Math.max(index + 1, 0), rows.length);
+  return [...rows.slice(0, at), row, ...rows.slice(at)];
+}
+
+/** Trả ô `field` của dòng `index` về GIÁ TRỊ MÁY ĐỌC (đi qua `applyEdit` nên `orig[field]` tự xoá).
+ *  Dòng không có `orig[field]` thì trả CHÍNH `rows`. */
+export function restoreField(rows: Tx[], index: number, field: EditField): Tx[] {
+  const orig = rows[index]?.orig;
+  if (!orig || !(field in orig)) return rows;
+  return applyEdit(rows, index, field, orig[field] ?? null);
+}
+
+/** Tên cột in trên sổ — dùng trong lời chú «máy đọc → người sửa». */
+export const FIELD_LABEL: Record<EditField, string> = {
+  date: "年月日",
+  kind: "区分",
+  description: "摘要",
+  amount_out: "お支払",
+  amount_in: "お預り",
+  balance: "差引残高",
+  store_code: "取扱店",
+  extra_text: "備考",
+};
+
+const FIELD_ORDER = Object.keys(FIELD_LABEL) as EditField[];
+
+export type EditChange = { field: EditField; from: string | number | null; to: string | number | null };
+
+/** Các ô người đã sửa của dòng: giá trị máy đọc → giá trị đang hiện, theo thứ tự cột. */
+export function editChanges(tx: Tx): EditChange[] {
+  const orig = tx.orig ?? {};
+  return FIELD_ORDER.filter((f) => f in orig).map((f) => ({ field: f, from: norm(orig[f]), to: shown(tx, f) }));
+}

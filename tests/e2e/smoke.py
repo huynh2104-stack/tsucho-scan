@@ -31,6 +31,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
  10 mỗi dòng có rid; ô đã sửa nhớ giá trị máy đọc (orig); F5 rồi sửa ô khác vẫn không mất orig
  11 mặt ② của sổ mẫu có đúng 1 dòng vàng thật (số thứ tự nhảy 05→07): bộ đếm, huy hiệu cột trái,
     phím n khớp nhau; ✓ → hết vàng → Ctrl+Z → ✓ lại → F5 vẫn còn ✓ (server lưu reviewed)
+ 12 ↺ trả ô về giá trị máy đọc · Ctrl+Enter (✓ rồi nhảy tiếp, kể cả khi đang gõ dở) · 「Xác nhận cả mặt sổ」
+    (hỏi lại khi còn dòng NG) · 「+ Thêm dòng」chèn ngay dưới dòng đang chọn · Ctrl+Shift+Enter · F5 còn nguyên
 """
 from __future__ import annotations
 
@@ -504,6 +506,124 @@ def step_review_definition(pg, base: str, ctx: dict) -> str:
     return "mặt ② có 1 dòng vàng (行抜けの疑い) · bộ đếm = huy hiệu = số dòng vàng · n vào ô 摘要 · ✓/Ctrl+Z/F5/bỏ ✓ đều đúng"
 
 
+def step_review_actions(pg, base: str, ctx: dict) -> str:
+    """Task 1.3: ↺ khôi phục giá trị máy đọc, Ctrl+Enter, xác nhận cả mặt sổ, chèn dòng đúng chỗ.
+
+    Dựa vào trạng thái mặt ① sau các bước 8 và 10: dòng 1 có 出金 gõ thành 1,234 (chuỗi lệch, NG),
+    dòng 2 có ngày "tuần sau" (ngày hỏng) ⇒ 2 dòng vàng; dòng 1 còn orig.date, dòng 5 đã sửa 摘要."""
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+
+    def row(i):
+        return pg.locator("tr[data-row]").nth(i)
+
+    def cell(i, field):
+        return row(i).locator(f'input[data-field="{field}"]')
+
+    def restore(i, field):
+        td = cell(i, field).locator("xpath=..")               # ô cha của <input>
+        td.hover()                                            # ↺ chỉ hiện khi rê chuột vào ô
+        td.locator(f'button[data-restore="{field}"]').click()
+
+    def server_row(i):
+        return sheet_rows(pg, base, SAMPLE_SHEET_NAME)[i]
+
+    def state(i):
+        return row(i).get_attribute("data-state")
+
+    assert need_review(pg) == 2, f"mặt ① phải còn 2 dòng vàng sau bước 8 (dòng 1 NG, dòng 2 ngày hỏng), thực tế {need_review(pg)}"
+    n_rows = pg.locator("tr[data-row]").count()
+
+    # ── ↺ khôi phục giá trị máy đọc ──
+    assert cell(1, "amount_out").input_value() == "1,234"
+    restore(1, "amount_out")
+    wait_until(lambda: cell(1, "amount_out").input_value() == "1,100", "↺ trả 出金 về 1,100 (máy đọc)")
+    wait_until(lambda: need_review(pg) == 1, "khôi phục 出金 thì dòng 1 hết NG")
+    assert state(1) == "edited" and "đã sửa tay" in row(1).inner_text(), "dòng 1 còn orig.date ⇒ phải ghi ✎ đã sửa tay"
+    tip = row(1).locator("td", has_text="đã sửa tay").first.get_attribute("title") or ""
+    assert "年月日" in tip and "→" in tip, f"lời chú phải liệt kê máy đọc → hiện tại, thực tế {tip!r}"
+    wait_until(lambda: server_row(1).get("orig") == {"date": "2025-04-11"}, "server xoá amount_out khỏi orig", timeout=15)
+    restore(2, "date")
+    wait_until(lambda: cell(2, "date").input_value() == "2025-04-11", "↺ trả ngày về 2025-04-11")
+    wait_until(lambda: need_review(pg) == 0, "khôi phục ngày thì hết dòng vàng")
+    wait_until(lambda: "orig" not in server_row(2), "server bỏ hẳn orig của dòng 2", timeout=15)
+
+    # ── Ctrl+Enter: ✓ dòng đang đứng (kể cả chữ gõ dở) rồi nhảy tới dòng cần soát kế ──
+    bal = balance_cell(pg, 3)
+    bal.click(); bal.press("Control+a"); bal.type(WRONG_BALANCE); bal.press("Enter")
+    wait_until(lambda: need_review(pg) == 2, "sửa sai 残高 dòng 3 ⇒ 2 dòng vàng (dòng 3 và 4)")
+    desc0 = cell(3, "description").input_value()
+    d = cell(3, "description")
+    d.click(); d.press("Control+a"); d.type("XYZ")                # CHƯA bấm Enter
+    pg.keyboard.press("Control+Enter")
+    wait_until(lambda: state(3) == "confirmed", "Ctrl+Enter ✓ dòng 3")
+    at = wait_until(lambda: focused(pg), "Ctrl+Enter nhảy con trỏ sang dòng cần soát kế")
+    assert (at["row"], at["field"], at["state"]) == (4, "balance", "review"), f"phải vào ô 残高 dòng 4, thực tế {at}"
+    assert cell(3, "description").input_value() == "XYZ", "chữ gõ dở phải được ghi trước khi ✓"
+    assert need_review(pg) == 1
+    pg.keyboard.press("Control+z")
+    pg.keyboard.press("Control+z")
+    wait_until(lambda: need_review(pg) == 2 and cell(3, "description").input_value() == desc0,
+               "Ctrl+Z hai lần trả lại cả ✓ lẫn chữ gõ")
+
+    # ── 「Xác nhận cả mặt sổ」: còn NG thì hỏi lại ──
+    pg.locator('button[data-act="confirm-all"]').first.click()
+    dialog = pg.locator("[role=alertdialog]")
+    dialog.wait_for(timeout=5000)
+    assert "2 dòng số dư lệch" in dialog.inner_text(), f"hộp thoại phải nói còn 2 dòng số dư lệch: {dialog.inner_text()!r}"
+    pg.keyboard.press("Escape")
+    dialog.wait_for(state="detached", timeout=5000)
+    assert need_review(pg) == 2, "huỷ hộp thoại thì không được xác nhận gì"
+    pg.locator('button[data-act="confirm-all"]').first.click()
+    dialog.wait_for(timeout=5000)
+    dialog.get_by_role("button", name="Xác nhận cả mặt sổ").click()
+    wait_until(lambda: need_review(pg) == 0, "xác nhận cả mặt ⇒ hết dòng vàng")
+    done = pg.locator('tr[data-row][data-state="confirmed"]').count()
+    assert done == n_rows - 1 and state(0) == "note", f"mọi dòng trừ ghi chú phải confirmed ({done}/{n_rows - 1})"
+    assert pg.locator('button[data-act="confirm-all"]').first.is_disabled(), "đã ✓ hết thì nút phải mờ đi"
+    pg.keyboard.press("Control+z")
+    wait_until(lambda: need_review(pg) == 2, "Ctrl+Z hoàn tác xác nhận cả mặt")
+    pg.keyboard.press("Control+z")                                # trả luôn số dư sai của dòng 3
+    wait_until(lambda: need_review(pg) == 0 and balance_cell(pg, 3).input_value() == ctx["orig_balance"],
+               "hoàn tác về sạch")
+
+    # ── 「+ Thêm dòng」chèn NGAY DƯỚI dòng đang chọn; Ctrl+Shift+Enter cũng vậy ──
+    cell(2, "description").click()                                # chọn dòng 2
+    pg.locator("button", has_text="Thêm dòng").first.click()
+    wait_until(lambda: pg.locator("tr[data-row]").count() == n_rows + 1, "thêm một dòng")
+    assert state(3) == "review", "dòng mới chèn ngay dưới dòng 2 và phải cần soát (chưa ✓)"
+    at = wait_until(lambda: focused(pg), "con trỏ vào dòng mới")
+    assert (at["row"], at["field"]) == (3, "date"), f"con trỏ phải vào ô ngày của dòng mới, thực tế {at}"
+    cell(6, "description").click()
+    pg.keyboard.press("Control+Shift+Enter")
+    wait_until(lambda: pg.locator("tr[data-row]").count() == n_rows + 2, "Ctrl+Shift+Enter chèn thêm một dòng")
+    assert state(7) == "review", "dòng chèn bằng phím tắt phải nằm ngay dưới dòng 6"
+    assert need_review(pg) == 2
+    pg.keyboard.press("Control+Enter")                            # ✓ dòng 7 rồi nhảy sang dòng cần soát còn lại
+    wait_until(lambda: state(7) == "confirmed", "Ctrl+Enter ✓ dòng chèn")
+    at = wait_until(lambda: focused(pg), "nhảy tới dòng cần soát còn lại")
+    assert (at["row"], at["field"]) == (3, "date"), f"phải nhảy về dòng 3 (ô ngày), thực tế {at}"
+    pg.keyboard.press("Control+Enter")
+    wait_until(lambda: need_review(pg) == 0, "✓ nốt dòng còn lại")
+
+    # ── F5 vẫn còn nguyên ──
+    def saved():
+        rows = sheet_rows(pg, base, SAMPLE_SHEET_NAME)
+        ok = len(rows) == n_rows + 2 and rows[3].get("reviewed") and rows[7].get("reviewed") and rows[3].get("added") and rows[7].get("added")
+        return rows if ok else None
+
+    rows = wait_until(saved, "server lưu 2 dòng chèn với added + reviewed", timeout=15)
+    assert all(re.fullmatch(r"[0-9a-f]{12}", r["rid"]) for r in rows) and len({r["rid"] for r in rows}) == len(rows)
+    pg.reload()
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.click(timeout=15000)
+    pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+    assert pg.locator("tr[data-row]").count() == n_rows + 2, "sau F5 mất dòng chèn"
+    wait_until(lambda: need_review(pg) == 0, "sau F5 vẫn không còn dòng vàng")
+    assert state(3) == "confirmed" and state(7) == "confirmed", "sau F5 mất ✓ của dòng chèn"
+    return ("↺ trả 出金 và ngày về máy đọc (orig tự dọn) · Ctrl+Enter ✓ + nhảy, ghi cả chữ gõ dở · xác nhận cả mặt có hỏi khi còn NG · "
+            "chèn dòng ngay dưới dòng chọn (nút và Ctrl+Shift+Enter) · F5 còn nguyên")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -516,6 +636,7 @@ STEPS = [
     ("9. Ngôn ngữ theo trình duyệt", step_language_from_browser),
     ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
     ("11. Dòng vàng thật + ✓ (một định nghĩa 'cần soát')", step_review_definition),
+    ("12. ↺, Ctrl+Enter, xác nhận cả mặt, chèn dòng đúng chỗ", step_review_actions),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
