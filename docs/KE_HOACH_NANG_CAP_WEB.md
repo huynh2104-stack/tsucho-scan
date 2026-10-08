@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.4 (08/10) — pytest **345 passed** · `npm test` **106 pass** · build xanh · E2E `smoke.py` **13/13 bước** (~25 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.5 (08/10) — pytest **345 passed** · `npm test` **120 pass** · build xanh · E2E `smoke.py` **14/14 bước** (~30 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1041,7 +1041,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.2 Một định nghĩa "cần soát" (xong 03/10/2026)
 - [x] 1.3 ✓ Đã soát (xong 08/10/2026)
 - [x] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A** (xong 08/10/2026)
-- [ ] 1.5 Lý do dễ hiểu + gợi ý sửa
+- [x] 1.5 Lý do dễ hiểu + gợi ý sửa (xong 08/10/2026)
 - [ ] 1.6 Nối số dư giữa các mặt
 - [ ] 1.7 Ảnh chụp trùng trang
 - [ ] 2.1 Backend hồ sơ
@@ -1164,7 +1164,16 @@ Quan sát khi viết E2E (không sửa):
 - **Đo trên dữ liệu thật của anh** (xuất ra file tạm, chỉ đếm): bộ 10 khối: 3 dòng vàng = 3 dòng cần soát trên màn hình (cách cũ cũng 3); bộ 33 khối: **15 dòng vàng = 15 trên màn hình, cách cũ 17** (hai dòng anh đã sửa đúng từ trước giờ hết vàng cả trong Excel).
 - `api/jobs.py` (`per_sheet` của một lần quét) và CLI (`main.py`) cũng dùng định nghĩa chung; `core.ScanResult.verification/totals` đi qua `verification_summary` nên tự theo. `verification_summary` giữ các khoá cũ và thêm `confirmed`, `edited`.
 - **Hệ quả cần biết**: dòng ghi chú (繰越…) mà engine ghi `残高不一致` không còn tô vàng/ghi 要確認 trong Excel nữa (đúng luật「dòng ghi chú không bao giờ cần soát」của 1.2, trên màn hình cũng vậy). Chỗ nối giữa các mặt sổ sẽ do task 1.6 kiểm riêng.
-- E2E bước 13: ✓ cả hai mặt → xuất → mỗi tab không còn ô vàng nào ở bảng, B6 bắt đầu bằng `検証済`, F6 ghi đúng số dòng 確認済, chú thích không còn chữ Việt. pytest: `tests/test_export.py` (+19: đủ bốn trạng thái, từng mức 検証レベル, khối, CSV cùng nguồn, per_sheet) và `tests/test_review.py` (+6: tách khối, chuỗi không nối qua đầu khối, `edit_changes`, FIELD_LABEL khớp bản TS, `to_accounts`, xuất sổ mẫu: còn vàng → ✓ hết → 0 ô vàng).
+- E2E bước 13 (nay là bước 14 sau khi thêm bước gợi ý sửa): ✓ cả hai mặt → xuất → mỗi tab không còn ô vàng nào ở bảng, B6 bắt đầu bằng `検証済`, F6 ghi đúng số dòng 確認済, chú thích không còn chữ Việt. pytest: `tests/test_export.py` (+19: đủ bốn trạng thái, từng mức 検証レベル, khối, CSV cùng nguồn, per_sheet) và `tests/test_review.py` (+6: tách khối, chuỗi không nối qua đầu khối, `edit_changes`, FIELD_LABEL khớp bản TS, `to_accounts`, xuất sổ mẫu: còn vàng → ✓ hết → 0 ô vàng).
+
+**Task 1.5 — xong 08/10/2026** (pytest **345** không đổi, task này chỉ ở web · `npm test` **120 pass** (+14) · build xanh · E2E **14/14 bước**: thêm bước 13, đánh số lại bước xuất Excel thành 14).
+- **`explainReason(r, lang, ctx)`** (`review.ts`; chuỗi dịch nằm ở `dict.ts`, đủ vi/en/ja, `dict.test.ts` giữ ba thứ tiếng cùng khoá): balance, rowgap (số dòng đệm 0: 06→08), date, nobal, lowconf; cả **ghi chú tự sửa** của máy (`fix`: 10 chuỗi → câu «Máy đã chuyển số tiền sang cột 入金», «Máy đã sửa số dư theo phép tính (bản in đọc ra 906,810)», «Sổ không in ngày: lấy ngày của dòng trên»…). Chuỗi lạ giữ nguyên. Cột 確認メモ giờ hiện câu đã dịch; **tooltip giữ chuỗi tiếng Nhật gốc** (kèm lời chú「máy đọc → hiện tại」). Excel/CSV vẫn tiếng Nhật.
+- **Phát hiện khi viết: 「差額」của engine KHÔNG phải mức lệch.** Nó là `残高 in − 残高 dòng trước` (độ nhảy của số dư), nên với dòng có rút/gửi con số khác hẳn mức lệch thật (ví dụ trước 1,000, rút 100, in 1,340: 差額 = +340 nhưng lệch thật = +440). Ví dụ「+440」trong kế hoạch chỉ đúng khi dòng không có tiền ra/vào. Nếu giải thích bằng 差額 thì người dùng bị chỉ sai số. Nên mức lệch trong câu giải thích lấy từ chuỗi số dư hiện tại (`RowInfo.diff` = in − tính được); chưa biết thì nói chung chung, không bịa số.
+- **`suggestFixes(rows, i)` + `applyFix`** đúng 4 phương án như kế hoạch, chỉ cho dòng NG (chưa ✓, không phải ghi chú, có mốc trước), tối đa 3: (1) đổi cột 出金↔入金 nếu P−I+O=B và O≠I; (2) 残高 → E chỉ khi số dư in ở dòng kế khớp E (đòi khớp tuyệt đối; qua dòng không in 残高 thì cộng dồn, qua 繰越 thì so thẳng); (3) sửa 出金/入金 thành số làm chuỗi khớp, chỉ khi số đó dương và cách số cũ ≤ 2 chữ số (khoảng cách sửa chữ số, nên 110→1,100 cũng tính là «đọc thiếu một chữ»); (4) thêm dòng sót (rút nếu số dư thấp hơn tính toán, gửi nếu cao hơn; bỏ nếu ra số dư âm). Phương án 3 và 1 loại trừ nhau về mặt toán học nên thực tế một dòng không bao giờ có quá 3. Áp dụng đi qua `applyEdit` nên ghi `orig` từng ô như người tự gõ; dòng thêm bằng (4) mượn ngày của dòng NG, `added: true`, 摘要 trống, vẫn phải ✓.
+- **Vị trí chip khác kế hoạch (có lý do): thanh gợi ý `FixBar` ngay dưới thanh công cụ, không phải «dưới ô 確認メモ».** Cột 確認メモ nằm tận mép phải bảng (phải cuộn ngang mới thấy ở màn hình thường) và rộng 140px; chip ở đó vừa khuất tầm mắt vừa làm dòng cao lên đúng lúc người dùng nhấn chuột (chính loại lỗi bấm trượt đã sửa ở 1.3). Thanh có **chiều cao cố định** (E2E kiểm không đổi khi có/không gợi ý), hiện lý do đầy đủ + «Gợi ý:» + các nút cho dòng đang chọn (phím `n` cũng chọn dòng nên chip hiện ngay chỗ con trỏ đáp xuống). Lúc rảnh nó nhắc phím tắt (n / Ctrl+Enter / Ctrl+Z) — giao diện chưa có chỗ nào ghi chúng.
+- **Áp xong thì tự sang dòng cần soát kế** — tính SAU khi bảng vẽ lại (`jumpNext` + effect): dùng dữ liệu cũ thì sẽ nhảy nhầm vào dòng kế vừa hết lệch theo (sửa 残高 một dòng là dòng kế cũng hết NG). Dòng còn cờ khác thì ở lại và đặt con trỏ vào ô cần xem; thêm dòng sót thì con trỏ vào 摘要 của dòng mới.
+- Tests: 14 test TS mới (giải thích ba thứ tiếng, mức lệch thật, ghi chú tự sửa, từng phương án có ca đúng + ca không được gợi ý — ví dụ (2) không ra khi dòng kế không khớp hoặc không có dòng sau —, thứ tự/giới hạn, không gợi ý cho dòng khớp/đã ✓/ghi chú, `applyFix` làm hết NG và ghi `orig`, dòng sót đặt đúng chỗ). Cố ý bẻ 5 luật: bằng chứng hai phía, khoảng cách chữ số, mức lệch lấy từ chuỗi (thay vì 差額) thì test đỏ đúng chỗ; luật «chỉ dòng NG» lúc đầu KHÔNG bị bắt nên đã thêm test «dòng đang khớp không được gợi ý»; giới hạn 3 phương án không bẻ được vì về mặt toán học không bao giờ có 4 (giữ làm lưới an toàn). E2E bước 13 dùng sổ mẫu: 出金 1,700→1,100, 残高 → 2,108,211 (tự nhảy sang dòng kế), đổi cột, thêm dòng sót + Ctrl+Z.
+- Python không đổi (gợi ý chỉ là việc của giao diện; Excel không cần).
 
 ---
 

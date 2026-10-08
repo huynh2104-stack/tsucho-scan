@@ -16,8 +16,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useT, type Dict } from "@/lib/i18n";
-import { FIELD_LABEL, analyzeRows, editChanges, isISO, openReasons, parseYen, type RowInfo } from "@/lib/review";
+import { useT, type Dict, type Lang } from "@/lib/i18n";
+import {
+  FIELD_LABEL,
+  analyzeRows,
+  editChanges,
+  explainOpen,
+  explainReason,
+  isISO,
+  parseReasons,
+  parseYen,
+  type RowInfo,
+} from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
@@ -277,6 +287,7 @@ function Row({
   rowIdx,
   pick,
   t,
+  lang,
   onEdit,
   onDelete,
   onToggleReviewed,
@@ -297,6 +308,7 @@ function Row({
   /** Cột thứ `c` của dòng này có nằm trong vùng bôi đen không. */
   pick: (row: number, col: number) => boolean;
   t: Dict;
+  lang: Lang;
   onEdit: EditFn;
   onDelete: RowActionFn;
   onToggleReviewed: RowActionFn;
@@ -340,9 +352,14 @@ function Row({
       </button>
     );
   };
-  // Cột 確認メモ của dòng vàng: chỉ những lý do CHƯA giải quyết (+ nhắn rõ dòng do người thêm)
-  const memo = flag
-    ? [...openReasons(tx, chk).map((r) => r.text), ...(tx.added ? [t.rowAddedNote] : [])].join("・")
+  // Cột 確認メモ của dòng vàng: chỉ những lý do CHƯA giải quyết, dịch sang ngôn ngữ đang dùng
+  // (chuỗi tiếng Nhật gốc của máy nằm trong tooltip). Dòng do người thêm cũng được nhắc rõ.
+  const memo = flag ? explainOpen(tx, info, lang).join(" · ") : "";
+  // Dòng máy đã tự sửa: ghi máy đã làm gì, cũng bằng ngôn ngữ đang dùng
+  const fixedMemo = fixed
+    ? parseReasons(tx.reason)
+        .map((r) => explainReason(r, lang))
+        .join(" · ")
     : "";
 
   // Thứ tự các ô SỬA ĐƯỢC trong một dòng = toạ độ cột của vùng bôi đen.
@@ -506,7 +523,7 @@ function Row({
         title={[editTip, tx.reason].filter(Boolean).join("\n") || undefined}
       >
         {flag && memo && <span className="text-warnink">⚠ {memo}</span>}
-        {fixed && <span className="text-inink">✓ {tx.reason}</span>}
+        {fixed && <span className="text-inink">✓ {fixedMemo}</span>}
         {confirmed && (
           <span className="text-okink">
             ✓ {t.rowConfirmed}
@@ -573,6 +590,7 @@ function AccountCard({
   cols,
   head,
   t,
+  lang,
   filter,
   onEdit,
   onDeleteRow,
@@ -598,6 +616,7 @@ function AccountCard({
   cols: OptCols;
   head: React.ReactNode;
   t: Dict;
+  lang: Lang;
   filter: string;
   onEdit: EditFn;
   onDeleteRow: RowActionFn;
@@ -696,6 +715,7 @@ function AccountCard({
                 rowIdx={rowBase + i}
                 pick={pick}
                 t={t}
+                lang={lang}
                 onEdit={onEdit}
                 onDelete={onDeleteRow}
                 onToggleReviewed={onToggleReviewed}
@@ -787,7 +807,7 @@ export default function ReviewPane({
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const g = t.colGloss;
   const scroller = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("");
@@ -963,6 +983,7 @@ export default function ReviewPane({
         cols={cols}
         head={head}
         t={t}
+        lang={lang}
         filter={filter}
         onEdit={onEdit}
         onDeleteRow={onDeleteRow}

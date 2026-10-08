@@ -52,13 +52,17 @@ import { useAuth } from "@/lib/auth";
 import {
   analyzeRows,
   applyEdit,
+  applyFix,
   blankRow,
+  explainOpen,
   insertRowAfter,
   ngCount,
   restoreField,
   setAllReviewed,
   setReviewed,
   sheetStats,
+  suggestFixes,
+  type Fix,
   type FocusField,
 } from "@/lib/review";
 import { useT } from "@/lib/i18n";
@@ -79,6 +83,7 @@ import ExportDialog, { type ExportOpts } from "@/components/ExportDialog";
 import ImportProgress, { type PendingUpload } from "@/components/ImportProgress";
 import SheetBusy from "@/components/SheetBusy";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import FixBar from "@/components/FixBar";
 
 const WS_KEY = "tsucho.ws";
 
@@ -117,7 +122,7 @@ function parseRowKey(key: string | undefined): TxRef | null {
 }
 
 export default function Workbench() {
-  const { t } = useT();
+  const { t, lang } = useT();
 
   /** Mã lỗi từ server → câu ĐÚNG THỨ TIẾNG người dùng đang xem.
    *
@@ -169,6 +174,8 @@ export default function Workbench() {
     ref: TxRef;
     field: FocusField;
   } | null>(null);
+  // Vừa áp một gợi ý sửa ở dòng này: sau khi bảng vẽ lại thì sang dòng cần soát kế (nếu dòng đã hết cờ)
+  const [jumpNext, setJumpNext] = useState<TxRef | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -594,6 +601,35 @@ export default function Workbench() {
     return false;
   };
 
+  /* Sau khi áp một gợi ý sửa: dòng đã hết cờ thì tự sang dòng cần soát kế; còn cờ khác thì ở lại và
+     đặt con trỏ vào ô cần xem. Chạy SAU khi bảng vẽ lại (flatRows đã tính theo dữ liệu mới) — dùng
+     flatRows cũ thì sẽ nhảy nhầm vào dòng kế vừa hết lệch theo. */
+  useEffect(() => {
+    if (!jumpNext) return;
+    const here = flatRows.find(
+      (r) => r.ref.sheet === jumpNext.sheet && r.ref.block === jumpNext.block && r.ref.row === jumpNext.row,
+    );
+    if (here?.bad) {
+      setSelRow(here.ref);
+      setPendingFocus({ ref: here.ref, field: here.field });
+    } else {
+      jumpBad(1, jumpNext, true);
+    }
+    setJumpNext(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpNext, flatRows]);
+
+  /** Thanh gợi ý: vì sao dòng đang chọn vàng + các phương án sửa một chạm (null nếu dòng không cần soát). */
+  const fixBar = useMemo(() => {
+    if (!selRow) return null;
+    const rows = store[selRow.sheet]?.blocks[selRow.block]?.rows;
+    const tx = rows?.[selRow.row];
+    if (!rows || !tx) return null;
+    const info = analyzeRows(rows)[selRow.row];
+    if (info.state !== "review") return null;
+    return { ref: selRow, explain: explainOpen(tx, info, lang), fixes: suggestFixes(rows, selRow.row) };
+  }, [selRow, store, lang]);
+
   /** Chỉnh ảnh CHỈ tác động mặt đang xem. */
   const editTarget = () => (active ? [active] : []);
 
@@ -854,6 +890,18 @@ export default function Workbench() {
   /** Nút ↺: trả một ô về giá trị MÁY ĐỌC (và xoá nó khỏi `orig`). */
   const restoreCell: RestoreFn = (ref, field) =>
     patchRows(ref.sheet, ref.block, (rows) => restoreField(rows, ref.row, field));
+
+  /** Bấm một gợi ý sửa. Là một lần sửa như mọi lần khác (Ctrl+Z hoàn tác được). */
+  const applyFixAt = (ref: TxRef, fix: Fix) => {
+    patchRows(ref.sheet, ref.block, (rows) => applyFix(rows, ref.row, fix));
+    if (fix.kind === "addrow") {
+      // Dòng sót mới nằm đúng chỗ dòng cũ; con trỏ vào 摘要 của nó để điền tên từ ảnh
+      setSelRow(ref);
+      setPendingFocus({ ref, field: "description" });
+    } else {
+      setJumpNext(ref);
+    }
+  };
 
   /** 「✓ Xác nhận cả mặt sổ」: ✓ mọi dòng của một khối. Còn dòng NG thì hỏi lại trước. */
   const confirmAll = (sheetId: string, block: number) => {
@@ -1325,6 +1373,7 @@ export default function Workbench() {
           }`}
         >
           {Object.keys(store).length > 0 && (
+            <>
             <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-1.5">
               <button
                 onClick={undoEdit}
@@ -1397,6 +1446,12 @@ export default function Workbench() {
                 )}
               </div>
             </div>
+            <FixBar
+              explain={fixBar?.explain ?? []}
+              fixes={fixBar?.fixes ?? []}
+              onApply={(fix) => fixBar && applyFixAt(fixBar.ref, fix)}
+            />
+            </>
           )}
           <div className="min-h-0 flex-1">
             <ReviewPane

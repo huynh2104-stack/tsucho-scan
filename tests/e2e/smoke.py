@@ -33,7 +33,9 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     phím n khớp nhau; ✓ → hết vàng → Ctrl+Z → ✓ lại → F5 vẫn còn ✓ (server lưu reviewed)
  12 ↺ trả ô về giá trị máy đọc · Ctrl+Enter (✓ rồi nhảy tiếp, kể cả khi đang gõ dở) · 「Xác nhận cả mặt sổ」
     (hỏi lại khi còn dòng NG) · 「+ Thêm dòng」chèn ngay dưới dòng đang chọn · Ctrl+Shift+Enter · F5 còn nguyên
- 13 xác nhận cả hai mặt sổ → xuất Excel: 0 ô vàng ở bảng dữ liệu, 検証レベル bắt đầu bằng 検証済 hoặc
+ 13 lý do hiện bằng tiếng Việt (tooltip giữ chuỗi Nhật); thanh gợi ý có chiều cao cố định; gợi ý sửa một chạm:
+    出金 → số đúng, 残高 → số đúng (tự sang dòng cần soát kế), đổi cột 出金↔入金, thêm dòng sót (Ctrl+Z hoàn tác)
+ 14 xác nhận cả hai mặt sổ → xuất Excel: 0 ô vàng ở bảng dữ liệu, 検証レベル bắt đầu bằng 検証済 hoặc
     残高チェーン検証済, cột 確認メモ ghi 確認済, chú thích hoàn toàn tiếng Nhật
 """
 from __future__ import annotations
@@ -469,7 +471,9 @@ def step_review_definition(pg, base: str, ctx: dict) -> str:
     agree(1, "mặt ② lúc mới mở")
     row = pg.locator('tr[data-row][data-state="review"]').first
     assert row.locator('input[data-field="description"]').input_value() == GAP_DESC, "dòng vàng không phải dòng 証貸 5月"
-    assert "行抜けの疑い" in row.inner_text(), f"cột 確認メモ không nói lý do: {row.inner_text()!r}"
+    assert "Số dòng nhảy 05→07" in row.inner_text(), f"cột 確認メモ không nói lý do bằng tiếng Việt: {row.inner_text()!r}"
+    tip = row.locator("td", has_text="Số dòng nhảy").first.get_attribute("title") or ""
+    assert "行抜けの疑い" in tip, f"tooltip phải giữ chuỗi gốc của máy: {tip!r}"
 
     pg.locator("body").click(position={"x": 5, "y": 5})
     pg.keyboard.press("n")
@@ -626,6 +630,101 @@ def step_review_actions(pg, base: str, ctx: dict) -> str:
             "chèn dòng ngay dưới dòng chọn (nút và Ctrl+Shift+Enter) · F5 còn nguyên")
 
 
+def step_fix_suggestions(pg, base: str, ctx: dict) -> str:
+    """Task 1.5: lý do dễ hiểu + gợi ý sửa một chạm. Chạy TRƯỚC khi ✓ cả mặt (dòng đã ✓ thì không còn NG)."""
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+
+    def idx(desc: str) -> int:
+        i = pg.evaluate("""d => Array.from(document.querySelectorAll('tr[data-row]'))
+            .findIndex(tr => (tr.querySelector('input[data-field=description]') || {}).value === d)""", desc)
+        assert i >= 0, f"không thấy dòng {desc!r}"
+        return i
+
+    def cell(i, field):
+        return pg.locator("tr[data-row]").nth(i).locator(f'input[data-field="{field}"]')
+
+    def typ(c, text):
+        c.click(); c.press("Control+a")
+        if text:
+            c.type(text)
+        else:
+            c.press("Delete")                                    # gõ chuỗi rỗng không xoá vùng đang bôi đen
+        c.press("Enter")
+
+    def bar():
+        return pg.locator("[data-fixbar]")
+
+    def chips():
+        return [b.get_attribute("data-fix") for b in bar().locator("button[data-fix]").all()]
+
+    def pick_row(i):
+        cell(i, "description").click()
+
+    n_rows = pg.locator("tr[data-row]").count()
+    a, c_, b_ = idx("SS手数料"), idx("ヨキンキ"), idx("手数料")
+    assert need_review(pg) == 0, "đầu bước này mặt ① phải sạch"
+    h_idle = bar().bounding_box()["height"]
+    assert "Ctrl+Enter" in bar().inner_text(), "lúc rảnh thanh gợi ý phải nhắc phím tắt"
+
+    # ── 出金 gõ nhầm 1,700 (đúng là 1,100) + 残高 dòng ヨキンキ gõ sai ──
+    typ(cell(a, "amount_out"), "1700")
+    typ(cell(c_, "balance"), "999")
+    wait_until(lambda: need_review(pg) == 3, "2 chỗ sai ⇒ 3 dòng vàng (dòng 出金 sai + dòng 残高 sai + dòng kế lệch theo)")
+    pick_row(a)
+    wait_until(lambda: chips() == ["amount", "addrow"], "dòng 出金 sai có gợi ý 出金 → số đúng và thêm dòng sót")
+    text = bar().inner_text()
+    assert "Số dư lệch +600 so với phép tính từ dòng trên" in text, f"lý do phải nói mức lệch thật: {text!r}"
+    assert "出金 → 1,100" in text and "Thêm dòng 入金 ¥600" in text, text
+    assert bar().bounding_box()["height"] == h_idle, "thanh gợi ý đổi chiều cao khi có gợi ý ⇒ bảng sẽ giật"
+    memo = pg.locator("tr[data-row]").nth(a).locator("td", has_text="Số dư lệch").first
+    assert "残高" not in memo.inner_text() and "Số dư lệch" in memo.inner_text(), memo.inner_text()
+
+    bar().locator('button[data-fix="amount"]').click()
+    wait_until(lambda: cell(a, "amount_out").input_value() == "1,100", "bấm 出金 → 1,100 thì ô về 1,100")
+    # Áp xong thì dòng này hết vàng ⇒ tự sang dòng cần soát kế (dòng 残高 sai), con trỏ vào đúng ô 残高
+    at = wait_until(lambda: focused(pg), "sau khi sửa xong tự sang dòng cần soát kế")
+    assert (at["row"], at["field"], at["state"]) == (c_, "balance", "review"), f"phải vào ô 残高 của dòng ヨキンキ, thực tế {at}"
+    wait_until(lambda: chips() == ["balance"], "dòng 残高 sai chỉ có một gợi ý (dòng kế khớp ⇒ đủ bằng chứng)")
+    assert "残高 → 2,108,211" in bar().inner_text()
+    bar().locator('button[data-fix="balance"]').click()
+    wait_until(lambda: need_review(pg) == 0 and cell(c_, "balance").input_value() == "2,108,211",
+               "bấm 残高 → 2,108,211 thì cả dòng đó lẫn dòng kế hết vàng")
+
+    # ── Số tiền nằm nhầm cột ──
+    typ(cell(b_, "amount_in"), "2750")
+    typ(cell(b_, "amount_out"), "")
+    wait_until(lambda: need_review(pg) == 1, "手数料 chuyển sang cột 入金 ⇒ lệch")
+    pick_row(b_)
+    wait_until(lambda: chips()[:1] == ["swap"], "gợi ý đầu tiên là đổi cột")
+    assert "Đổi cột 出金↔入金" in bar().inner_text()
+    bar().locator('button[data-fix="swap"]').click()
+    wait_until(lambda: need_review(pg) == 0, "đổi cột xong thì hết vàng")
+    assert (cell(b_, "amount_out").input_value(), cell(b_, "amount_in").input_value()) == ("2,750", ""), "số tiền phải về đúng cột 出金"
+
+    # ── Thêm dòng bị sót (Ctrl+Z hoàn tác được) ──
+    typ(cell(a, "amount_out"), "1700")
+    pick_row(a)
+    wait_until(lambda: "addrow" in chips(), "có gợi ý thêm dòng sót")
+    bar().locator('button[data-fix="addrow"]').click()
+    wait_until(lambda: pg.locator("tr[data-row]").count() == n_rows + 1, "thêm một dòng")
+    row_new = pg.locator("tr[data-row]").nth(a)
+    assert row_new.get_attribute("data-state") == "review" and cell(a, "amount_in").input_value() == "600", "dòng mới: 入金 600, cần ✓"
+    assert cell(a, "balance").input_value() == "22,661"
+    at = wait_until(lambda: focused(pg), "con trỏ vào dòng mới")
+    assert (at["row"], at["field"]) == (a, "description"), f"phải vào ô 摘要 của dòng mới, thực tế {at}"
+    assert pg.locator("tr[data-row]").nth(a + 1).get_attribute("data-state") != "review", "dòng cũ phải hết lệch"
+    assert need_review(pg) == 1, "chỉ dòng thêm tay còn cần ✓"
+    pg.keyboard.press("Control+z")
+    wait_until(lambda: pg.locator("tr[data-row]").count() == n_rows and need_review(pg) == 1, "Ctrl+Z bỏ dòng vừa thêm")
+    pick_row(a)
+    wait_until(lambda: "amount" in chips(), "dòng 出金 sai lại có gợi ý")
+    bar().locator('button[data-fix="amount"]').click()
+    wait_until(lambda: need_review(pg) == 0 and cell(a, "amount_out").input_value() == "1,100", "trả mặt ① về sạch")
+    return ("lý do hiện tiếng Việt, tooltip giữ chuỗi Nhật · 出金 → 1,100 và 残高 → 2,108,211 (tự sang dòng kế) · đổi cột · "
+            "thêm dòng sót + Ctrl+Z · thanh gợi ý không đổi chiều cao")
+
+
 def step_export_confirmed(pg, base: str, ctx: dict) -> str:
     """Task 1.4: soát xong (✓ cả hai mặt) rồi xuất Excel thì file không còn ô vàng nào."""
     from openpyxl import load_workbook
@@ -672,7 +771,8 @@ STEPS = [
     ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
     ("11. Dòng vàng thật + ✓ (một định nghĩa 'cần soát')", step_review_definition),
     ("12. ↺, Ctrl+Enter, xác nhận cả mặt, chèn dòng đúng chỗ", step_review_actions),
-    ("13. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
+    ("13. Lý do tiếng Việt + gợi ý sửa một chạm", step_fix_suggestions),
+    ("14. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

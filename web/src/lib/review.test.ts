@@ -7,9 +7,12 @@ import {
   analyzeRows,
   applyDateEdit,
   applyEdit,
+  applyFix,
   blankRow,
   chainChecks,
   editChanges,
+  explainOpen,
+  explainReason,
   focusField,
   insertRowAfter,
   ngCount,
@@ -26,6 +29,7 @@ import {
   setReviewed,
   sheetStats,
   shown,
+  suggestFixes,
 } from "./review.ts";
 
 // ── parseDateInput ───────────────────────────────────────────────────
@@ -522,4 +526,154 @@ test("editChanges: liệt kê máy đọc → hiện tại theo thứ tự cột
     { field: "balance", from: 100, to: 150 },
   ]);
   assert.deepEqual(editChanges(full({})), []);
+});
+
+
+// ── Task 1.5: lý do dễ hiểu + gợi ý sửa một chạm ────────────────────
+
+const kinds = (fixes: { kind: string }[]) => fixes.map((f) => f.kind);
+
+test("explainReason: lý do cần soát được giải thích bằng ba thứ tiếng, số dòng nhảy được đệm 0", () => {
+  const gap = parseReasons("行番号 6→8: 1行抜けの疑い")[0];
+  assert.equal(explainReason(gap, "vi"), "Số dòng nhảy 06→08: có thể sót 1 dòng");
+  assert.equal(explainReason(gap, "en"), "Row numbers jump 06→08: 1 row(s) may be missing");
+  assert.match(explainReason(gap, "ja"), /06→08.*1 行/);
+  assert.equal(explainReason(parseReasons("日付不明")[0], "vi"), "Không đọc được ngày");
+  assert.equal(explainReason(parseReasons("低信頼度")[0], "vi"), "Máy đọc không chắc (chữ mờ)");
+  assert.equal(explainReason(parseReasons("残高が読取れず検証不可")[0], "en"), "Balance unreadable, so this row cannot be verified");
+  assert.equal(explainReason(parseReasons("日付不明(手入力)")[0], "ja"), "日付を読み取れません");
+});
+
+test("explainReason: lý do số dư dùng mức lệch THẬT (in − tính), không dùng 差額 của engine", () => {
+  const r = parseReasons("残高不一致(差額 +340)")[0];                 // 差額 = in − số dư dòng trước, không phải mức lệch
+  assert.equal(explainReason(r, "vi", { diff: 440 }), "Số dư lệch +440 so với phép tính từ dòng trên");
+  assert.equal(explainReason(r, "vi", { diff: -1234 }), "Số dư lệch -1,234 so với phép tính từ dòng trên");
+  assert.equal(explainReason(r, "vi"), "Số dư không khớp phép tính từ dòng trên");   // chưa biết mức lệch thì không bịa
+  assert.match(explainReason(r, "en", { diff: 440 }), /off by \+440/);
+});
+
+test("explainReason: ghi chú tự sửa của máy cũng được giải thích; chuỗi lạ giữ nguyên", () => {
+  const ex = (s: string, lang: "vi" | "en" | "ja" = "vi") => explainReason(parseReasons(s)[0], lang);
+  assert.equal(ex("金額を入金列へ移動"), "Máy đã chuyển số tiền sang cột 入金");
+  assert.equal(ex("金額の列を入替"), "Máy đã đổi chỗ hai cột tiền");
+  assert.equal(ex("残高を検算で補正(印字読取 906,810)"), "Máy đã sửa số dư theo phép tính (bản in đọc ra 906,810)");
+  assert.equal(ex("残高を検算で補正"), "Máy đã sửa số dư theo phép tính");
+  assert.equal(ex("日付は前行と同じ(印字なし)", "en"), "No date printed: using the date of the row above");
+  assert.equal(ex("年を後行から補完", "ja"), "下の行から年を補いました");
+  assert.equal(ex("何かの警告"), "何かの警告");
+  assert.equal(ex("未知の補正"), "Máy đã tự sửa dòng này");
+});
+
+test("explainOpen: dòng NG máy không ghi lý do vẫn được giải thích; dòng thêm tay được nhắc; dòng không cần soát thì rỗng", () => {
+  const rows = [full({ balance: 1000 }), full({ amount_out: 100, balance: 1340 }), full({ amount_out: 1, balance: 899 })];
+  const info = analyzeRows(rows);
+  assert.equal(info[1].diff, 440);
+  assert.deepEqual(explainOpen(rows[1], info[1], "vi"), ["Số dư lệch +440 so với phép tính từ dòng trên"]);
+  assert.deepEqual(explainOpen(rows[0], info[0], "vi"), []);
+  const them = [full({ balance: 1000 }), full({ added: true, amount_out: 100, balance: 900 })];
+  assert.deepEqual(explainOpen(them[1], analyzeRows(them)[1], "vi"), ["Dòng thêm tay — chưa soát"]);
+  const date = [full({ date: null, date_raw: "?", status: "check", reason: "日付不明・低信頼度" })];
+  assert.deepEqual(explainOpen(date[0], analyzeRows(date)[0], "vi"), ["Không đọc được ngày", "Máy đọc không chắc (chữ mờ)"]);
+});
+
+test("analyzeRows.diff: chỉ có ở dòng NG, bằng số dư in trừ số dư tính được", () => {
+  const info = analyzeRows([full({ balance: 1000 }), full({ amount_in: 50, balance: 1000 }), full({ amount_out: 10, balance: 990 })]);
+  assert.deepEqual(info.map((x) => x.diff), [null, -50, null]);
+});
+
+test("gợi ý 1: đổi cột 出金↔入金 khi đảo cột làm chuỗi khớp; không gợi ý khi đảo cũng không khớp", () => {
+  // Thật ra rút 300 (700), máy đọc nhầm sang cột 入金
+  const sai = [full({ balance: 1000 }), full({ amount_in: 300, balance: 700 })];
+  assert.deepEqual(suggestFixes(sai, 1)[0], { kind: "swap" });
+  const khong = [full({ balance: 1000 }), full({ amount_in: 300, balance: 650 })];
+  assert.equal(kinds(suggestFixes(khong, 1)).includes("swap"), false);
+  const haiBen = [full({ balance: 1000 }), full({ amount_in: 300, amount_out: 300, balance: 5 })];
+  assert.equal(kinds(suggestFixes(haiBen, 1)).includes("swap"), false);   // 出金 = 入金: đảo cột không đổi gì
+});
+
+test("gợi ý 2: sửa 残高 thành số tính được CHỈ khi số dư dòng kế khớp (bằng chứng hai phía)", () => {
+  const ok = [full({ balance: 1000 }), full({ amount_out: 100, balance: 999 }), full({ amount_out: 50, balance: 850 })];
+  assert.deepEqual(suggestFixes(ok, 1).find((f) => f.kind === "balance"), { kind: "balance", value: 900 });
+  const lech = [ok[0], ok[1], full({ amount_out: 50, balance: 840 })];       // dòng kế không khớp với 900 ⇒ không đủ bằng chứng
+  assert.equal(kinds(suggestFixes(lech, 1)).includes("balance"), false);
+  assert.equal(kinds(suggestFixes(ok.slice(0, 2), 1)).includes("balance"), false);   // không có dòng nào phía sau để đối chiếu
+  const nghi = [ok[0], ok[1], full({ amount_out: 50 }), full({ amount_out: 10, balance: 840 })];   // dòng không in 残高: cộng dồn
+  assert.deepEqual(suggestFixes(nghi, 1).find((f) => f.kind === "balance"), { kind: "balance", value: 900 });
+  const ghiChu = [ok[0], ok[1], full({ is_note: true, status: "note", balance: 900 })];       // 繰越 in lại đúng số dư
+  assert.equal(kinds(suggestFixes(ghiChu, 1)).includes("balance"), true);
+});
+
+test("gợi ý 3: sửa số tiền khi chỉ khác 1–2 chữ số; không gợi ý khi khác xa hoặc không dương", () => {
+  const out = [full({ balance: 22061 }), full({ amount_out: 1700, balance: 20961 })];   // thật ra 1,100
+  assert.deepEqual(suggestFixes(out, 1).find((f) => f.kind === "amount"), { kind: "amount", field: "amount_out", value: 1100 });
+  const inn = [full({ balance: 1000 }), full({ amount_in: 480, balance: 1450 })];       // thật ra 450
+  assert.deepEqual(suggestFixes(inn, 1).find((f) => f.kind === "amount"), { kind: "amount", field: "amount_in", value: 450 });
+  const xa = [full({ balance: 22061 }), full({ amount_out: 9876, balance: 20961 })];    // 9876 vs 1100: đọc nhầm cả số
+  assert.equal(kinds(suggestFixes(xa, 1)).includes("amount"), false);
+  const am = [full({ balance: 1000 }), full({ amount_out: 10, balance: 2000 })];         // cần 出金 = -1000
+  assert.equal(kinds(suggestFixes(am, 1)).includes("amount"), false);
+  const thieu = [full({ balance: 22061 }), full({ amount_out: 110, balance: 20961 })];   // thiếu một chữ số 0: 110 → 1100
+  assert.deepEqual(suggestFixes(thieu, 1).find((f) => f.kind === "amount"), { kind: "amount", field: "amount_out", value: 1100 });
+});
+
+test("gợi ý 4: thêm dòng bị sót — rút khi số dư thấp hơn tính toán, gửi khi cao hơn; không ra số dư âm", () => {
+  const rut = [full({ balance: 1000 }), full({ amount_out: 100, balance: 600 })];        // thấp hơn 300 ⇒ sót một lần rút 300
+  assert.deepEqual(suggestFixes(rut, 1).find((f) => f.kind === "addrow"), { kind: "addrow", side: "out", amount: 300, balance: 700 });
+  const gui = [full({ balance: 1000 }), full({ amount_out: 100, balance: 1500 })];       // cao hơn 600 ⇒ sót một lần gửi 600
+  assert.deepEqual(suggestFixes(gui, 1).find((f) => f.kind === "addrow"), { kind: "addrow", side: "in", amount: 600, balance: 1600 });
+  const am = [full({ balance: 100 }), full({ amount_out: 10, balance: -500 })];
+  assert.equal(kinds(suggestFixes(am, 1)).includes("addrow"), false);
+});
+
+test("gợi ý: tối đa 3 phương án, đúng thứ tự 1 → 2 → 3 → 4", () => {
+  const rows = [full({ balance: 1000 }), full({ amount_in: 300, balance: 700 }), full({ amount_out: 50, balance: 1250 })];
+  // swap (1000-300=700), balance (E=1300, dòng kế 1250 khớp), addrow rút 600 (700-1300); amount không có (B-P<0)
+  assert.deepEqual(kinds(suggestFixes(rows, 1)), ["swap", "balance", "addrow"]);
+  assert.ok(suggestFixes(rows, 1).length <= 3);
+});
+
+test("gợi ý: chỉ cho dòng NG — dòng khớp, đã ✓, ghi chú, đầu khối, không có số dư thì không gợi ý gì", () => {
+  const rows = [full({ balance: 1000 }), full({ amount_out: 100, balance: 900 }), full({ amount_out: 1, balance: 5, reviewed: true }),
+    full({ is_note: true, status: "note", balance: 77 }), full({ amount_out: 1 })];
+  for (const i of [0, 1, 2, 3, 4, 9]) assert.deepEqual(suggestFixes(rows, i), [], `dòng ${i}`);
+});
+
+test("applyFix: mỗi phương án làm dòng hết NG và ghi nhớ giá trị máy đọc (orig) như người tự gõ", () => {
+  const needOf = (rows: Tx[]) => analyzeRows(rows).filter((x) => x.need).length;
+
+  const sw = [full({ balance: 1000 }), full({ amount_in: 300, balance: 700 })];
+  const swOut = applyFix(sw, 1, { kind: "swap" });
+  assert.deepEqual([swOut[1].amount_out, swOut[1].amount_in], [300, null]);
+  assert.deepEqual(swOut[1].orig, { amount_in: 300, amount_out: null });
+  assert.equal(needOf(swOut), 0);
+
+  const bl = [full({ balance: 1000 }), full({ amount_out: 100, balance: 999 }), full({ amount_out: 50, balance: 850 })];
+  assert.equal(needOf(bl), 2);                                                  // dòng sai và dòng kế lệch theo
+  const blOut = applyFix(bl, 1, { kind: "balance", value: 900 });
+  assert.deepEqual(blOut[1].orig, { balance: 999 });
+  assert.equal(needOf(blOut), 0);                                               // sửa một chỗ, hết cả hai
+
+  const am = [full({ balance: 22061 }), full({ amount_out: 1700, balance: 20961 })];
+  const amOut = applyFix(am, 1, { kind: "amount", field: "amount_out", value: 1100 });
+  assert.equal(amOut[1].amount_out, 1100);
+  assert.equal(needOf(amOut), 0);
+});
+
+test("applyFix addrow: chèn dòng sót NGAY TRÊN dòng NG, mượn ngày, balance đúng, vẫn phải ✓; dòng cũ hết NG", () => {
+  const rows = [full({ balance: 1000 }), full({ amount_out: 100, balance: 600, date: "2025-05-02" })];
+  const fix = suggestFixes(rows, 1).find((f) => f.kind === "addrow")!;
+  const out = applyFix(rows, 1, fix);
+  assert.equal(out.length, 3);
+  const nova = out[1];
+  assert.deepEqual([nova.added, nova.date, nova.amount_out, nova.amount_in, nova.balance, nova.description],
+    [true, "2025-05-02", 300, null, 700, null]);
+  assert.equal(out[2], rows[1]);                                                // dòng NG cũ giữ nguyên tham chiếu
+  const info = analyzeRows(out);
+  assert.deepEqual(info.map((x) => x.chk), ["―", "OK", "OK"]);                  // cả hai dòng đều khớp chuỗi
+  assert.deepEqual(info.map((x) => x.need), [false, true, false]);              // chỉ dòng thêm tay còn cần ✓
+});
+
+test("gợi ý: dòng đang KHỚP chuỗi thì dù có thể 'sửa' cho khớp thêm vẫn không được gợi ý", () => {
+  const rows = [full({ balance: 1000 }), full({ amount_out: 100, balance: 900 }), full({ amount_out: 50, balance: 850 })];
+  assert.deepEqual(suggestFixes(rows, 1), []);                                  // dòng kế khớp với 900 nhưng dòng này đã đúng
 });

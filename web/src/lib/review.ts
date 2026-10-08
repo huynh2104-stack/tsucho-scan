@@ -12,6 +12,7 @@
  */
 
 import type { EditField, Tx } from "./api.ts";
+import { DICT, type Dict, type Lang } from "./dict.ts";
 
 // ── Ngày ─────────────────────────────────────────────────────────────
 
@@ -264,7 +265,8 @@ export type Reason = { kind: ReasonKind; text: string; params: ReasonParams };
 export type RowState = "note" | "confirmed" | "review" | "fixed" | "edited" | "ok";
 /** Ô mà phím n đặt con trỏ vào. */
 export type FocusField = "balance" | "date" | "description";
-export type RowInfo = { chk: Chain; state: RowState; need: boolean; field: FocusField };
+/** `diff` = số dư in − số dư tính từ dòng trên, chỉ có khi dòng đang NG (dùng để giải thích và gợi ý sửa). */
+export type RowInfo = { chk: Chain; state: RowState; need: boolean; field: FocusField; diff: number | null };
 export type SheetStats = { rows: number; need: number; fixed: number; confirmed: number; edited: number };
 
 const SEP = "・";
@@ -279,20 +281,26 @@ const NOT_CHECKABLE: Chain = "―";
  * • dòng đầu khối (chưa có mốc): "―".
  */
 export function chainChecks(rows: Tx[]): Chain[] {
+  return chainWalk(rows).map((s) => s.chk);
+}
+
+/** Kết quả cột 検算 kèm số dư KỲ VỌNG ngay trước dòng (`before`, null nếu chưa có mốc). */
+function chainWalk(rows: Tx[]): { chk: Chain; before: number | null }[] {
   let running: number | null = null;
-  return rows.map((tx): Chain => {
+  return rows.map((tx) => {
+    const before = running;
     if (tx.is_note) {
       if (tx.balance != null) running = tx.balance;
-      return NOT_CHECKABLE;
+      return { chk: NOT_CHECKABLE, before };
     }
     const move = (tx.amount_in ?? 0) - (tx.amount_out ?? 0);
     if (tx.balance == null) {
       if (running != null) running += move;
-      return NOT_CHECKABLE;
+      return { chk: NOT_CHECKABLE, before };
     }
-    const out: Chain = running == null ? NOT_CHECKABLE : running + move === tx.balance ? "OK" : "NG";
+    const chk: Chain = running == null ? NOT_CHECKABLE : running + move === tx.balance ? "OK" : "NG";
     running = tx.balance;
-    return out;
+    return { chk, before };
   });
 }
 
@@ -415,13 +423,15 @@ export function focusField(tx: Tx, chk: Chain): FocusField {
 
 /** Mỗi dòng của một khối → `{chk, state, need, field}`, tính chuỗi số dư đúng MỘT lượt. */
 export function analyzeRows(rows: Tx[]): RowInfo[] {
-  const chk = chainChecks(rows);
-  return rows.map((tx, i) => ({
-    chk: chk[i],
-    state: rowState(tx, chk[i]),
-    need: needsReview(tx, chk[i]),
-    field: focusField(tx, chk[i]),
-  }));
+  const walk = chainWalk(rows);
+  return rows.map((tx, i) => {
+    const { chk, before } = walk[i];
+    const diff =
+      chk === "NG" && before != null && tx.balance != null
+        ? tx.balance - (before - (tx.amount_out ?? 0) + (tx.amount_in ?? 0))
+        : null;
+    return { chk, state: rowState(tx, chk), need: needsReview(tx, chk), field: focusField(tx, chk), diff };
+  });
 }
 
 /** Thống kê một mặt sổ. Dòng ghi chú không được tính vào `rows`. */
@@ -532,4 +542,177 @@ export type EditChange = { field: EditField; from: string | number | null; to: s
 export function editChanges(tx: Tx): EditChange[] {
   const orig = tx.orig ?? {};
   return FIELD_ORDER.filter((f) => f in orig).map((f) => ({ field: f, from: norm(orig[f]), to: shown(tx, f) }));
+}
+
+
+// ── Lý do dễ hiểu + gợi ý sửa một chạm (task 1.5) ─────────────────────
+//
+// Lý do của máy là chuỗi tiếng Nhật kỹ thuật (`残高不一致(差額 +440)`): người dùng VI/EN không đọc
+// được. `explainReason` đổi sang một câu ngắn theo ngôn ngữ đang dùng; tooltip vẫn giữ chuỗi gốc.
+// CHÚ Ý: 「差額」của engine là `残高 in − 残高 dòng trước` (độ nhảy của số dư), KHÔNG phải mức lệch
+// so với phép tính, nên không đem ra giải thích; mức lệch thật (`diff` = in − tính) lấy từ chuỗi
+// số dư hiện tại (RowInfo.diff).
+
+const signed = (n: number) => (n > 0 ? "+" : n < 0 ? "-" : "") + Math.abs(n).toLocaleString("en-US");
+
+function explainFix(text: string, t: Dict): string {
+  if (/^金額を入金列へ移動$/.test(text)) return t.rsFixToIn;
+  if (/^金額を出金列へ移動$/.test(text)) return t.rsFixToOut;
+  if (/^金額の列を入替$/.test(text)) return t.rsFixSwap;
+  if (/^残高から取扱店を分離$/.test(text)) return t.rsFixStore;
+  if (/^残高と取扱店を入替補正$/.test(text)) return t.rsFixStoreSwap;
+  if (/^残高の行ずれを自動補正$/.test(text)) return t.rsFixShift;
+  if (/^日付は前行と同じ/.test(text)) return t.rsFixDateSame;
+  if (/^年を前行から補完$/.test(text)) return t.rsFixYearPrev;
+  if (/^年を後行から補完$/.test(text)) return t.rsFixYearNext;
+  if (/^残高を検算で補正/.test(text)) {
+    const m = text.match(/印字読取\s*([0-9,]+)/);
+    return m ? t.rsFixBalanceRead(m[1]) : t.rsFixBalance;
+  }
+  return t.rsFixGeneric;
+}
+
+/** Một lý do của máy → một câu ngắn theo ngôn ngữ. `ctx.diff` = số dư in − số dư tính được (nếu biết). */
+export function explainReason(r: Reason, lang: Lang, ctx: { diff?: number | null } = {}): string {
+  const t = DICT[lang] as Dict;
+  switch (r.kind) {
+    case "balance":
+      return ctx.diff ? t.rsBalanceDiff(signed(ctx.diff)) : t.rsBalance;
+    case "rowgap": {
+      const { from, to, missing } = r.params;
+      return from != null && to != null && missing != null
+        ? t.rsRowgap(String(from).padStart(2, "0"), String(to).padStart(2, "0"), missing)
+        : t.rsRowgapPlain;
+    }
+    case "date":
+      return t.rsDate;
+    case "nobal":
+      return t.rsNobal;
+    case "lowconf":
+      return t.rsLowconf;
+    case "fix":
+      return explainFix(r.text, t);
+    default:
+      return r.text;
+  }
+}
+
+/** Các lý do CHƯA giải quyết của một dòng cần soát, đã dịch (rỗng nếu dòng không ở trạng thái `review`).
+ *  Dòng NG mà máy không ghi lý do (người sửa làm lệch chuỗi) vẫn được giải thích; dòng thêm tay thì nhắc rõ. */
+export function explainOpen(tx: Tx, info: RowInfo, lang: Lang): string[] {
+  if (info.state !== "review") return [];
+  const open = openReasons(tx, info.chk);
+  const out = open.map((r) => explainReason(r, lang, { diff: info.diff }));
+  if (info.chk === "NG" && !open.some((r) => r.kind === "balance")) {
+    out.unshift(explainReason({ kind: "balance", text: "", params: {} }, lang, { diff: info.diff }));
+  }
+  if (tx.added) out.push((DICT[lang] as Dict).rowAddedNote);
+  return out;
+}
+
+/** Khoảng cách sửa (thêm/bớt/đổi một chữ số) giữa hai số — "đọc nhầm một chữ" là khoảng cách 1. */
+function digitDistance(a: number, b: number): number {
+  const x = String(a);
+  const y = String(b);
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[y.length];
+}
+
+/** Số dư in ở dòng có 残高 kế tiếp có khớp với phép tính nếu dòng `i` có số dư `e` không?
+ *  (bằng chứng hai phía, giống `_lookahead_ok` của validate.py nhưng đòi khớp tuyệt đối). */
+function nextBalanceMatches(rows: Tx[], i: number, e: number): boolean {
+  let running = e;
+  for (let j = i + 1; j < rows.length; j++) {
+    const n = rows[j];
+    if (n.is_note) {
+      if (n.balance != null) return n.balance === running;      // 繰越 in lại số dư: phải bằng số dư đúng
+      continue;
+    }
+    running += (n.amount_in ?? 0) - (n.amount_out ?? 0);
+    if (n.balance != null) return n.balance === running;
+  }
+  return false;                                                 // không có dòng nào phía sau để đối chứng
+}
+
+/** Một phương án sửa cho dòng NG. */
+export type Fix =
+  | { kind: "swap" }
+  | { kind: "balance"; value: number }
+  | { kind: "amount"; field: "amount_out" | "amount_in"; value: number }
+  | { kind: "addrow"; side: "out" | "in"; amount: number; balance: number };
+
+/**
+ * Gợi ý sửa cho dòng `i` — CHỈ khi dòng đó đang NG (và chưa ✓, không phải ghi chú). Gọi P = số dư
+ * trước, O/I = rút/gửi, B = số dư in, E = P − O + I, diff = B − E. Tối đa 3 phương án, theo thứ tự:
+ *  1. đổi cột 出金↔入金 — nếu P − I + O = B;
+ *  2. sửa 残高 thành E — chỉ khi dòng có số dư KẾ TIẾP khớp với E (bằng chứng hai phía);
+ *  3. sửa 出金 (hoặc 入金) thành số làm chuỗi khớp — chỉ khi số đó khác số đang có tối đa 2 chữ số;
+ *  4. thêm dòng bị sót phía trên: diff < 0 → dòng 出金 |diff|, diff > 0 → dòng 入金 diff.
+ */
+export function suggestFixes(rows: Tx[], i: number): Fix[] {
+  const tx = rows[i];
+  if (!tx || tx.is_note || tx.reviewed || tx.balance == null) return [];
+  const step = chainWalk(rows)[i];
+  if (step.chk !== "NG" || step.before == null) return [];
+
+  const P = step.before;
+  const O = tx.amount_out ?? 0;
+  const I = tx.amount_in ?? 0;
+  const B = tx.balance;
+  const E = P - O + I;
+  const out: Fix[] = [];
+
+  if (O !== I && P - I + O === B) out.push({ kind: "swap" });
+
+  if (nextBalanceMatches(rows, i, E)) out.push({ kind: "balance", value: E });
+
+  if (O > 0 && I === 0) {
+    const v = P + I - B;                                        // số 出金 làm chuỗi khớp B
+    if (v > 0 && v !== O && digitDistance(O, v) <= 2) out.push({ kind: "amount", field: "amount_out", value: v });
+  } else if (I > 0 && O === 0) {
+    const v = B - P + O;                                        // số 入金 làm chuỗi khớp B
+    if (v > 0 && v !== I && digitDistance(I, v) <= 2) out.push({ kind: "amount", field: "amount_in", value: v });
+  }
+
+  const diff = B - E;
+  if (diff < 0 && P + diff >= 0) out.push({ kind: "addrow", side: "out", amount: -diff, balance: P + diff });
+  else if (diff > 0) out.push({ kind: "addrow", side: "in", amount: diff, balance: P + diff });
+
+  return out.slice(0, 3);
+}
+
+/** Áp một phương án lên dòng `i`: trả mảng dòng MỚI. Sửa ô nào là ghi `orig` ô đó (như người tự gõ). */
+export function applyFix(rows: Tx[], i: number, fix: Fix): Tx[] {
+  const tx = rows[i];
+  if (!tx) return rows;
+  switch (fix.kind) {
+    case "swap": {
+      const o = tx.amount_out ?? null;
+      const n = tx.amount_in ?? null;
+      return applyEdit(applyEdit(rows, i, "amount_out", n), i, "amount_in", o);
+    }
+    case "balance":
+      return applyEdit(rows, i, "balance", fix.value);
+    case "amount":
+      return applyEdit(rows, i, fix.field, fix.value);
+    case "addrow": {
+      // Dòng sót nằm ngay trên dòng `i`. Mượn ngày của dòng `i` cho đỡ gõ; vẫn là dòng người thêm
+      // (`added`) nên phải ✓ mới hết cờ, và 摘要 để trống cho người điền từ ảnh.
+      const row: Tx = {
+        ...blankRow(tx.sheet_id),
+        date: isISO(tx.date) ? tx.date : null,
+        amount_out: fix.side === "out" ? fix.amount : null,
+        amount_in: fix.side === "in" ? fix.amount : null,
+        balance: fix.balance,
+      };
+      return insertRowAfter(rows, i - 1, row);
+    }
+  }
 }
