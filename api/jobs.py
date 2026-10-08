@@ -14,9 +14,11 @@ import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
+import review
 from core import ExtractError, scan
 
 from . import results
@@ -199,20 +201,21 @@ def _payload(job: Job, result) -> dict:
                 else None
             )
 
-    # Thống kê theo từng mặt sổ — hiện huy hiệu ngay trên thumbnail bên trái
+    # Thống kê theo từng mặt sổ — hiện huy hiệu ngay trên thumbnail bên trái. Tính bằng định nghĩa
+    # chung review.py (không đọc `status` đóng băng) trên từng KHỐI = đoạn liền nhau của một mặt sổ
+    # trong một sổ, đúng như kho kết quả cắt khối (results.save_job).
     per_sheet: dict[str, dict] = {
-        sid: {"sheet_id": sid, "rows": 0, "need_check": 0, "fixed": 0}
+        sid: {"sheet_id": sid, "rows": 0, "need_check": 0, "fixed": 0, "confirmed": 0, "edited": 0}
         for sid in job.sheet_ids
     }
     for acc in data["accounts"]:
-        for tx in acc["transactions"]:
-            sid = tx.get("sheet_id")
-            if sid in per_sheet and not tx.get("is_note"):
-                per_sheet[sid]["rows"] += 1
-                if tx.get("status") == "check":
-                    per_sheet[sid]["need_check"] += 1
-                elif tx.get("status") == "fixed":
-                    per_sheet[sid]["fixed"] += 1
+        for sid, run in groupby(acc["transactions"], key=lambda tx: tx.get("sheet_id")):
+            if sid in per_sheet:
+                st = review.sheet_stats([{"rows": list(run)}])
+                per_sheet[sid]["rows"] += st["rows"]
+                per_sheet[sid]["need_check"] += st["need"]
+                for k in ("fixed", "confirmed", "edited"):
+                    per_sheet[sid][k] += st[k]
 
     data["per_sheet"] = list(per_sheet.values())
     data["sheet_ids"] = job.sheet_ids

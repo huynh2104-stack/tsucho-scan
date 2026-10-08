@@ -33,6 +33,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     phím n khớp nhau; ✓ → hết vàng → Ctrl+Z → ✓ lại → F5 vẫn còn ✓ (server lưu reviewed)
  12 ↺ trả ô về giá trị máy đọc · Ctrl+Enter (✓ rồi nhảy tiếp, kể cả khi đang gõ dở) · 「Xác nhận cả mặt sổ」
     (hỏi lại khi còn dòng NG) · 「+ Thêm dòng」chèn ngay dưới dòng đang chọn · Ctrl+Shift+Enter · F5 còn nguyên
+ 13 xác nhận cả hai mặt sổ → xuất Excel: 0 ô vàng ở bảng dữ liệu, 検証レベル bắt đầu bằng 検証済 hoặc
+    残高チェーン検証済, cột 確認メモ ghi 確認済, chú thích hoàn toàn tiếng Nhật
 """
 from __future__ import annotations
 
@@ -624,6 +626,39 @@ def step_review_actions(pg, base: str, ctx: dict) -> str:
             "chèn dòng ngay dưới dòng chọn (nút và Ctrl+Shift+Enter) · F5 còn nguyên")
 
 
+def step_export_confirmed(pg, base: str, ctx: dict) -> str:
+    """Task 1.4: soát xong (✓ cả hai mặt) rồi xuất Excel thì file không còn ô vàng nào."""
+    from openpyxl import load_workbook
+
+    for name in (SAMPLE_SHEET_NAME, SHEET2_NAME):
+        pg.get_by_text(name).first.click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+        button = pg.locator('button[data-act="confirm-all"]').first
+        if not button.is_disabled():
+            button.click()
+        wait_until(lambda: pg.locator('tr[data-row]:not([data-state="confirmed"]):not([data-state="note"])').count() == 0,
+                   f"mọi dòng của {name} đã ✓")
+    path = export_xlsx(pg, ctx, "da-soat.xlsx")
+
+    viet = re.compile("[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]")
+    wb = load_workbook(path, data_only=True)
+    assert len(wb.sheetnames) >= 2, wb.sheetnames
+    seen = []
+    for ws in wb.worksheets:
+        vang = [c.coordinate for row in ws.iter_rows(min_row=9) for c in row
+                if str(c.fill.start_color.rgb).endswith("FFF2CC")]
+        assert not vang, f"{ws.title}: đã ✓ hết mà file vẫn còn ô vàng: {vang[:6]}"
+        level = str(ws["B6"].value)
+        assert level.startswith(("検証済", "残高チェーン検証済")), f"{ws.title}: 検証レベル = {level!r}"
+        memo_col = next(c for c in range(1, ws.max_column + 1) if ws.cell(row=8, column=c).value == "確認メモ")
+        confirmed = sum(1 for r in range(9, ws.max_row + 1) if str(ws.cell(row=r, column=memo_col).value or "").startswith("確認済"))
+        assert confirmed > 0 and f"人手確認 {confirmed}行" in str(ws["F6"].value), f"{ws.title}: F6 = {ws['F6'].value!r}, 確認済 {confirmed} dòng"
+        legend = [ws[a].value for a in ("F1", "F2", "F3", "B6", "F6", "H6")]
+        assert not any(viet.search(str(v)) for v in legend), f"{ws.title}: chú thích còn chữ Việt: {legend}"
+        seen.append(f"{ws.title}: {level} ({confirmed} dòng 確認済)")
+    return " · ".join(seen)
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -637,6 +672,7 @@ STEPS = [
     ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
     ("11. Dòng vàng thật + ✓ (một định nghĩa 'cần soát')", step_review_definition),
     ("12. ↺, Ctrl+Enter, xác nhận cả mặt, chèn dòng đúng chỗ", step_review_actions),
+    ("13. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

@@ -8,6 +8,8 @@ khi giao file cho khách Nhật.
 import csv
 import io
 
+from export import annotate
+
 # Giữ đúng tên cột của sổ, không dịch — xem WEB_PLAN §8
 BASE_COLS = ["行", "年月日", "区分", "摘要", "お支払金額", "お預り金額", "差引残高"]
 OPT_COLS = {"store_code": "取扱店", "extra_text": "備考"}
@@ -48,24 +50,11 @@ def accounts_to_csv(
             (t["balance"] for t in reversed(txs) if t.get("balance") is not None), None
         )
 
-        prev_bal = None
-        for i, t in enumerate(txs, 1):
+        # 残高チェック và 確認メモ lấy từ CÙNG nơi với file Excel (export.annotate ← review.py)
+        notes = annotate(txs)
+        for i, (t, note) in enumerate(zip(txs, notes), 1):
             bal = t.get("balance")
-            if t.get("is_note"):
-                check = "―"
-            elif bal is not None and prev_bal is not None:
-                want = prev_bal - (t.get("amount_out") or 0) + (t.get("amount_in") or 0)
-                check = "OK" if want == bal else "NG"
-            else:
-                check = "―"
-            if bal is not None:
-                prev_bal = bal
-
-            memo = ""
-            if t.get("status") == "check":
-                memo = f"要確認: {t.get('reason', '')}"
-            elif t.get("status") == "fixed":
-                memo = f"自動修正: {t.get('reason', '')}"
+            check, memo = note["chk"], note["memo"]
 
             row = [
                 t.get("row_no") or i,

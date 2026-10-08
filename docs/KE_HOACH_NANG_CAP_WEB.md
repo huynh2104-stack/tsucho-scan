@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.3 (08/10) — pytest **320 passed** · `npm test` **106 pass** · build xanh · E2E `smoke.py` **12/12 bước** (~20 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.4 (08/10) — pytest **345 passed** · `npm test` **106 pass** · build xanh · E2E `smoke.py` **13/13 bước** (~25 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1040,7 +1040,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.1 Danh tính dòng + giá trị máy đọc (xong 03/10/2026)
 - [x] 1.2 Một định nghĩa "cần soát" (xong 03/10/2026)
 - [x] 1.3 ✓ Đã soát (xong 08/10/2026)
-- [ ] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A**
+- [x] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A** (xong 08/10/2026)
 - [ ] 1.5 Lý do dễ hiểu + gợi ý sửa
 - [ ] 1.6 Nối số dư giữa các mặt
 - [ ] 1.7 Ảnh chụp trùng trang
@@ -1155,6 +1155,16 @@ Quan sát khi viết E2E (không sửa):
 - **Khác kế hoạch / cần biết**: (1) hướng dẫn 7 bước sửa lời ở bước 5 (nhắc ✓ và Ctrl+Enter) nên **`VERSION` của tour tăng 1→2: người đã xem sẽ thấy hướng dẫn mở lại một lần**; (2) không có "bảng phím tắt" nào trong giao diện để thêm vào, nên phím tắt mới nằm ở tooltip nút ✓ / 「+ Thêm dòng」 và lời hướng dẫn bước 5; (3) dòng chỉ có ô do máy tự tính (`inferred`, không có `orig`) ghi「✎ máy tự tính」chứ không ghi「đã sửa tay」(vì không ai sửa tay).
 - **E2E bước 12** dựa vào trạng thái mặt ① sau bước 8 và 10 (dòng 1 có 出金 gõ thành 1,234 ⇒ NG, dòng 2 có ngày "tuần sau" ⇒ 2 dòng vàng): ↺ trả hai ô về máy đọc ⇒ hết vàng, server dọn `orig`; Ctrl+Enter khi đang gõ dở; hộp thoại nói「2 dòng số dư lệch」, Escape thì không xác nhận gì, đồng ý thì 11 dòng confirmed và ghi chú vẫn là note; Ctrl+Z; chèn dòng bằng nút và bằng phím; ✓ hai dòng chèn; F5 vẫn đủ 14 dòng, `added` + `reviewed` còn nguyên.
 - Còn lại của giai đoạn 1: 1.4 (Excel/CSV theo định nghĩa chung — vẫn đang dùng `status` đóng băng), rồi 1.5–1.7.
+
+**Task 1.4 — xong 08/10/2026 (mốc demo A)** (pytest **345** · `npm test` **106** · build xanh · E2E **13/13 bước**, thêm bước 13). Trả luôn khoản nợ của 1.2: **Excel/CSV và `api/jobs.py` không còn đọc `status` đóng băng**, mọi nơi dùng `review.py`.
+- **Cách làm**: `export.annotate(txs)` → mỗi dòng `{state, chk, memo}` từ `review.analyze_account`; Excel và CSV cùng gọi nó nên không thể nói hai điều khác nhau về một dòng. Bảng 確認メモ/tô màu đúng như kế hoạch: `review` → vàng 出金/入金/残高 + `要確認: <lý do chưa giải quyết>`; `confirmed` → không tô + `確認済` (kèm `（元: <lý do gốc của máy>）` và `（修正: 差引残高 1,340→900）`); `fixed` → xanh 出金/入金 + `自動修正: …`; `edited` → không tô + `手修正: 差引残高 1,340→900`; ô `inferred` ghi thêm `推定値（残高から計算）`. Tô vàng 摘要 katakana (và `confidence: low`) chỉ với dòng chưa ✓; ô ngày hỏng cũng không tô nếu dòng đã ✓ (vẫn ghi chuỗi gốc).
+- **Chú thích tiếng Nhật hoàn toàn** (F1–F3), `F6` thành `取引 N行 / 残高検算OK X行 / 自動修正 Y行 / 人手確認 Z行 / 要確認 W行`, 検証レベル theo kế hoạch. Tiện tay bỏ phần tiếng Việt trong hai tiêu đề 内訳 (「chi tiết tiền vào/ra」): test kiểm cả sheet không còn ký tự Việt có dấu. Câu cảnh báo giới hạn ở H6 giữ nguyên. Công thức sống 残高チェック, màu header, freeze `A9`, khối 集計/内訳 giữ nguyên.
+- **Hai chỗ khác kế hoạch (có lý do)**: (1) nếu có dòng đã ✓ mà chuỗi số dư ở dòng đó vẫn lệch (✓ thắng NG) thì 検証レベル ghi `検証済（人手確認 N行・うち残高不一致 K行）` chứ không ghi「残高一致」— nói「一致」khi file còn ô NG là nói sai; vẫn bắt đầu bằng `検証済` như kế hoạch. (2) Lý do ở `要確認:` là các lý do **chưa giải quyết** (không phải nguyên chuỗi của máy, vì chuỗi gốc còn lẫn ghi chú tự sửa đã xong); chuỗi gốc đầy đủ vẫn nằm sau `元:` khi dòng đã ✓.
+- **Chuỗi số dư theo KHỐI như màn hình**: web gộp các khối cùng sổ làm một danh sách khi xuất, nên `buildAccounts` (và `results.to_accounts` ở nhánh server tự dựng) đánh dấu `block_start: true` ở dòng đầu mỗi khối; `review.split_blocks` cắt lại. Dòng đầu khối ghi「―」(không còn công thức), dòng ghi chú cũng「―」; nếu không, Excel báo NG ở chỗ nối hai mặt sổ trong khi màn hình và 検証レベル nói không sao. Công thức 残高チェック còn **cộng dồn qua dòng không in 残高** (`-SUM(出金)+SUM(入金)` từ dòng sau mốc tới dòng hiện tại) cho khớp cách engine và `chain_checks` tính — bản cũ báo NG giả sau dòng phí ゆうちょ.
+- **Đo trên dữ liệu thật của anh** (xuất ra file tạm, chỉ đếm): bộ 10 khối: 3 dòng vàng = 3 dòng cần soát trên màn hình (cách cũ cũng 3); bộ 33 khối: **15 dòng vàng = 15 trên màn hình, cách cũ 17** (hai dòng anh đã sửa đúng từ trước giờ hết vàng cả trong Excel).
+- `api/jobs.py` (`per_sheet` của một lần quét) và CLI (`main.py`) cũng dùng định nghĩa chung; `core.ScanResult.verification/totals` đi qua `verification_summary` nên tự theo. `verification_summary` giữ các khoá cũ và thêm `confirmed`, `edited`.
+- **Hệ quả cần biết**: dòng ghi chú (繰越…) mà engine ghi `残高不一致` không còn tô vàng/ghi 要確認 trong Excel nữa (đúng luật「dòng ghi chú không bao giờ cần soát」của 1.2, trên màn hình cũng vậy). Chỗ nối giữa các mặt sổ sẽ do task 1.6 kiểm riêng.
+- E2E bước 13: ✓ cả hai mặt → xuất → mỗi tab không còn ô vàng nào ở bảng, B6 bắt đầu bằng `検証済`, F6 ghi đúng số dòng 確認済, chú thích không còn chữ Việt. pytest: `tests/test_export.py` (+19: đủ bốn trạng thái, từng mức 検証レベル, khối, CSV cùng nguồn, per_sheet) và `tests/test_review.py` (+6: tách khối, chuỗi không nối qua đầu khối, `edit_changes`, FIELD_LABEL khớp bản TS, `to_accounts`, xuất sổ mẫu: còn vàng → ✓ hết → 0 ô vàng).
 
 ---
 

@@ -187,3 +187,86 @@ def test_so_mau_xac_nhan_dong_vang_thi_het_vang(ws):
             row["reviewed"] = True
     assert review.sheet_stats(sheet2["blocks"])["need"] == 0
     assert review.sheet_stats(sheet2["blocks"])["confirmed"] == 1
+
+
+# ── Task 1.4: dùng cho xuất file ─────────────────────────────────────────────────────────────
+
+def test_split_blocks_cat_o_dong_danh_dau_block_start():
+    a, b, c, d = {"i": 1}, {"i": 2}, {"i": 3, "block_start": True}, {"i": 4}
+    assert review.split_blocks([a, b, c, d]) == [[a, b], [c, d]]
+    assert review.split_blocks([{"block_start": True}, a]) == [[{"block_start": True}, a]]    # dòng đầu: không tạo khối rỗng
+    assert review.split_blocks([]) == []
+
+
+def test_chuoi_so_du_khong_noi_qua_dau_khoi():
+    rows = [
+        {**DEFAULTS, "balance": 1000},
+        {**DEFAULTS, "balance": 900, "amount_out": 100},
+        {**DEFAULTS, "balance": 5000, "block_start": True},
+        {**DEFAULTS, "balance": 4900, "amount_out": 100},
+    ]
+    assert [i["chk"] for i in review.analyze_account(rows)] == ["―", "OK", "―", "OK"]
+    flat = [{k: v for k, v in r.items() if k != "block_start"} for r in rows]       # không có dấu → một khối → NG
+    assert [i["chk"] for i in review.analyze_account(flat)] == ["―", "OK", "NG", "OK"]
+
+
+def test_edit_changes_giong_ban_ts():
+    tx = {**DEFAULTS, "date": "2025-04-12", "description": None, "balance": 150, "amount_out": 0,
+          "orig": {"balance": 100, "description": "A", "date": "2025-04-11", "amount_out": None}}
+    assert review.edit_changes(tx) == [
+        {"field": "date", "from": "2025-04-11", "to": "2025-04-12"},
+        {"field": "description", "from": "A", "to": None},
+        {"field": "amount_out", "from": None, "to": 0},
+        {"field": "balance", "from": 100, "to": 150},
+    ]
+    assert review.edit_changes(DEFAULTS) == []
+    assert review.shown({**DEFAULTS, "date": None, "date_raw": "07-0?-11"}, "date") == "07-0?-11"
+
+
+def test_field_label_trung_ban_ts():
+    """FIELD_LABEL phải y hệt ở review.ts (cùng thứ tự cột)."""
+    import re
+
+    ts = (ROOT / "web" / "src" / "lib" / "review.ts").read_text(encoding="utf-8")
+    block = re.search(r"FIELD_LABEL: Record<EditField, string> = \{(.*?)\n\};", ts, re.S).group(1)
+    pairs = re.findall(r"(\w+): \"([^\"]+)\"", block)
+    assert dict(pairs) == review.FIELD_LABEL and [k for k, _ in pairs] == list(review.FIELD_LABEL)
+
+
+def test_to_accounts_danh_dau_dau_moi_khoi(ws):
+    sample.add_to(ws)
+    (acc,) = results.to_accounts(ws, results.load_all(ws.id))              # hai mặt cùng sổ → gộp làm một
+    starts = [i for i, t in enumerate(acc["transactions"]) if t.get("block_start")]
+    assert starts == [0, 12]                                                # mặt ① có 12 dòng, mặt ② bắt đầu ở dòng 12
+    assert len(review.split_blocks(acc["transactions"])) == 2
+
+
+def test_so_mau_xuat_excel_dong_vang_roi_xac_nhan_het_thi_khong_con_o_vang(ws, tmp_path):
+    from openpyxl import load_workbook
+
+    from export import HEADER_ROW, export_accounts
+
+    sample.add_to(ws)
+    saved = results.load_all(ws.id)
+    (acc,) = results.to_accounts(ws, saved)
+
+    def yellow_cells(accounts):
+        out = tmp_path / "s.xlsx"
+        export_accounts(accounts, str(out))
+        sh = load_workbook(out).active
+        found = [c.coordinate for row in sh.iter_rows(min_row=HEADER_ROW + 1) for c in row
+                 if str(c.fill.start_color.rgb).endswith("FFF2CC")]
+        return sh, found
+
+    sh, found = yellow_cells([acc])
+    assert found, "chưa xác nhận gì thì mặt ② phải còn ô vàng (行抜けの疑い + tên katakana)"
+    assert any("行抜けの疑い" in str(c.value) for row in sh.iter_rows(min_row=HEADER_ROW + 1) for c in row)
+    assert sh["B6"].value.startswith("一部未検証（1行が要確認）")
+
+    for t in acc["transactions"]:
+        if not t.get("is_note"):
+            t["reviewed"] = True
+    sh, found = yellow_cells([acc])
+    assert found == [], f"xác nhận hết rồi mà còn ô vàng: {found}"
+    assert sh["B6"].value == "検証済（残高一致・人手確認 18行）"
+    assert "人手確認 18行" in sh["F6"].value

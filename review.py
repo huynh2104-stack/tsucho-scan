@@ -243,3 +243,62 @@ def sheet_stats(blocks: list[dict]) -> dict:
             elif state in ("fixed", "confirmed", "edited"):
                 s[state] += 1
     return s
+
+
+# ── Nhiều khối trong một sổ xuất ra (task 1.4) ───────────────────────
+
+def split_blocks(rows: list[dict]) -> list[list[dict]]:
+    """Cắt danh sách dòng của một sổ xuất file thành các KHỐI, đúng như trên màn hình.
+
+    Bảng trên web tính chuỗi số dư theo từng khối (mỗi khối = một mặt sổ × một sổ ngân hàng) và
+    dòng đầu khối luôn là «―». Khi xuất file, web gộp các khối cùng sổ làm một danh sách và đánh
+    dấu `block_start: true` ở dòng đầu mỗi khối; không có dấu thì cả danh sách là MỘT khối
+    (đúng với kết quả quét trực tiếp từ engine / CLI)."""
+    blocks: list[list[dict]] = []
+    for tx in rows:
+        if not blocks or tx.get("block_start"):
+            blocks.append([])
+        blocks[-1].append(tx)
+    return blocks
+
+
+def analyze_account(rows: list[dict]) -> list[dict]:
+    """`analyze_rows` cho cả sổ xuất file (nhiều khối): một phần tử cho mỗi dòng, giữ thứ tự."""
+    return [info for block in split_blocks(rows) for info in analyze_rows(block)]
+
+
+# ── Người đã sửa gì (task 1.3 / 1.4) ─────────────────────────────────
+
+# Bản Python của FIELD_LABEL trong review.ts (test_review.py so hai bản với nhau)
+FIELD_LABEL = {
+    "date": "年月日",
+    "kind": "区分",
+    "description": "摘要",
+    "amount_out": "お支払",
+    "amount_in": "お預り",
+    "balance": "差引残高",
+    "store_code": "取扱店",
+    "extra_text": "備考",
+}
+
+
+def _norm(v):
+    return None if v == "" else v
+
+
+def shown(tx: dict, field: str):
+    """Giá trị đang HIỆN trên ô `field`. Ô ngày hiện `date`, không đọc được thì hiện chữ gốc."""
+    if field == "date":
+        d = tx.get("date")
+        return _norm(d if d is not None else tx.get("date_raw"))
+    return _norm(tx.get(field))
+
+
+def edit_changes(tx: dict) -> list[dict]:
+    """Các ô người đã sửa: `{field, from, to}` = giá trị MÁY ĐỌC → giá trị đang hiện, theo thứ tự cột."""
+    orig = tx.get("orig") or {}
+    return [
+        {"field": f, "from": _norm(orig[f]), "to": shown(tx, f)}
+        for f in FIELD_LABEL
+        if f in orig
+    ]

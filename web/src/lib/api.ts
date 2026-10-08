@@ -130,6 +130,8 @@ export type Tx = {
   added?: boolean;
   /** Ô do máy SUY RA (vd「Tự tính số dư」), không phải số in trên sổ. */
   inferred?: EditField[];
+  /** Chỉ có trong dữ liệu GỬI ĐI XUẤT FILE: dòng đầu của một khối (xem `buildAccounts`). */
+  block_start?: boolean;
 };
 
 export type Account = {
@@ -542,8 +544,11 @@ export function buildAccounts(sheets: Sheet[], store: ResultStore): Account[] {
         last.bank_name === block.meta.bank_name &&
         last.account_no === block.meta.account_no &&
         block.meta.account_no != null;
-      if (same) last.transactions.push(...block.rows);
-      else out.push({ ...block.meta, transactions: [...block.rows] });
+      // `block_start` ở dòng đầu mỗi khối: bảng tính chuỗi số dư theo từng khối, nên file xuất cũng
+      // phải biết chỗ nối để tô vàng / ghi 確認メモ đúng như màn hình (xem review.split_blocks).
+      const rows = block.rows.map((r, i) => (i === 0 ? { ...r, block_start: true } : r));
+      if (same) last.transactions.push(...rows);
+      else out.push({ ...block.meta, transactions: rows });
     }
   }
   return out;

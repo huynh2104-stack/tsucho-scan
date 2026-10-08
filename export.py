@@ -5,6 +5,9 @@
   | (取扱店) | 残高チェック | 確認メモ — cột 備考/取扱店 chỉ hiện khi sổ có dữ liệu đó.
 - 残高チェック: công thức Excel sống từng dòng, tham chiếu dòng có 残高 gần nhất.
 - Ô chưa chắc chắn tô FFF2CC; ô được kiểm tra kép tự sửa tô xanh C6EFCE.
+- Dòng nào CẦN SOÁT (tô vàng, 要確認) do `review.py` quyết định — cùng một định nghĩa với bảng trên
+  web, tính từ chuỗi số dư HIỆN TẠI + việc người đã làm (sửa ô, bấm ✓ 確認済), KHÔNG đọc cờ
+  `status` đóng băng lúc quét. Dòng người đã xác nhận không tô vàng; cột 確認メモ ghi rõ lý do.
 - Dòng ghi chú (繰越, 未記帳...) in nghiêng xám, không có số tiền.
 - Báo cáo 集計レポート + 入金/出金の内訳 bằng công thức COUNTIFS/SUMIFS sống.
 """
@@ -17,6 +20,8 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+import review
 
 UNCERTAIN = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
 FIXED_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -71,24 +76,85 @@ def verification_summary(txs: list[dict]) -> dict:
     Chuỗi 残高 chỉ chứng minh tính NHẤT QUÁN NỘI BỘ: nó không phát hiện được
     dòng bị bỏ sót hay tên đối tác đọc sai. Vì vậy phải ghi thẳng ra file, để
     người xem biết còn phải soát gì chứ không tưởng "không có ô vàng là xong".
+
+    Đếm theo trạng thái của `review.py` (không theo `status` đóng băng của máy):
+    rows = need + confirmed + verified; verified gồm dòng khớp, tự sửa và người đã sửa tay.
+    Các khoá cũ (rows, verified, fixed, need_check, level, chain_ok) được giữ vì
+    `core.ScanResult` và test đang dùng; thêm `confirmed`, `edited`.
     """
-    real = [t for t in txs if not t.get("is_note")]
-    n = len(real)
-    verified = sum(1 for t in real if t.get("status") in ("ok", "fixed"))
-    fixed = sum(1 for t in real if t.get("status") == "fixed")
-    need = sum(1 for t in real if t.get("status") == "check")
-    has_bal = any(t.get("balance") is not None for t in real)
+    pairs = [(t, i) for t, i in zip(txs, review.analyze_account(txs)) if i["state"] != "note"]
+    n = len(pairs)
+    count = lambda state: sum(1 for _, i in pairs if i["state"] == state)  # noqa: E731
+    need, confirmed, fixed, edited = count("review"), count("confirmed"), count("fixed"), count("edited")
+    # Dòng người đã ✓ dù chuỗi số dư vẫn lệch: không được nói "残高一致" như thể chuỗi khớp hết
+    confirmed_ng = sum(1 for _, i in pairs if i["state"] == "confirmed" and i["chk"] == "NG")
+    has_bal = any(t.get("balance") is not None for t, _ in pairs)
 
     if not has_bal:
         level = "未検証（残高が読取れず検算不可）"
-    elif need == 0:
-        level = "残高チェーン検証済（全行一致）"
-    else:
+    elif need > 0:
         level = f"一部未検証（{need}行が要確認）"
+    elif confirmed == 0:
+        level = "残高チェーン検証済（全行一致）"
+    elif confirmed_ng == 0:
+        level = f"検証済（残高一致・人手確認 {confirmed}行）"
+    else:
+        level = f"検証済（人手確認 {confirmed}行・うち残高不一致 {confirmed_ng}行）"
     return {
-        "rows": n, "verified": verified, "fixed": fixed,
-        "need_check": need, "level": level, "chain_ok": has_bal and need == 0,
+        "rows": n, "verified": n - need - confirmed, "fixed": fixed, "confirmed": confirmed,
+        "edited": edited, "need_check": need, "level": level, "chain_ok": has_bal and need == 0,
     }
+
+
+def _fmt_value(v) -> str:
+    if v is None:
+        return "空欄"
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{v:,}"
+    return str(v)
+
+
+def _memo(tx: dict, info: dict) -> str:
+    """Nội dung cột 確認メモ theo trạng thái dòng (bảng ở task 1.4)."""
+    state, chk = info["state"], info["chk"]
+    if state == "review":
+        parts = [r["text"] for r in review.open_reasons(tx, chk)]
+        if chk == "NG" and not any(p.startswith("残高不一致") for p in parts):
+            parts.append("残高不一致（検算NG）")        # chuỗi lệch do người sửa nên máy không ghi lý do
+        if tx.get("added"):
+            parts.append("手入力行（未確認）")
+        return "要確認: " + "・".join(parts) if parts else "要確認"
+    if state == "fixed":
+        return f"自動修正: {tx.get('reason', '')}"
+
+    changes = "、".join(
+        f"{review.FIELD_LABEL[c['field']]} {_fmt_value(c['from'])}→{_fmt_value(c['to'])}"
+        for c in review.edit_changes(tx)
+    )
+    inferred = ""
+    if tx.get("inferred"):
+        what = "残高から計算" if "balance" in tx["inferred"] else "、".join(
+            review.FIELD_LABEL.get(f, f) for f in tx["inferred"])
+        inferred = f"推定値（{what}）"
+    if state == "confirmed":
+        memo = "確認済"
+        if tx.get("reason"):
+            memo += f"（元: {tx['reason']}）"
+        if changes:
+            memo += f"（修正: {changes}）"
+        return memo + inferred
+    if state == "edited":
+        return "／".join(p for p in ([f"手修正: {changes}"] if changes else []) + ([inferred] if inferred else []))
+    return ""
+
+
+def annotate(txs: list[dict]) -> list[dict]:
+    """Mỗi dòng của một sổ xuất file → `{state, chk, memo}` — dùng chung cho Excel và CSV
+    để hai định dạng không thể nói hai điều khác nhau về cùng một dòng."""
+    return [
+        {"state": i["state"], "chk": i["chk"], "memo": _memo(tx, i)}
+        for tx, i in zip(txs, review.analyze_account(txs))
+    ]
 
 
 def _sheet_title(bank_name: str | None, index: int) -> str:
@@ -132,10 +198,11 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
     for r, (label, val) in enumerate(info, start=1):
         _set(ws, r, 1, label, font=ARIAL_BOLD)
         _set(ws, r, 2, val or "―")
-    _set(ws, 1, 6, "Ô vàng nhạt = chưa chắc chắn / tên katakana cần soát（黄色＝要確認）",
+    # File giao cho khách Nhật: chú thích hoàn toàn bằng tiếng Nhật
+    _set(ws, 1, 6, "黄色＝要確認（読取り・検算で疑わしい箇所。カタカナ名は原本と照合してください）",
          fill=UNCERTAIN)
-    _set(ws, 2, 6, "Ô xanh lá = đã tự sửa bằng kiểm tra số dư（緑＝残高検算で自動修正）",
-         fill=FIXED_FILL)
+    _set(ws, 2, 6, "緑＝残高検算で自動修正", fill=FIXED_FILL)
+    _set(ws, 3, 6, "確認メモ『確認済』＝利用者が原本と照合済み")
 
     # ---- Mức độ bảo đảm: giá trị tính sẵn (KHÔNG dùng công thức) để cả người
     # đọc lẫn chương trình khác đều lấy được — công thức Excel chưa tính thì
@@ -146,7 +213,7 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
          fill=OK_FILL if v["chain_ok"] else WARN_FILL)
     _set(ws, VERIFY_ROW, 6,
          f"取引 {v['rows']}行 / 残高検算OK {v['verified']}行 / 自動修正 {v['fixed']}行 "
-         f"/ 要確認 {v['need_check']}行",
+         f"/ 人手確認 {v['confirmed']}行 / 要確認 {v['need_check']}行",
          fill=OK_FILL if v["chain_ok"] else WARN_FILL)
     _set(ws, VERIFY_ROW, 7, None)
     # Cảnh báo giới hạn của phép kiểm: người dùng phải tự soát số DÒNG và tên
@@ -173,12 +240,15 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
     ws.freeze_panes = f"A{HEADER_ROW + 1}"
 
     # ---- Dòng dữ liệu
+    notes = annotate(txs)
     prev_bal_row = None
     r = HEADER_ROW
-    for tx in txs:
+    for tx, note in zip(txs, notes):
         r += 1
         is_note = tx.get("is_note")
-        status = tx.get("status")
+        state, chk = note["state"], note["chk"]
+        if tx.get("block_start"):
+            prev_bal_row = None            # dòng đầu mỗi khối không có mốc phía trước (như bảng trên web)
 
         # Ngày: ô date thật (yyyy-mm-dd); không đọc được thì giữ chuỗi gốc + tô vàng
         date_cell = _set(ws, r, col["年月日(西暦)"], None, border=BORDER)
@@ -188,9 +258,11 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
             date_cell.value = _iso_to_date(tx["date"])
             date_cell.number_format = DATE_FMT
         else:
-            # Không có ngày, hoặc ngày không đọc được: giữ chuỗi người dùng/máy ghi + tô vàng
+            # Không có ngày, hoặc ngày không đọc được: giữ chuỗi người dùng/máy ghi. Tô vàng trừ khi
+            # người đã bấm ✓ dòng này (đã nhìn và chấp nhận).
             date_cell.value = str(tx.get("date") or tx.get("date_raw") or "")
-            date_cell.fill = UNCERTAIN
+            if state != "confirmed":
+                date_cell.fill = UNCERTAIN
 
         _set(ws, r, col["区分"], tx.get("kind") or ("注記" if is_note else None), border=BORDER)
         desc_cell = _set(ws, r, col["摘要"], tx.get("description") or None, border=BORDER)
@@ -206,10 +278,17 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
         if has_t:
             _set(ws, r, col["取扱店"], tx.get("store_code") or None, border=BORDER)
 
-        # 残高チェック: công thức sống, tham chiếu dòng có 残高 gần nhất phía trên
-        if tx.get("balance") is not None and prev_bal_row is not None:
-            check = (f'=IF({bal_l}{r}={bal_l}{prev_bal_row}'
-                     f'-N({out_l}{r})+N({in_l}{r}),"OK","NG")')
+        # 残高チェック: công thức sống, tham chiếu dòng có 残高 gần nhất phía trên. Có công thức hay
+        # «―» là do review.py quyết định (dòng đầu khối, dòng ghi chú, dòng không in 残高 → «―»),
+        # để cột này, ô vàng và 検証レベル luôn nói cùng một chuyện.
+        if chk != "―" and prev_bal_row is not None:
+            if prev_bal_row == r - 1:
+                moves = f"-N({out_l}{r})+N({in_l}{r})"
+            else:
+                # Giữa hai dòng có 残高 còn dòng không in 残高 (dòng phí...): cộng dồn như engine
+                lo = prev_bal_row + 1
+                moves = f"-SUM({out_l}{lo}:{out_l}{r})+SUM({in_l}{lo}:{in_l}{r})"
+            check = f'=IF({bal_l}{r}={bal_l}{prev_bal_row}{moves},"OK","NG")'
         else:
             check = "―"
         check_cell = _set(ws, r, col["残高チェック"], check, font=FAINT_FONT, border=BORDER)
@@ -225,22 +304,21 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
         if has_x:
             ws.cell(row=r, column=col["備考"]).alignment = CENTER
 
-        # Ghi chú xác nhận + tô màu
-        if status == "check":
-            _set(ws, r, col["確認メモ"], f"要確認: {tx.get('reason', '')}", border=BORDER)
+        # Ghi chú xác nhận + tô màu theo trạng thái (review.py):
+        #   review → vàng 出金/入金/残高 · fixed → xanh 出金/入金 · confirmed/edited/ok → không tô
+        _set(ws, r, col["確認メモ"], note["memo"] or None, border=BORDER)
+        if state == "review":
             for cell in (out_cell, in_cell, bal_cell):
                 cell.fill = UNCERTAIN
-        elif status == "fixed":
-            _set(ws, r, col["確認メモ"], f"自動修正: {tx.get('reason', '')}", border=BORDER)
+        elif state == "fixed":
             for cell in (out_cell, in_cell):
                 cell.fill = FIXED_FILL
-        else:
-            _set(ws, r, col["確認メモ"], None, border=BORDER)
 
-        # Tên katakana (model hay sai chính tả mà không tự biết) → tô nhạt để soát
-        if tx.get("confidence") == "low" or (
+        # Tên katakana (model hay sai chính tả mà không tự biết) → tô nhạt để soát. CHỈ với dòng
+        # chưa xác nhận: soát bằng mắt xong thì file không còn ô vàng.
+        if state != "confirmed" and (tx.get("confidence") == "low" or (
             not is_note and _KANA_RUN.search(str(tx.get("description") or ""))
-        ):
+        )):
             desc_cell.fill = UNCERTAIN
 
         if is_note:
@@ -320,8 +398,8 @@ def _write_sheet(ws, acc: dict, source_name: str, add_total: bool = False) -> No
 
     # ---- 入金・出金の内訳 theo đối tác (COUNTIFS/SUMIFS sống)
     for title, amount_key, amt_l in (
-        ("― 入金の内訳（chi tiết tiền vào）", "amount_in", in_l),
-        ("― 出金の内訳（chi tiết tiền ra）", "amount_out", out_l),
+        ("― 入金の内訳", "amount_in", in_l),
+        ("― 出金の内訳", "amount_out", out_l),
     ):
         keys: "OrderedDict[tuple, int]" = OrderedDict()
         for t in txs:

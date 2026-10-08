@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from core import ExtractError, scan
+from export import annotate
 
 
 def _cost_line(result) -> str:
@@ -85,12 +86,12 @@ def main() -> int:
 
         print(f"Xong! ({result.model}, {_cost_line(result)})")
         for acc in result.accounts:
-            # Đếm theo status thô để khớp đúng số ô được tô màu trong Excel;
-            # dòng 検証レベル trong file chỉ tính giao dịch thật nên có thể lệch
-            # vài dòng ghi chú (繰越...) — đó là khác biệt có chủ ý.
+            # Đếm bằng cùng định nghĩa với file Excel (review.py) nên khớp đúng số ô tô màu;
+            # dòng ghi chú (繰越...) không bao giờ tính là cần soát.
             txs = acc["transactions"]
-            n_fixed = sum(1 for t in txs if t["status"] == "fixed")
-            n_check = sum(1 for t in txs if t["status"] == "check")
+            states = [n["state"] for n in annotate(txs)]
+            n_fixed = states.count("fixed")
+            n_check = states.count("review")
             bank = acc["bank_name"] or "(không rõ ngân hàng)"
             print(f"  [{bank}]")
             print(f"    - Số giao dịch      : {len(txs)}")

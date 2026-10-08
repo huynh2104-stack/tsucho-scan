@@ -218,8 +218,11 @@ def to_accounts(ws: workspace.Workspace, saved: dict[str, dict]) -> list[dict]:
                 and last["account_no"] == meta.get("account_no")
                 and meta.get("account_no") is not None
             )
+            # `block_start` đánh dấu dòng đầu mỗi khối: bảng và file xuất tính chuỗi số dư theo từng
+            # khối, nên khi gộp khối phải còn dấu để review.split_blocks cắt lại đúng chỗ.
+            rows = [{**r, "block_start": True} if i == 0 else r for i, r in enumerate(block["rows"])]
             if same:
-                last["transactions"].extend(block["rows"])
+                last["transactions"].extend(rows)
             else:
-                accounts.append({**meta, "transactions": list(block["rows"])})
+                accounts.append({**meta, "transactions": rows})
     return accounts
