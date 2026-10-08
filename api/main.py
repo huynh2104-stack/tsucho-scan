@@ -323,6 +323,21 @@ def reorder_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dic
     return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
+@app.post("/api/ws/{ws_id}/dup-ok")
+def dup_ok(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    """「Không phải trùng」: người dùng đã so hai mặt sổ và xác nhận chúng là hai trang khác nhau
+    (task 1.7). Id lạ hoặc hai id giống nhau → 400."""
+    ws = _ws(ws_id, user)
+    a, b = body.get("a"), body.get("b")
+    if not isinstance(a, str) or not isinstance(b, str):
+        raise HTTPException(400, "Thiếu mã hai mặt sổ")
+    try:
+        workspace.mark_not_duplicate(ws, a, b)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return workspace.to_json(ws)
+
+
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/image")
 def sheet_image(
     ws_id: str,

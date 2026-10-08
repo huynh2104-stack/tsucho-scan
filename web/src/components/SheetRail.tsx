@@ -62,6 +62,8 @@ export default function SheetRail({
   states,
   perSheet,
   brokenLinks,
+  dupWith,
+  onOpenDup,
   onToggle,
   onToggleRange,
   onActivate,
@@ -77,6 +79,9 @@ export default function SheetRail({
   perSheet: Record<string, PerSheet>;
   /** Mặt sổ có chuỗi số dư ĐỨT với mặt đứng ngay trước (chắc cùng một sổ, chưa bấm「Không phải lỗi」). */
   brokenLinks: Set<string>;
+  /** Mặt sổ nghi là bản chụp lại → TÊN mặt sổ đứng trước mà nó nghi trùng (task 1.7). */
+  dupWith: Record<string, string>;
+  onOpenDup: (sheetId: string) => void;
   onToggle: (id: string) => void;
   onToggleRange: (id: string) => void;
   onActivate: (id: string) => void;
@@ -310,6 +315,20 @@ export default function SheetRail({
                       >
                         ⛓✕
                       </span>
+                    )}
+                    {dupWith[s.id] && (
+                      <button
+                        type="button"
+                        data-dup-chip
+                        onClick={(e) => {
+                          e.stopPropagation();           // không kích hoạt thẻ (chọn mặt sổ) khi bấm huy hiệu
+                          onOpenDup(s.id);
+                        }}
+                        title={t.dupTitle}
+                        className="max-w-full break-words rounded bg-warnbg px-1.5 py-px text-left font-semibold leading-snug text-warnink hover:brightness-95"
+                      >
+                        ⚠ {t.dupChip(dupWith[s.id])}
+                      </button>
                     )}
                     {autoDone && s.auto && (
                       <span

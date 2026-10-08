@@ -10,6 +10,9 @@ import {
   applyFix,
   blankRow,
   chainChecks,
+  dupBadges,
+  dupPairsIn,
+  duplicatePairs,
   editChanges,
   explainOpen,
   explainReason,
@@ -789,4 +792,82 @@ test("sheetLinks: 'Không phải lỗi' chỉ có hiệu lực với ĐÚNG mặ
   // đổi thứ tự: mặt đứng trước B là mặt khác ⇒ xác nhận cũ hết hiệu lực
   const c = result("c", [{ balance: 400 }]);
   assert.equal(sheetLinks(ids("c", "b"), { c, b: b({ prev: "a", diff: 50 }) })[0].dismissed, false);
+});
+
+
+// ── Task 1.7: hai ảnh chụp cùng một trang ────────────────────────────
+
+/** Mặt sổ có các số dư cho trước (mỗi số một dòng, chỉ để có dữ liệu). */
+const withBalances = (id: string, balances: number[], extra: Partial<Tx>[] = []) =>
+  result(id, [...balances.map((balance) => ({ balance })), ...extra]);
+const BAL = [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000];
+
+test("duplicatePairs: chụp lại cùng một trang (cùng số dư) là nghi trùng, kèm số liệu để hiện 'x/y số dư trùng'", () => {
+  const store = { a: withBalances("a", BAL), b: withBalances("b", BAL.slice(0, 6)) };
+  assert.deepEqual(duplicatePairs(ids("a", "b"), store), [{ a: "a", b: "b", common: 6, sizeA: 8, sizeB: 6 }]);
+});
+
+test("duplicatePairs: ngưỡng — đúng 4 số dư và đúng 50% thì trùng; 3 số dư hoặc dưới 50% thì không", () => {
+  const dung = { a: withBalances("a", [10000, 20000, 30000, 40000, 51000, 52000, 53000, 54000]), b: withBalances("b", [10000, 20000, 30000, 40000, 61000, 62000, 63000, 64000]) };
+  assert.equal(duplicatePairs(ids("a", "b"), dung).length, 1);                     // 4 chung / min(8, 8) = 50%
+  const ba = { a: withBalances("a", [10000, 20000, 30000, 51000]), b: withBalances("b", [10000, 20000, 30000, 61000]) };
+  assert.equal(duplicatePairs(ids("a", "b"), ba).length, 0);                       // chỉ 3 chung (75% nhưng chưa đủ 4)
+  const thua = { a: withBalances("a", [10000, 20000, 30000, 40000, 51000, 52000, 53000, 54000, 55000]), b: withBalances("b", [10000, 20000, 30000, 40000, 61000, 62000, 63000, 64000, 65000]) };
+  assert.equal(duplicatePairs(ids("a", "b"), thua).length, 0);                     // 4/9 < 50%
+});
+
+test("duplicatePairs: số dư nhỏ (< 1,000) và dòng ghi chú không được tính; số dư lặp trong một mặt chỉ tính một lần", () => {
+  const nho = { a: withBalances("a", [100, 200, 300, 400, 500, 600]), b: withBalances("b", [100, 200, 300, 400, 500, 600]) };
+  assert.deepEqual(duplicatePairs(ids("a", "b"), nho), []);
+  const ghiChu = {
+    a: withBalances("a", [10000, 20000, 30000], [{ is_note: true, status: "note", balance: 40000 }]),
+    b: withBalances("b", [10000, 20000, 30000], [{ is_note: true, status: "note", balance: 40000 }]),
+  };
+  assert.deepEqual(duplicatePairs(ids("a", "b"), ghiChu), []);                     // 繰越 lặp giữa hai trang liền nhau là chuyện thường
+  const lap = { a: withBalances("a", [10000, 10000, 10000, 10000, 10000]), b: withBalances("b", [10000, 10000, 10000, 10000, 10000]) };
+  assert.deepEqual(duplicatePairs(ids("a", "b"), lap), []);
+});
+
+test("duplicatePairs: hai trang LIỀN NHAU của cùng một sổ không bị báo trùng (chỉ chung số dư biên)", () => {
+  const store = {
+    a: withBalances("a", [10000, 20000, 30000, 40000, 50000]),
+    b: withBalances("b", [50000, 60000, 70000, 80000, 90000]),
+  };
+  assert.deepEqual(duplicatePairs(ids("a", "b"), store), []);
+});
+
+test("duplicatePairs: 'Không phải trùng' loại cặp đó, đúng cả khi ghi ngược thứ tự; cặp khác vẫn còn", () => {
+  const store = { a: withBalances("a", BAL), b: withBalances("b", BAL), c: withBalances("c", BAL) };
+  const all = duplicatePairs(ids("a", "b", "c"), store);
+  assert.deepEqual(all.map((p) => [p.a, p.b]), [["a", "b"], ["a", "c"], ["b", "c"]]);
+  assert.deepEqual(duplicatePairs(ids("a", "b", "c"), store, [["b", "a"]]).map((p) => [p.a, p.b]), [["a", "c"], ["b", "c"]]);
+  assert.deepEqual(duplicatePairs(ids("a", "b", "c"), store, [["a", "b"], ["c", "a"], ["b", "c"]]), []);
+});
+
+test("duplicatePairs: mặt chưa có kết quả hoặc không có số dư bị bỏ qua; mặt đứng trước luôn là `a`", () => {
+  const store = { a: withBalances("a", BAL), c: withBalances("c", BAL) };
+  assert.deepEqual(duplicatePairs(ids("c", "x", "a"), store).map((p) => [p.a, p.b]), [["c", "a"]]);
+  assert.deepEqual(duplicatePairs([], {}), []);
+  assert.deepEqual(duplicatePairs(ids("a"), store), []);
+});
+
+test("dupBadges: mỗi mặt nghi là bản chụp lại chỉ gắn với mặt đứng trước SỚM NHẤT nghi trùng nó", () => {
+  const store = { a: withBalances("a", BAL), b: withBalances("b", BAL), c: withBalances("c", BAL), d: withBalances("d", [1000, 2000]) };
+  const pairs = duplicatePairs(ids("a", "b", "c", "d"), store);
+  const badge = dupBadges(pairs);
+  assert.deepEqual(Object.keys(badge).sort(), ["b", "c"]);                         // a đứng đầu nên không có huy hiệu
+  assert.equal(badge.b.a, "a");
+  assert.equal(badge.c.a, "a");                                                     // (b,c) cũng trùng nhưng a đứng trước b
+  // bảo (a,c) không phải trùng thì c quay sang trùng với b
+  const sau = dupBadges(duplicatePairs(ids("a", "b", "c", "d"), store, [["a", "c"]]));
+  assert.equal(sau.c.a, "b");
+});
+
+test("dupPairsIn: chỉ đếm cặp mà CẢ HAI mặt đều nằm trong phạm vi xuất file", () => {
+  const store = { a: withBalances("a", BAL), b: withBalances("b", BAL), c: withBalances("c", BAL) };
+  const pairs = duplicatePairs(ids("a", "b", "c"), store);
+  assert.equal(dupPairsIn(pairs, new Set(["a", "b", "c"])), 3);
+  assert.equal(dupPairsIn(pairs, new Set(["a", "b"])), 1);
+  assert.equal(dupPairsIn(pairs, new Set(["a"])), 0);
+  assert.equal(dupPairsIn(pairs, new Set()), 0);
 });

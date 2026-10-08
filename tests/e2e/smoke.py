@@ -39,6 +39,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     残高チェーン検証済, cột 確認メモ ghi 確認済, chú thích hoàn toàn tiếng Nhật
  15 chỗ nối số dư giữa hai mặt sổ liền nhau: đúng thứ tự → «nối liền»; đổi thứ tự → «đứt chuỗi» (dải vàng, chip ⛓✕
     ở cột trái, chip ⚠ ở thanh công cụ); 「Không phải lỗi」sống qua F5; trả thứ tự lại → «nối liền»
+ 16 thêm lần nữa sổ mẫu (hai mặt giống hệt) → huy hiệu «Có thể trùng với…» ở cột trái, hộp so sánh hai ảnh
+    ("x/y số dư trùng"), cảnh báo ở hộp Xuất file; 「Không phải trùng」sống qua F5; 「Xoá mặt bên phải」
 """
 from __future__ import annotations
 
@@ -836,6 +838,73 @@ def step_sheet_links(pg, base: str, ctx: dict) -> str:
     return "đúng thứ tự: nối liền · đổi thứ tự: dải đứt + ⛓✕ + chip ⚠ (không cộng vào số dòng) · Không phải lỗi sống qua F5 và bỏ được · trả đúng thứ tự thì nối liền"
 
 
+def step_duplicate_pages(pg, base: str, ctx: dict) -> str:
+    """Task 1.7: hai mặt sổ chung nhiều số dư = nghi cùng một trang chụp hai lần. Thêm sổ mẫu lần nữa cho ra hai
+    cặp trùng ($0, không gọi Gemini)."""
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+
+    def workspace():
+        return pg.request.get(f"{base}/api/ws/{ws_id}").json()
+
+    n_before = len(workspace()["sheets"])
+    added = pg.request.post(f"{base}/api/ws/{ws_id}/sample").json()["added"]
+    assert len(added) == 2, added
+    pg.reload()
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.wait_for(timeout=15000)
+
+    chips = pg.locator("[data-dup-chip]")
+    wait_until(lambda: chips.count() == 2, "hai bản chụp lại của sổ mẫu đều có huy hiệu «Có thể trùng»")
+    assert f"Có thể trùng với「{SAMPLE_SHEET_NAME}」" in chips.first.inner_text(), chips.first.inner_text()
+    assert pg.locator("[data-dup-compare]").count() == 0
+
+    # Hộp so sánh hai ảnh
+    chips.first.click()
+    box = pg.locator("[data-dup-compare]")
+    box.wait_for(timeout=5000)
+    assert re.fullmatch(r"\d+/\d+ số dư trùng nhau", box.locator("[data-dup-match]").inner_text().strip()), box.inner_text()
+    wait_until(lambda: box.locator("img").count() == 2 and all(
+        im.evaluate("e => e.complete && e.naturalWidth > 0") for im in box.locator("img").all()), "hai ảnh đã tải")
+    box.locator('[data-dup="later"]').click()
+    box.wait_for(state="detached", timeout=5000)
+    assert chips.count() == 2, "Để sau thì không đổi gì"
+
+    # Cảnh báo (không chặn) ở hộp Xuất file
+    pg.locator('[data-tour="export"]').click()
+    dialog = pg.locator("[role=dialog][aria-labelledby=exp-title]")
+    dialog.wait_for(timeout=5000)
+    warn = dialog.locator("[data-dup-warn]")
+    wait_until(lambda: warn.count() == 1 and "2 cặp mặt sổ có thể trùng nhau" in warn.inner_text(), "cảnh báo trùng ở hộp Xuất file")
+    assert dialog.get_by_role("button", name=VI["download"]).is_enabled(), "cảnh báo không được chặn việc xuất"
+    pg.keyboard.press("Escape")
+    dialog.wait_for(state="detached", timeout=5000)
+
+    # 「Không phải trùng」: hết huy hiệu, sống qua F5
+    chips.first.click()
+    box.wait_for(timeout=5000)
+    box.locator('[data-dup="not"]').click()
+    wait_until(lambda: chips.count() == 1 and box.count() == 0, "bấm Không phải trùng thì cặp đó hết bị nghi")
+    wait_until(lambda: len(workspace()["dup_ok"]) == 1, "server lưu dup_ok")
+    pg.reload()
+    pg.get_by_text(SAMPLE_SHEET_NAME).first.wait_for(timeout=15000)
+    wait_until(lambda: chips.count() == 1, "sau F5 cặp đã xác nhận vẫn không bị nghi lại")
+
+    # 「Xoá mặt bên phải」: có hỏi lại, rồi xoá thật
+    victim = chips.first.inner_text()
+    chips.first.click()
+    box.wait_for(timeout=5000)
+    box.locator('[data-dup="delete"]').click()
+    pg.locator("[role=alertdialog]").get_by_role("button", name="Xoá mặt sổ").click()
+    wait_until(lambda: chips.count() == 0 and len(workspace()["sheets"]) == n_before + 1, "mặt bên phải đã bị xoá, hết huy hiệu")
+    assert box.count() == 0
+
+    # Dọn: bỏ nốt bản sổ mẫu thêm vào để các bước sau (nếu có) không bị ảnh hưởng
+    for sid in added:
+        if any(x["id"] == sid for x in workspace()["sheets"]):
+            assert pg.request.delete(f"{base}/api/ws/{ws_id}/sheets/{sid}").ok
+    assert len(workspace()["sheets"]) == n_before and workspace()["dup_ok"] == [], "xoá mặt sổ phải dọn luôn cặp dup_ok chứa nó"
+    return f"2 bản chụp lại → 2 huy hiệu ({victim.strip()[:30]}…) · hộp so sánh có 2 ảnh + số dư trùng · cảnh báo khi xuất · Không phải trùng sống qua F5 · Xoá mặt bên phải"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -852,6 +921,7 @@ STEPS = [
     ("13. Lý do tiếng Việt + gợi ý sửa một chạm", step_fix_suggestions),
     ("14. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
     ("15. Chỗ nối số dư giữa các mặt sổ", step_sheet_links),
+    ("16. Hai ảnh chụp cùng một trang", step_duplicate_pages),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

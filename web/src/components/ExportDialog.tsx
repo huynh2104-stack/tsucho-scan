@@ -65,6 +65,7 @@ export default function ExportDialog({
   tickedCount,
   totalCount,
   hasCurrent,
+  dupCount,
   busy,
   onCancel,
   onExport,
@@ -74,6 +75,8 @@ export default function ExportDialog({
   tickedCount: number;
   totalCount: number;
   hasCurrent: boolean;
+  /** Số cặp mặt sổ nghi trùng nhau trong từng phạm vi xuất — cảnh báo, không chặn. */
+  dupCount: Record<ExportOpts["scope"], number>;
   busy: boolean;
   onCancel: () => void;
   onExport: (o: ExportOpts) => void;
@@ -223,6 +226,16 @@ export default function ExportDialog({
               <span className="text-[13px] text-ink3">.{opts.format}</span>
             </div>
           </section>
+
+          {dupCount[opts.scope] > 0 && (
+            <p
+              role="alert"
+              data-dup-warn
+              className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[12.5px] font-medium text-warnink"
+            >
+              ⚠ {t.expDupWarn(dupCount[opts.scope])}
+            </p>
+          )}
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-rule px-5 py-3">

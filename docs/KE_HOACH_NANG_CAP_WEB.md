@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.6 (08/10) — pytest **355 passed** · `npm test` **129 pass** · build xanh · E2E `smoke.py` **15/15 bước** (~35 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.7 = hết giai đoạn 1 (09/10) — pytest **367 passed** · `npm test` **137 pass** · build xanh · E2E `smoke.py` **16/16 bước** (~40 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1043,7 +1043,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.4 Excel/CSV 確認済 + tiếng Nhật — **mốc demo A** (xong 08/10/2026)
 - [x] 1.5 Lý do dễ hiểu + gợi ý sửa (xong 08/10/2026)
 - [x] 1.6 Nối số dư giữa các mặt (xong 08/10/2026)
-- [ ] 1.7 Ảnh chụp trùng trang
+- [x] 1.7 Ảnh chụp trùng trang (xong 09/10/2026) — **hết giai đoạn 1**
 - [ ] 2.1 Backend hồ sơ
 - [ ] 2.2 Trang hồ sơ
 - [ ] 2.3 Sửa thông tin sổ
@@ -1181,6 +1181,15 @@ Quan sát khi viết E2E (không sửa):
 - **「Không phải lỗi」lưu khác kế hoạch một chút**: kế hoạch ghi `link_ok: bool`; làm vậy thì đổi thứ tự hoặc xoá mặt trước là chỗ đứt MỚI bị che âm thầm. Nay `link_ok = {prev: id mặt trước, diff: mức chênh}` ở file kết quả của mặt B, và chỉ có hiệu lực khi đúng mặt trước và đúng mức chênh. `PUT /api/ws/:ws/results/:sheet` nhận thêm `link_ok` (có khoá thì ghi, `null` thì xoá, vắng mặt thì GIỮ nguyên — client cũ không mất xác nhận; sai định dạng → 400); quét lại mặt sổ thì mất (dữ liệu mới). Bấm「Không phải lỗi」/「Bỏ xác nhận」đi qua `commitStore` nên Ctrl+Z hoàn tác được và autosave tự lưu.
 - **Giao diện**: dải mảnh ở ĐẦU kết quả của mặt B, cả chế độ trang lẫn chế độ danh sách (đặt trong `cardsOf` nên dùng chung). **Chiều cao cố định** (`h-8`, chữ cắt bớt, tooltip có đủ câu): dải đổi từ «nối liền» sang «đứt» khi người dùng vừa sửa một số mà cao thấp khác nhau thì cả bảng giật đúng lúc đang nhấn chuột — chính lỗi đã gặp ở 1.3. Chip「⚠ N chỗ đứt」nằm trong cụm trạng thái không-bao-giờ-xuống-dòng của thanh công cụ (không phải ngay sau bộ đếm) vì cùng lý do; bấm vào thì sang dạng danh sách và cuộn tới chỗ đứt đầu tiên. Bộ đếm「Còn N dòng」không đổi: chỗ đứt tính riêng. Sổ mẫu: mặt ② mở bằng 繰越 647,354 = số dư cuối mặt ① nên hiện «nối liền»; đổi thứ tự hai mặt thì «đứt», chênh ¥-729,414.
 - Tests: 9 test TS cho `sheetLinks` (nối đúng; đứt + sameBook; khác sổ/khác ngân hàng; 繰越 bằng/lệch/không in số dư; không có số dư; cộng dồn dòng không in số dư; chỉ cặp liền nhau; nhiều sổ trong một mặt; `link_ok` đúng/sai mặt trước/sai mức chênh) và 10 pytest cho `link_ok` (lưu/giữ/xoá, quét lại thì mất, 7 kiểu sai định dạng, qua HTTP). E2E bước 15: đúng thứ tự → nối liền; đổi thứ tự bằng API → dải vàng + chip ⛓✕ + chip ⚠ (số dòng cần soát vẫn 0); chip ⚠ sang dạng danh sách; Không phải lỗi sống qua F5, bỏ xác nhận được; trả thứ tự → nối liền, mặt đứng đầu không có dải.
+
+**Task 1.7 — xong 09/10/2026 — hết GIAI ĐOẠN 1** (pytest **367** (+12) · `npm test` **137** (+8) · build xanh · E2E **16/16 bước**, thêm bước 16).
+- **`duplicatePairs(sheets, store, dupOk)`** (`review.ts`) đúng luật kế hoạch: tập số dư (≥ 1,000, không đếm dòng ghi chú, mỗi số một lần) của từng mặt; cặp nghi trùng khi `|A∩B| ≥ 4` và `|A∩B| / min(|A|,|B|) ≥ 0.5`; mặt đứng trước là `a`, đứng sau là `b` (bản nghi là chụp lại); cặp người dùng đã bảo「Không phải trùng」bị loại (không phân biệt thứ tự). Thêm `dupBadges` (mỗi mặt chỉ gắn với mặt đứng trước SỚM NHẤT nghi trùng nó — bộ ảnh của anh có cụm 5 bản của cùng một ảnh nên nếu không gom thì ra 10 huy hiệu cho một cụm) và `dupPairsIn` (đếm cặp có cả hai mặt nằm trong phạm vi xuất).
+- **Đo trên dữ liệu thật của anh**: luật bắt ĐÚNG ca kế hoạch nêu (S__35774551 ×2 và S__35774555_0: 21/21 số dư trùng) và các cụm anh đã tải lên nhiều lần với kiểu xoay/cắt khác nhau (so-fukuoka.jpg ×5, so-yucho-dep.jpg ×5, một trang của PDF khách A ×2 — khác byte nên chống trùng SHA-256 không bắt được). Bộ 33 mặt sổ: 29 cặp, 15 huy hiệu. Không thấy báo nhầm hai trang liền nhau của cùng một sổ (chỉ chung số dư biên, dưới ngưỡng 4).
+- **Backend**: `Workspace.dup_ok` (danh sách cặp `[id, id]` đã sắp xếp) trong `meta.json`; `POST /api/ws/:id/dup-ok {a, b}` (đúng chủ sở hữu mới gọi được — người khác nhận 404; id lạ, hai id giống nhau, thiếu/không phải chuỗi → 400; gọi lại hoặc đảo thứ tự thì không thêm cặp); xoá mặt sổ thì cặp chứa nó cũng bị xoá; meta cũ không có `dup_ok` vẫn đọc được; `GET /api/ws/:id` trả `dup_ok`. Test route khoá cửa tự bắt route mới. `tests/test_dup_ok.py` (12 test).
+- **Giao diện**: huy hiệu「⚠ Có thể trùng với「X」」trên thẻ mặt sổ (bấm để mở hộp, không kích hoạt thẻ); hộp **so sánh hai ảnh cạnh nhau** (`DupCompare`) với「N/M số dư trùng nhau」, ba nút「Để sau」(Esc) /「Không phải trùng」/「Xoá mặt bên phải」(qua `ConfirmDialog` như mọi lần xoá mặt sổ; Esc của hộp so sánh không ăn phím của hộp xác nhận); hộp Xuất file cảnh báo không chặn「N cặp mặt sổ có thể trùng nhau — giao dịch có thể bị tính 2 lần」theo ĐÚNG phạm vi đang chọn (một mặt thì không có cặp; chỉ các mặt đã tích thì chỉ cặp nằm trọn trong đó). Đủ vi/en/ja.
+- **Giới hạn cần biết**: dựa vào số dư nên chỉ thấy trùng ở mặt ĐÃ QUÉT (chưa quét thì chưa biết); ảnh trùng mà số dư bị đọc sai quá nửa thì lọt; hai trang khác nhau của sổ lặp số dư (hiếm) sẽ bị nghi — đã có nút「Không phải trùng」. «Không phải trùng» không hoàn tác bằng Ctrl+Z (nó lưu ở máy chủ, không nằm trong lịch sử sửa bảng) và giao diện chưa có chỗ bỏ xác nhận. Chưa thử với **hai ảnh chụp lại thật** trên giao diện (E2E dùng sổ mẫu thêm lần nữa: hai mặt giống hệt cả byte lẫn số dư — phần quy tắc chống nhiễu nằm ở test TS).
+- Test TS (8): ngưỡng đúng 4 và đúng 50%, 3 số dư, dưới 50%, số dư nhỏ, dòng ghi chú, số dư lặp trong một mặt, hai trang liền nhau của một sổ, loại cặp đã xác nhận (cả hai thứ tự), mặt chưa quét, huy hiệu theo mặt sớm nhất, đếm theo phạm vi. E2E bước 16: thêm sổ mẫu lần nữa → 2 huy hiệu, hộp có 2 ảnh đã tải + số dư trùng, cảnh báo ở hộp Xuất file (nút tải vẫn bật), Không phải trùng sống qua F5, Xoá mặt bên phải (có hỏi lại), dọn sạch `dup_ok`.
+- **Kiểm tra cuối giai đoạn 1 (mục 8)**: 4 lệnh xanh (367 · 137 · build · 16/16); WEB_PLAN §5a và bảng phím tắt đã đánh dấu; CHAY_WEB và memory cập nhật. Còn cho anh: các mục「Anh tự thử」của 1.1–1.7 trên sổ thật (chưa tự thử với 2 ảnh chụp lại thật vì tốn lượt Gemini nếu chưa có trong cache).
 
 ---
 

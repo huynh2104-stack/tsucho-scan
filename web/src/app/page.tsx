@@ -29,6 +29,7 @@ import {
   getWorkspace,
   listWorkspaces,
   listenEvents,
+  markNotDuplicate,
   renameBook,
   renameSheet,
   reorderSheets,
@@ -54,6 +55,9 @@ import {
   applyEdit,
   applyFix,
   blankRow,
+  dupBadges,
+  dupPairsIn,
+  duplicatePairs,
   explainOpen,
   insertRowAfter,
   isAlarm,
@@ -64,6 +68,7 @@ import {
   sheetLinks,
   sheetStats,
   suggestFixes,
+  type DupPair,
   type Fix,
   type FocusField,
   type SheetLink,
@@ -87,6 +92,7 @@ import ImportProgress, { type PendingUpload } from "@/components/ImportProgress"
 import SheetBusy from "@/components/SheetBusy";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import FixBar from "@/components/FixBar";
+import DupCompare from "@/components/DupCompare";
 
 const WS_KEY = "tsucho.ws";
 
@@ -179,6 +185,8 @@ export default function Workbench() {
   } | null>(null);
   // Vừa áp một gợi ý sửa ở dòng này: sau khi bảng vẽ lại thì sang dòng cần soát kế (nếu dòng đã hết cờ)
   const [jumpNext, setJumpNext] = useState<TxRef | null>(null);
+  // Cặp mặt sổ nghi cùng một trang đang mở hộp so sánh hai ảnh (task 1.7)
+  const [dupOpen, setDupOpen] = useState<DupPair | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -365,6 +373,15 @@ export default function Workbench() {
   const links = useMemo(() => sheetLinks(sheets, store), [sheets, store]);
   const linkByTo = useMemo(() => Object.fromEntries(links.map((l) => [l.to, l])), [links]);
   const alarms = useMemo(() => links.filter(isAlarm), [links]);
+
+  /* Hai mặt sổ nghi là CÙNG MỘT TRANG chụp hai lần (task 1.7): quét cả hai thì giao dịch bị cộng gấp đôi.
+     `dupPairs` đã loại các cặp người dùng bảo「Không phải trùng」(lưu ở server, `ws.dup_ok`). */
+  const dupPairs = useMemo(() => duplicatePairs(sheets, store, ws?.dup_ok ?? []), [sheets, store, ws?.dup_ok]);
+  const dupBadge = useMemo(() => dupBadges(dupPairs), [dupPairs]);
+  const dupWith = useMemo(
+    () => Object.fromEntries(Object.entries(dupBadge).map(([b, p]) => [b, sheets.find((x) => x.id === p.a)?.name ?? p.a])),
+    [dupBadge, sheets],
+  );
 
   /* Lưới an toàn cho lớp phủ kéo-thả: mọi nhánh con đều có thể gọi
      stopPropagation (thẻ mặt sổ làm vậy để trang không xử lý lại), nên onDrop
@@ -901,6 +918,35 @@ export default function Workbench() {
   const restoreCell: RestoreFn = (ref, field) =>
     patchRows(ref.sheet, ref.block, (rows) => restoreField(rows, ref.row, field));
 
+  /** 「Không phải trùng」: ghi vào server rồi đóng hộp so sánh; cặp này không bị nghi nữa. */
+  const notDuplicate = (p: DupPair) => {
+    if (!ws) return;
+    setDupOpen(null);
+    void guard(() => markNotDuplicate(ws.id, p.a, p.b));
+  };
+  /** 「Xoá mặt bên phải」: xoá bản nghi là chụp lại (có hỏi lại như mọi lần xoá mặt sổ). */
+  const deleteDupRight = (p: DupPair) => {
+    const sh = sheets.find((x) => x.id === p.b);
+    if (!ws || !sh) return;
+    setConfirm({
+      title: t.confirmDeleteSheetTitle,
+      message: t.confirmDeleteSheetMsg(sh.name),
+      warning: store[sh.id]?.blocks?.length ? t.confirmDeleteSheetHasResult : undefined,
+      label: t.deleteSheet,
+      danger: true,
+      run: () => {
+        setDupOpen(null);
+        if (active === sh.id) setActive(null);
+        setTicked((prev) => {
+          const next = new Set(prev);
+          next.delete(sh.id);
+          return next;
+        });
+        void guard(() => deleteSheet(ws.id, sh.id));
+      },
+    });
+  };
+
   /** 「Không phải lỗi」cho một chỗ đứt chuỗi: nhớ ở file kết quả của mặt sổ được kiểm, kèm mặt trước và
    *  mức chênh (đổi thứ tự hoặc sửa số làm chỗ đứt khác đi thì xác nhận cũ hết hiệu lực). Hoàn tác được. */
   const dismissLink = (l: SheetLink) =>
@@ -1283,6 +1329,8 @@ export default function Workbench() {
               states={states}
               perSheet={perSheet}
               brokenLinks={new Set(alarms.map((l) => l.to))}
+              dupWith={dupWith}
+              onOpenDup={(id) => setDupOpen(dupBadge[id] ?? null)}
               onToggle={toggle}
               onToggleRange={toggleRange}
               onActivate={(id) => {
@@ -1583,6 +1631,19 @@ export default function Workbench() {
         {t.caveat}
       </p>
 
+      {dupOpen && ws && sheets.some((x) => x.id === dupOpen.a) && sheets.some((x) => x.id === dupOpen.b) && (
+        <DupCompare
+          wsId={ws.id}
+          pair={dupOpen}
+          left={sheets.find((x) => x.id === dupOpen.a)!}
+          right={sheets.find((x) => x.id === dupOpen.b)!}
+          suspended={!!confirm}
+          onNotDup={() => notDuplicate(dupOpen)}
+          onDeleteRight={() => deleteDupRight(dupOpen)}
+          onLater={() => setDupOpen(null)}
+        />
+      )}
+
       <ConfirmDialog
         open={!!confirm}
         title={confirm?.title ?? ""}
@@ -1608,6 +1669,11 @@ export default function Workbench() {
         tickedCount={ticked.size}
         totalCount={Object.keys(store).length || sheets.length}
         hasCurrent={!!active}
+        dupCount={{
+          current: 0,
+          ticked: dupPairsIn(dupPairs, ticked),
+          all: dupPairs.length,
+        }}
         busy={exporting}
         onCancel={() => setShowExport(false)}
         onExport={doExport}

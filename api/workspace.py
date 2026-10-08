@@ -112,6 +112,9 @@ class Workspace:
     book_name: str = ""          # tên sổ người dùng đặt, dùng khi xuất file
     created_at: float = field(default_factory=time.time)
     owner: str = ""              # user.id — chỉ chủ sở hữu mới mở được
+    # Các cặp mặt sổ người dùng đã bảo「Không phải trùng」(task 1.7). Mỗi cặp là [id, id] đã SẮP XẾP
+    # nên (a,b) và (b,a) là một; xoá mặt sổ thì cặp chứa nó cũng bị xoá.
+    dup_ok: list[list[str]] = field(default_factory=list)
 
     def dir(self) -> Path:
         return WS_DIR / self.id
@@ -133,6 +136,7 @@ class Workspace:
                     "book_name": self.book_name,
                     "created_at": self.created_at,
                     "owner": self.owner,
+                    "dup_ok": self.dup_ok,
                     "sheets": [asdict(s) for s in self.sheets],
                 },
                 ensure_ascii=False,
@@ -175,6 +179,7 @@ def load(ws_id: str) -> Workspace | None:
         book_name=raw.get("book_name", ""),
         created_at=raw.get("created_at", time.time()),
         owner=raw.get("owner", ""),
+        dup_ok=[list(p) for p in raw.get("dup_ok", []) if isinstance(p, list) and len(p) == 2],
         sheets=[Sheet(**s) for s in raw.get("sheets", [])],
     )
     # Máy chủ tắt giữa chừng lúc đang xử lý nền: việc đó không còn ai làm tiếp, để nguyên
@@ -970,13 +975,29 @@ def remove(ws: Workspace, sheet_id: str) -> None:
         return
     shutil.rmtree(sheet.dir(ws.id), ignore_errors=True)
     ws.sheets = [s for s in ws.sheets if s.id != sheet_id]
+    ws.dup_ok = [p for p in ws.dup_ok if sheet_id not in p]
     mark_duplicates(ws)
     ws.save()
+
+
+def mark_not_duplicate(ws: Workspace, a: str, b: str) -> None:
+    """Ghi nhận người dùng đã xem và bảo hai mặt sổ này KHÔNG phải cùng một trang (task 1.7).
+
+    Raise ValueError nếu một trong hai id không phải mặt sổ của workspace, hoặc a == b. Gọi lại với
+    cùng cặp (kể cả đảo thứ tự) thì không làm gì thêm.
+    """
+    if a == b or not ws.find(a) or not ws.find(b):
+        raise ValueError("Mặt sổ không hợp lệ")
+    pair = sorted([a, b])
+    if pair not in ws.dup_ok:
+        ws.dup_ok.append(pair)
+        ws.save()
 
 
 def to_json(ws: Workspace) -> dict:
     return {
         "id": ws.id,
         "book_name": ws.book_name,
+        "dup_ok": ws.dup_ok,
         "sheets": [asdict(s) for s in ws.sheets],
     }

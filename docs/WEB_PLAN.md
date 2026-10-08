@@ -121,6 +121,9 @@ Nếu người dùng kéo cả thư mục lên, giao dịch bị **cộng gấp 
 - Trùng byte → chặn ngay khi tải lên (so sánh SHA-256).
 - Trùng nội dung → sau khi quét, nếu 2 sổ có ≥50% số dư giống nhau thì cảnh báo
   "2 file này có vẻ là cùng một trang, chọn giữ file nào?".
+  ✅ **XONG 09/10/2026 (task 1.7)** — huy hiệu «Có thể trùng với…», hộp so sánh hai ảnh cạnh nhau,
+  「Không phải trùng」/「Xoá mặt bên phải」/「Để sau」, cảnh báo ở hộp Xuất file. Ngưỡng: ≥ 4 số dư chung
+  (mỗi số ≥ 1,000, không tính dòng ghi chú) và ≥ 50% số dư của mặt ít số dư hơn.
 
 ### (b) Bảo mật dữ liệu — vấn đề kinh doanh, không phải kỹ thuật
 Đây là **số tài khoản ngân hàng thật của doanh nghiệp Nhật**.
@@ -233,7 +236,9 @@ Chia đôi có **thanh kéo được**, nhớ tỉ lệ người dùng đặt (l
 | Phím | Việc |
 |---|---|
 | `↑` `↓` `←` `→` | ✅ *(31/07/2026)* đi giữa các Ô trong bảng, vệt đỏ trên ảnh bám theo. `←` `→` chỉ nhảy ô khi con trỏ đã ở kịch đầu/kịch cuối chữ, đứng giữa chữ thì vẫn sửa bình thường |
-| `n` / `p` | **dòng cần soát tiếp theo / trước đó** — phím quan trọng nhất |
+| `n` / `p` | **dòng cần soát tiếp theo / trước đó** — phím quan trọng nhất ✅ *(03/10/2026: đặt con trỏ đúng ô, dùng chung định nghĩa «cần soát» với bảng và Excel)* |
+| `Ctrl+Enter` | ✅ *(08/10/2026)* ✓ đã soát dòng đang đứng (kể cả chữ gõ dở) rồi nhảy tới dòng cần soát kế |
+| `Ctrl+Shift+Enter` | ✅ *(08/10/2026)* chèn một dòng trống ngay dưới dòng đang đứng |
 | `Enter` | sửa ô đang chọn · `Tab` sang ô kế · `Esc` huỷ |
 | `+` `−` `0` | phóng to / thu nhỏ / vừa khung |
 | `r` | xoay ảnh 90° |

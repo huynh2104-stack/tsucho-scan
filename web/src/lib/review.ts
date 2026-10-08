@@ -827,3 +827,70 @@ export function sheetLinks(sheets: { id: string }[], store: ResultStore): SheetL
   }
   return out;
 }
+
+// ── Hai ảnh chụp cùng một trang (task 1.7) ────────────────────────────
+//
+// Nguy hiểm nhất: chụp lại cùng một trang (khác byte nên chống trùng SHA-256 không bắt được) rồi
+// quét cả hai ⇒ giao dịch bị cộng gấp đôi mà file nhìn vẫn bình thường. Hai mặt sổ nghi là cùng một
+// trang khi chúng chia sẻ nhiều SỐ DƯ giống hệt nhau (số dư là dấu vân tay của giao dịch).
+
+const DUP_MIN_BALANCE = 1000;   // số nhỏ trùng ngẫu nhiên là chuyện thường
+const DUP_MIN_COMMON = 4;
+const DUP_MIN_RATIO = 0.5;
+
+export type DupPair = {
+  /** Mặt đứng TRƯỚC trong danh sách (giữ lại) và mặt đứng SAU (nghi là bản chụp lại). */
+  a: string;
+  b: string;
+  /** Số số dư (≥ 1,000, không đếm dòng ghi chú) có ở cả hai mặt, và số số dư của từng mặt. */
+  common: number;
+  sizeA: number;
+  sizeB: number;
+};
+
+function balanceSet(res: ResultStore[string] | undefined): Set<number> {
+  const out = new Set<number>();
+  for (const b of res?.blocks ?? []) {
+    for (const tx of b.rows) {
+      if (!tx.is_note && tx.balance != null && tx.balance >= DUP_MIN_BALANCE) out.add(tx.balance);
+    }
+  }
+  return out;
+}
+
+/**
+ * Các cặp mặt sổ nghi là cùng một trang: |A∩B| ≥ 4 và |A∩B| / min(|A|,|B|) ≥ 0.5, trên tập số dư của
+ * từng mặt. `dupOk` = các cặp người dùng đã bảo「Không phải trùng」(không phân biệt thứ tự) — bị loại.
+ * Kết quả theo thứ tự danh sách; mặt chưa có kết quả thì bị bỏ qua.
+ */
+export function duplicatePairs(sheets: { id: string }[], store: ResultStore, dupOk: string[][] = []): DupPair[] {
+  const sets = sheets.map((s) => balanceSet(store[s.id]));
+  const dismissed = (a: string, b: string) => dupOk.some((p) => (p[0] === a && p[1] === b) || (p[0] === b && p[1] === a));
+  const out: DupPair[] = [];
+  for (let i = 0; i < sheets.length; i++) {
+    for (let j = i + 1; j < sheets.length; j++) {
+      const A = sets[i];
+      const B = sets[j];
+      const small = Math.min(A.size, B.size);
+      if (small === 0) continue;
+      let common = 0;
+      for (const v of A) if (B.has(v)) common++;
+      if (common >= DUP_MIN_COMMON && common / small >= DUP_MIN_RATIO && !dismissed(sheets[i].id, sheets[j].id)) {
+        out.push({ a: sheets[i].id, b: sheets[j].id, common, sizeA: A.size, sizeB: B.size });
+      }
+    }
+  }
+  return out;
+}
+
+/** Mỗi mặt sổ nghi là bản chụp lại → cặp với mặt đứng TRƯỚC SỚM NHẤT nghi trùng nó (để gắn huy hiệu). */
+export function dupBadges(pairs: DupPair[]): Record<string, DupPair> {
+  const out: Record<string, DupPair> = {};
+  for (const p of pairs) if (!(p.b in out)) out[p.b] = p;     // pairs theo thứ tự danh sách ⇒ cặp đầu tiên có mặt a sớm nhất
+  return out;
+}
+
+/** Số cặp nghi trùng mà CẢ HAI mặt đều nằm trong phạm vi xuất file. */
+export function dupPairsIn(pairs: DupPair[], ids: ReadonlySet<string>): number {
+  return pairs.filter((p) => ids.has(p.a) && ids.has(p.b)).length;
+}

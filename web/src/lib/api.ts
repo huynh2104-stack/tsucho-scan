@@ -95,6 +95,8 @@ export type Workspace = {
   sheets: Sheet[];
   /** Có ở GET /api/ws/:id — mọi kết quả đã quét, sống qua F5. */
   results?: ResultStore;
+  /** Các cặp mặt sổ người dùng đã bảo「Không phải trùng」(mỗi cặp đã sắp xếp). */
+  dup_ok?: string[][];
 };
 
 /** Các ô người dùng sửa được trong một dòng (thứ tự cột trên màn hình). */
@@ -393,6 +395,10 @@ export const deleteSheet = async (wsId: string, sheetId: string) =>
   asJson<Workspace>(
     await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}`, { method: "DELETE", ...CRED }),
   );
+
+/** 「Không phải trùng」: hai mặt sổ nghi cùng một trang nhưng người dùng đã so và thấy khác nhau. */
+export const markNotDuplicate = (wsId: string, a: string, b: string) =>
+  jsonPost<Workspace>(`/api/ws/${wsId}/dup-ok`, { a, b });
 
 export const reorderSheets = (wsId: string, sheet_ids: string[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/reorder`, { sheet_ids });
