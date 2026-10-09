@@ -52,6 +52,8 @@ import {
 import { useAuth } from "@/lib/auth";
 import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
+import QuickReview from "@/components/QuickReview";
+import type { RowRef } from "@/lib/quickreview";
 import { exportSummary, scopeIds, type ExportSummary } from "@/lib/exportsummary";
 import {
   analyzeRows,
@@ -190,6 +192,8 @@ export default function Workbench() {
   const [dupOpen, setDupOpen] = useState<DupPair | null>(null);
   /** Mặt sổ cần nhảy tới dòng cần soát đầu tiên (từ «Tóm tắt trước khi xuất»); null = không có việc chờ. */
   const [goNeed, setGoNeed] = useState<string | null>(null);
+  /** Đang ở chế độ «Soát nhanh» (task 3.2): cột kết quả thành thẻ một dòng. */
+  const [quickOpen, setQuickOpen] = useState(false);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -592,6 +596,17 @@ export default function Workbench() {
 
   // Cùng số với huy hiệu ở cột trái (cùng `perSheet`)
   const badCount = active ? (perSheet[active]?.need_check ?? 0) : 0;
+  /** Số dòng cần soát của TOÀN hồ sơ — «Soát nhanh» đi qua mọi mặt sổ. */
+  const totalNeed = Object.values(perSheet).reduce((n, s) => n + s.need_check, 0);
+
+  /** Thoát «Soát nhanh»: bảng nhảy về ĐÚNG dòng đang xem (con trỏ vào ô gây lệch). */
+  const closeQuick = (ref: RowRef | null, field: FocusField | null) => {
+    setQuickOpen(false);
+    if (!ref) return;
+    setActive(ref.sheet);
+    setSelRow(ref);
+    setPendingFocus({ ref, field: field ?? "description" });
+  };
 
   /* Đặt con trỏ vào ô gây lệch — SAU khi React đã vẽ dòng mới.
      Không dùng requestAnimationFrame trong hàm xử lý: nó có thể chạy trước khi
@@ -1121,6 +1136,8 @@ export default function Workbench() {
         redoEdit();
         return;
       }
+      // Soát nhanh tự xử lý n / p / Ctrl+Enter / Esc (components/QuickReview.tsx); ở đây chỉ còn hoàn tác / làm lại
+      if (quickOpen) return;
       // Ctrl+Enter / Ctrl+Shift+Enter cũng phải bắt TRƯỚC nhánh `typing`: lúc soát con trỏ thường
       // đang nằm trong một ô của bảng. Ô nhập NGOÀI bảng (lọc, đổi tên, tên sổ) thì bỏ qua.
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -1565,6 +1582,19 @@ export default function Workbench() {
               >
                 {badCount > 0 ? t.badLeft(badCount) : t.allChecked}
               </span>
+              {totalNeed > 0 && !quickOpen && (
+                <button
+                  data-testid="quick-start"
+                  onClick={() => {
+                    setPane("result");
+                    setQuickOpen(true);
+                  }}
+                  title={t.qrStartHint}
+                  className="tnum rounded-md border border-accent bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-accentink hover:brightness-110"
+                >
+                  ▶ {t.qrStart(totalNeed)}
+                </button>
+              )}
               {/* Cụm trạng thái bên phải KHÔNG được làm thanh công cụ xuống dòng. Trước đây mỗi chữ ở đây
                   là một phần tử riêng; chọn một dòng là hiện「vị trí ước lượng…」, thanh bị đẩy xuống dòng
                   thứ hai và cả bảng bên dưới tụt xuống một nấc NGAY GIỮA lúc người dùng đang nhấn chuột,
@@ -1607,14 +1637,19 @@ export default function Workbench() {
                 )}
               </div>
             </div>
-            <FixBar
-              explain={fixBar?.explain ?? []}
-              fixes={fixBar?.fixes ?? []}
-              onApply={(fix) => fixBar && applyFixAt(fixBar.ref, fix)}
-            />
+            {!quickOpen && (
+              <FixBar
+                explain={fixBar?.explain ?? []}
+                fixes={fixBar?.fixes ?? []}
+                onApply={(fix) => fixBar && applyFixAt(fixBar.ref, fix)}
+              />
+            )}
             </>
           )}
           <div className="min-h-0 flex-1">
+            {quickOpen ? (
+              <QuickReview sheets={sheets} store={store} onActivate={setActive} onClose={closeQuick} />
+            ) : (
             <ReviewPane
               store={store}
               sheets={sheets}
@@ -1637,6 +1672,7 @@ export default function Workbench() {
               selected={selRow}
               onSelectRow={(ref) => { setSelRow(ref); setActive(ref.sheet); }}
             />
+            )}
           </div>
 
           {/* Thanh xuất file */}

@@ -54,6 +54,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     Excel đúng số sheet (các mặt cùng tài khoản chung một tab), B1/B3 và số dòng khớp
  20 ⚙ Cài đặt: chọn ngôn ngữ / chủ đề trong hộp → máy chủ lưu theo tài khoản; máy lạ (trình duyệt trắng, ngôn ngữ en)
     đăng nhập cùng tài khoản thì giao diện theo lựa chọn đã lưu (ja); Esc đóng hộp
+ 21 «▶ Soát nhanh (N)»: chỉ hiện khi còn dòng cần soát; vào chế độ → thẻ một dòng «Dòng k/N · Mặt「…」», đi qua mọi mặt sổ
+    theo thứ tự cột trái (ảnh giữa đổi theo mặt sổ), n/p đi tới/lui, Esc thoát và bảng nhảy về đúng dòng đó
 """
 from __future__ import annotations
 
@@ -1378,6 +1380,103 @@ def step_settings(pg, base: str, ctx: dict) -> str:
     return "⚙ mở/đóng bằng Esc · chọn ja + tối → máy chủ lưu theo tài khoản · máy lạ (en-US, không có localStorage) đăng nhập cùng tài khoản thì thấy tiếng Nhật + chủ đề tối · trả lại vi"
 
 
+def viewer_sheet(pg) -> str | None:
+    """Tên mặt sổ đang hiện ở khung ảnh giữa (dòng «Mặt sổ: …» dưới ảnh)."""
+    return pg.evaluate("""() => {
+        const b = [...document.querySelectorAll('b')].find(e => e.parentElement && e.parentElement.textContent.trim().startsWith('Mặt sổ'));
+        return b ? b.textContent : null;
+    }""")
+
+
+def break_sheet_state(pg, base: str, ws_id: str, sid1: str, sid2: str):
+    """Dựng hai mặt sổ CÓ dòng cần soát: mặt ① một dòng in sai số dư, mặt ② bỏ ✓ (còn 1 dòng vàng thật).
+    Trả về bản gốc để trả lại sau khi thử."""
+    data = pg.request.get(f"{base}/api/ws/{ws_id}").json()
+    orig = {sid: (data["results"][sid]["blocks"], data["results"][sid].get("link_ok")) for sid in (sid1, sid2)}
+    b1 = [{**b, "rows": [dict(r) for r in b["rows"]]} for b in orig[sid1][0]]
+    b1[0]["rows"][EDIT_ROW]["balance"] = 999                                # như bước 4: số dư in sai ⇒ vàng
+    b2 = [{**b, "rows": [{k: v for k, v in r.items() if k not in ("reviewed", "reviewed_at")} for r in b["rows"]]}
+          for b in orig[sid2][0]]
+    for sid, blocks in ((sid1, b1), (sid2, b2)):
+        r = pg.request.put(f"{base}/api/ws/{ws_id}/results/{sid}", data={"blocks": blocks, "link_ok": None})
+        assert r.ok, r.text()
+    return orig
+
+
+def restore_sheet_state(pg, base: str, ws_id: str, orig: dict):
+    for sid, (blocks, link_ok) in orig.items():
+        r = pg.request.put(f"{base}/api/ws/{ws_id}/results/{sid}", data={"blocks": blocks, "link_ok": link_ok})
+        assert r.ok, r.text()
+
+
+def step_quick_review(pg, base: str, ctx: dict) -> str:
+    """Task 3.2 (bước 1: khung): «▶ Soát nhanh» đi lần lượt qua mọi dòng cần soát của mọi mặt sổ."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    ws_id = j("/api/ws")["workspaces"][0]["id"]
+    sheets = j(f"/api/ws/{ws_id}")["sheets"]
+    by_name = {x["name"]: x["id"] for x in sheets}
+    s1, s2 = by_name[SAMPLE_SHEET_NAME], by_name[SHEET2_NAME]
+    start = pg.locator("[data-testid=quick-start]")
+    quick = pg.locator("[data-testid=quick-review]")
+    progress = pg.locator("[data-testid=quick-progress]")
+
+    def reload_to_workbench():
+        pg.goto(f"{base}/")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        wait_until(lambda: pg.locator('[data-tour="rail"] li[data-need]').count() > 0, "cột trái có số cần soát")
+
+    # ── Hồ sơ sạch: không có nút ──
+    reload_to_workbench()
+    assert start.count() == 0, "không còn dòng cần soát thì không có nút «Soát nhanh»"
+
+    orig = break_sheet_state(pg, base, ws_id, s1, s2)
+    try:
+        reload_to_workbench()
+        need = {sid: int(pg.locator('[data-tour="rail"] li', has_text=name).first.get_attribute("data-need") or 0)
+                for sid, name in ((s1, SAMPLE_SHEET_NAME), (s2, SHEET2_NAME))}
+        total = need[s1] + need[s2]
+        assert need[s1] >= 1 and need[s2] >= 1, f"cần dòng cần soát ở cả hai mặt: {need}"
+        start.wait_for(timeout=5000)
+        assert start.inner_text().strip() == f"▶ Soát nhanh ({total})", start.inner_text()
+
+        # ── Vào chế độ: thẻ một dòng, bắt đầu ở mặt sổ ĐẦU TIÊN có dòng cần soát ──
+        start.click()
+        quick.wait_for(timeout=5000)
+        wait_until(lambda: f"Dòng 1/{total} · Mặt「{SAMPLE_SHEET_NAME}」" in progress.inner_text(), "tiến độ dòng 1")
+        wait_until(lambda: viewer_sheet(pg) == SAMPLE_SHEET_NAME, "ảnh giữa là mặt ①")
+        assert start.count() == 0, "đang soát nhanh thì nút bắt đầu biến mất"
+
+        # ── n: bỏ qua/đi tới — qua hết mặt ① rồi sang mặt ②, ảnh giữa đổi theo ──
+        seen = [progress.inner_text().strip()]
+        for _ in range(total - 1):
+            pg.keyboard.press("n")
+            wait_until(lambda: progress.inner_text().strip() != seen[-1], "n sang dòng kế")
+            seen.append(progress.inner_text().strip())
+        assert seen[-1].startswith(f"Dòng {total}/{total}") and f"Mặt「{SHEET2_NAME}」" in seen[-1], seen
+        wait_until(lambda: viewer_sheet(pg) == SHEET2_NAME, "sang mặt ② thì ảnh giữa đổi theo")
+        pg.keyboard.press("n")                                               # quay vòng về dòng đầu
+        wait_until(lambda: progress.inner_text().strip() == seen[0], "n ở dòng cuối thì quay vòng về dòng đầu")
+        pg.keyboard.press("p")                                               # p: lùi — vòng ngược về dòng cuối
+        wait_until(lambda: progress.inner_text().strip() == seen[-1], "p lùi một dòng (quay vòng)")
+        pg.locator("[data-testid=quick-prev]").click()
+        wait_until(lambda: progress.inner_text().strip() == seen[-2], "nút Quay lại")
+
+        # ── Esc: thoát, bảng nhảy về ĐÚNG dòng đang xem ──
+        pg.keyboard.press("Escape")
+        quick.wait_for(state="detached", timeout=5000)
+        wait_until(lambda: (focused(pg) or {}).get("state") == "review", "con trỏ vào ô của dòng đang xem trong bảng")
+        assert start.count() == 1, "thoát rồi thì nút bắt đầu hiện lại"
+        assert viewer_sheet(pg) == (SAMPLE_SHEET_NAME if total - 2 < need[s1] else SHEET2_NAME), viewer_sheet(pg)
+    finally:
+        restore_sheet_state(pg, base, ws_id, orig)
+    reload_to_workbench()
+    assert start.count() == 0
+    return (f"hồ sơ sạch không có nút · còn {total} dòng ({need[s1]} ở mặt ①, {need[s2]} ở mặt ②) → «▶ Soát nhanh ({total})» · "
+            "thẻ «Dòng k/N · Mặt…» · n/p/nút đi qua hai mặt sổ (ảnh giữa đổi theo, quay vòng) · Esc về đúng dòng trong bảng")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1399,6 +1498,7 @@ STEPS = [
     ("18. Sửa thông tin sổ", step_book_info),
     ("19. Tóm tắt trước khi xuất + xuất theo tài khoản", step_export_summary),
     ("20. Cài đặt theo tài khoản", step_settings),
+    ("21. Soát nhanh", step_quick_review),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
