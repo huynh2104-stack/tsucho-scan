@@ -127,10 +127,17 @@ def _memo(tx: dict, info: dict) -> str:
     if state == "fixed":
         return f"自動修正: {tx.get('reason', '')}"
 
-    changes = "、".join(
-        f"{review.FIELD_LABEL[c['field']]} {_fmt_value(c['from'])}→{_fmt_value(c['to'])}"
-        for c in review.edit_changes(tx)
-    )
+    # Ô sửa theo TỪ ĐIỂN SỬA LỖI (task 3.3) ghi riêng là 辞書で補正 — người đọc file biết chữ đó không do người gõ tay
+    in_dict = set(tx.get("dict_fixed") or [])
+
+    def _list(items) -> str:
+        return "、".join(
+            f"{review.FIELD_LABEL[c['field']]} {_fmt_value(c['from'])}→{_fmt_value(c['to'])}" for c in items
+        )
+
+    all_changes = review.edit_changes(tx)
+    changes = _list(c for c in all_changes if c["field"] not in in_dict)
+    dict_changes = _list(c for c in all_changes if c["field"] in in_dict)
     inferred = ""
     if tx.get("inferred"):
         what = "残高から計算" if "balance" in tx["inferred"] else "、".join(
@@ -142,9 +149,15 @@ def _memo(tx: dict, info: dict) -> str:
             memo += f"（元: {tx['reason']}）"
         if changes:
             memo += f"（修正: {changes}）"
+        if dict_changes:
+            memo += f"（辞書で補正: {dict_changes}）"
         return memo + inferred
     if state == "edited":
-        return "／".join(p for p in ([f"手修正: {changes}"] if changes else []) + ([inferred] if inferred else []))
+        return "／".join(
+            p for p in ([f"手修正: {changes}"] if changes else [])
+            + ([f"辞書で補正: {dict_changes}"] if dict_changes else [])
+            + ([inferred] if inferred else [])
+        )
     return ""
 
 
