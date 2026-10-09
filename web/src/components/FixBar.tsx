@@ -45,7 +45,7 @@ export default function FixBar({
   return (
     <div
       data-fixbar
-      className="flex h-9 flex-none items-center gap-2 overflow-hidden whitespace-nowrap border-b border-rule2 bg-card2 px-3 text-[11.5px]"
+      className="flex h-9 flex-none items-center gap-2 overflow-hidden whitespace-nowrap border-b border-rule2 bg-card2 px-3 text-[length:calc(11.5px*var(--fs))]"
     >
       {explain.length === 0 ? (
         <span className="truncate text-ink3">{t.inspectorHint}</span>
@@ -63,7 +63,7 @@ export default function FixBar({
                   data-fix={f.kind}
                   onClick={() => onApply(f)}
                   title={t.fixesHint}
-                  className="flex-none rounded-md border border-accent/50 bg-accentpale px-2 py-1 text-[11.5px] font-semibold text-accent hover:bg-accent hover:text-accentink"
+                  className="flex-none rounded-md border border-accent/50 bg-accentpale px-2 py-1 text-[length:calc(11.5px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
                 >
                   {fixLabel(t, f)}
                 </button>

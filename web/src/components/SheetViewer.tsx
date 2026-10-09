@@ -94,7 +94,7 @@ function Tool({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`flex h-8 flex-none items-center gap-1.5 rounded-lg border px-2.5 text-[12.5px] transition-colors disabled:opacity-40 ${cls}`}
+      className={`flex h-8 flex-none items-center gap-1.5 rounded-lg border px-2.5 text-[length:calc(12.5px*var(--fs))] transition-colors disabled:opacity-40 ${cls}`}
     >
       {icon}
       {/* Thanh công cụ hẹp thì bỏ chữ, giữ biểu tượng — vẫn có `title` và
@@ -125,7 +125,7 @@ function MenuItem({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`block w-full px-3 py-2 text-left text-[12.5px] disabled:opacity-35 ${
+      className={`block w-full px-3 py-2 text-left text-[length:calc(12.5px*var(--fs))] disabled:opacity-35 ${
         danger ? "text-danger hover:bg-danger/10" : "text-ink2 hover:bg-card2"
       }`}
     >
@@ -170,7 +170,7 @@ function Slider({
       />
       <button
         onClick={onReset}
-        className="tnum w-[46px] flex-none rounded px-1 text-right text-[11px] text-ink3 hover:bg-card2 hover:text-ink"
+        className="tnum w-[46px] flex-none rounded px-1 text-right text-[length:calc(11px*var(--fs))] text-ink3 hover:bg-card2 hover:text-ink"
         title={label}
       >
         {value > 0 && unit === "°" ? "+" : ""}
@@ -340,8 +340,8 @@ export default function SheetViewer({
   if (!sheet) {
     return (
       <div className="canvas-bg flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-[15px] font-semibold text-ink2">{t.viewerEmpty}</p>
-        <p className="max-w-xs text-[12.5px] text-ink3">{t.viewerEmptyHint}</p>
+        <p className="text-[length:calc(15px*var(--fs))] font-semibold text-ink2">{t.viewerEmpty}</p>
+        <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink3">{t.viewerEmptyHint}</p>
       </div>
     );
   }
@@ -530,7 +530,7 @@ export default function SheetViewer({
           mất đúng phần đầu trang sổ, mà đó lại là chỗ người dùng cần nhìn để
           kéo khung cắt / kéo góc. */}
       {(cropping || warping) && (
-        <p className="flex items-start gap-2 border-b border-accent/40 bg-accentpale px-3 py-1.5 text-[11.5px] text-accent">
+        <p className="flex items-start gap-2 border-b border-accent/40 bg-accentpale px-3 py-1.5 text-[length:calc(11.5px*var(--fs))] text-accent">
           <span aria-hidden>💡</span>
           <span>{warping ? t.warpHint : t.cropHint}</span>
         </p>
@@ -613,7 +613,7 @@ export default function SheetViewer({
             title={t.zoomIn}
             icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6" /> </svg>}
           />
-          <span className="tnum text-[10.5px] leading-none text-ink3">
+          <span className="tnum text-[length:calc(10.5px*var(--fs))] leading-none text-ink3">
             {Math.round(zoom * 100)}
           </span>
           <Tool
@@ -873,7 +873,7 @@ export default function SheetViewer({
       {/* Máy đã tự chỉnh ảnh lúc nhập file: nói rõ đã làm gì và cho hoàn tác ngay tại đây */}
       {sheet.auto && (sheet.auto.rotate !== 0 || sheet.auto.cropped) && (
         <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-accentpale/60 px-3 py-1.5">
-          <span className="text-[12px] font-semibold text-accent">
+          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-accent">
             ✨{" "}
             {[
               sheet.auto.rotate
@@ -892,8 +892,8 @@ export default function SheetViewer({
       )}
       {sheet.auto && !sheet.auto.sure && sheet.auto.detected !== 0 && sheet.auto.rotate === 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
-          <span className="text-[12px] font-semibold text-warnink">⚠ {t.autoUnsureBadge}</span>
-          <span className="text-[11.5px] text-warnink/90">{t.autoUnsure}</span>
+          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-warnink">⚠ {t.autoUnsureBadge}</span>
+          <span className="text-[length:calc(11.5px*var(--fs))] text-warnink/90">{t.autoUnsure}</span>
         </div>
       )}
 
@@ -901,8 +901,8 @@ export default function SheetViewer({
           file từ kết quả của một tấm ảnh khác mà không biết. */}
       {stale && (
         <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
-          <span className="text-[12px] font-semibold text-warnink">⚠ {t.staleTitle}</span>
-          <span className="text-[11.5px] text-warnink/90">{t.staleMsg}</span>
+          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-warnink">⚠ {t.staleTitle}</span>
+          <span className="text-[length:calc(11.5px*var(--fs))] text-warnink/90">{t.staleMsg}</span>
           <span className="flex-1" />
           <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
             {scanning ? t.scanning : t.rescanNow}
@@ -1040,13 +1040,13 @@ export default function SheetViewer({
               <Tool onClick={clearPreview} title={t.discardPreview}>
                 {t.discardPreview}
               </Tool>
-              <span className="text-[11px] text-warnink">{t.previewOnly}</span>
+              <span className="text-[length:calc(11px*var(--fs))] text-warnink">{t.previewOnly}</span>
             </>
           ) : (
-            <span className="text-[11px] text-ink3">{t.adjustHint}</span>
+            <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.adjustHint}</span>
           )}
           <span className="flex-1" />
-          <span className="truncate text-[11.5px] text-ink3">
+          <span className="truncate text-[length:calc(11.5px*var(--fs))] text-ink3">
             {t.sheetLabel}: <b className="font-semibold text-ink2">{sheet.name}</b>
             <span className="tnum ml-2">
               {sheet.width}×{sheet.height}px

@@ -38,7 +38,7 @@ export default function Toast({ toast, onClose }: { toast: ToastData | null; onC
       data-testid="toast"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="fixed bottom-16 left-1/2 z-[65] flex max-w-[min(92vw,640px)] -translate-x-1/2 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-rule bg-card px-4 py-2.5 text-[13.5px] shadow-2xl lg:bottom-6"
+      className="fixed bottom-16 left-1/2 z-[65] flex max-w-[min(92vw,640px)] -translate-x-1/2 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-rule bg-card px-4 py-2.5 text-[length:calc(13.5px*var(--fs))] shadow-2xl lg:bottom-6"
     >
       <span className="min-w-0 flex-1 break-words">{toast.text}</span>
       {toast.actions?.map((a) => (
@@ -49,7 +49,7 @@ export default function Toast({ toast, onClose }: { toast: ToastData | null; onC
             a.onClick();
             onClose();
           }}
-          className="flex-none rounded-lg border border-accent bg-accentpale px-3 py-1 text-[13px] font-semibold text-accent hover:bg-accent hover:text-accentink"
+          className="flex-none rounded-lg border border-accent bg-accentpale px-3 py-1 text-[length:calc(13px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
         >
           {a.label}
         </button>
@@ -58,7 +58,7 @@ export default function Toast({ toast, onClose }: { toast: ToastData | null; onC
         onClick={onClose}
         aria-label={t.toastClose}
         title={t.toastClose}
-        className="flex-none rounded px-1.5 text-[15px] leading-none text-ink3 hover:text-ink"
+        className="flex-none rounded px-1.5 text-[length:calc(15px*var(--fs))] leading-none text-ink3 hover:text-ink"
       >
         ×
       </button>

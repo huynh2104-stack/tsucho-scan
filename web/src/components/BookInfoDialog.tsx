@@ -68,14 +68,14 @@ export default function BookInfoDialog({
       >
         <div className="flex flex-col gap-3 px-5 py-4">
           <div>
-            <h2 id="bi-title" className="text-[15px] font-bold">
+            <h2 id="bi-title" className="text-[length:calc(15px*var(--fs))] font-bold">
               {t.bookInfoTitle}
             </h2>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink2">{t.bookInfoHint}</p>
+            <p className="mt-1 text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">{t.bookInfoHint}</p>
           </div>
 
           {fields.map((f, i) => (
-            <label key={f.key} className="flex flex-col gap-1 text-[12.5px] font-medium text-ink2">
+            <label key={f.key} className="flex flex-col gap-1 text-[length:calc(12.5px*var(--fs))] font-medium text-ink2">
               {f.label}
               <input
                 ref={i === 0 ? first : undefined}
@@ -83,13 +83,13 @@ export default function BookInfoDialog({
                 maxLength={META_INPUT_MAX}
                 onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
                 data-field={f.key}
-                className="rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[14px] font-normal text-ink"
+                className="rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(14px*var(--fs))] font-normal text-ink"
               />
             </label>
           ))}
 
           {followers > 0 ? (
-            <label className="flex items-start gap-2 rounded-lg bg-card2 px-3 py-2 text-[12.5px] text-ink2">
+            <label className="flex items-start gap-2 rounded-lg bg-card2 px-3 py-2 text-[length:calc(12.5px*var(--fs))] text-ink2">
               <input
                 type="checkbox"
                 checked={propagate}
@@ -99,11 +99,11 @@ export default function BookInfoDialog({
               />
               <span>
                 <span className="font-medium text-ink">{t.biApply(followers)}</span>
-                <span className="block text-[11.5px] text-ink3">{t.biApplyHint}</span>
+                <span className="block text-[length:calc(11.5px*var(--fs))] text-ink3">{t.biApplyHint}</span>
               </span>
             </label>
           ) : (
-            <p className="text-[11.5px] text-ink3">{t.biApplyNone}</p>
+            <p className="text-[length:calc(11.5px*var(--fs))] text-ink3">{t.biApplyNone}</p>
           )}
         </div>
 
@@ -111,14 +111,14 @@ export default function BookInfoDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
+            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
           >
             {t.cancel}
           </button>
           <button
             type="submit"
             data-testid="bookinfo-save"
-            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110"
+            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
           >
             {t.biSave}
           </button>

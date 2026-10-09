@@ -88,7 +88,7 @@ function QField({
   const [rev, setRev] = useState(0);
   return (
     <label className={`flex flex-col gap-0.5 ${span}`}>
-      <span className="text-[12px] text-ink3">
+      <span className="text-[length:calc(12px*var(--fs))] text-ink3">
         <span className="font-semibold text-ink2">{label}</span> {gloss}
       </span>
       <input
@@ -120,7 +120,7 @@ function QField({
             e.stopPropagation();                      // Esc chỉ rời khỏi ô; Esc kế tiếp mới thoát chế độ
           }
         }}
-        className={`w-full rounded-lg border bg-card px-2.5 py-1.5 text-[18px] focus:border-accent focus:outline-none data-[invalid]:border-danger data-[invalid]:bg-danger/10 ${
+        className={`w-full rounded-lg border bg-card px-2.5 py-1.5 text-[length:calc(18px*var(--fs))] focus:border-accent focus:outline-none data-[invalid]:border-danger data-[invalid]:bg-danger/10 ${
           flagged ? "border-warnedge bg-warnbg" : "border-rule"
         } ${money ? "tnum text-right" : ""}`}
       />
@@ -291,7 +291,7 @@ export default function QuickReview({
         data-sug={field}
         title={t.dictSuggestTitle(right)}
         onClick={() => onAcceptSug(ref, field, right)}
-        className="self-start rounded-lg border border-accent/50 bg-accentpale px-2.5 py-1 text-[14px] font-semibold text-accent hover:bg-accent hover:text-accentink"
+        className="self-start rounded-lg border border-accent/50 bg-accentpale px-2.5 py-1 text-[length:calc(14px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
       >
         💡 {right}
       </button>
@@ -301,9 +301,9 @@ export default function QuickReview({
   return (
     <div data-testid="quick-review" className="flex h-full min-h-0 flex-col bg-page">
       <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule bg-card px-4 py-2.5">
-        <span className="rounded-md bg-accent px-2 py-0.5 text-[12px] font-bold text-accentink">▶ {t.qrTitle}</span>
+        <span className="rounded-md bg-accent px-2 py-0.5 text-[length:calc(12px*var(--fs))] font-bold text-accentink">▶ {t.qrTitle}</span>
         {row && sheet ? (
-          <span data-testid="quick-progress" className="tnum text-[13.5px] font-semibold">
+          <span data-testid="quick-progress" className="tnum text-[length:calc(13.5px*var(--fs))] font-semibold">
             {t.qrProgress(prog.k, prog.n, sheet.name)}
           </span>
         ) : null}
@@ -311,7 +311,7 @@ export default function QuickReview({
         <button
           data-testid="quick-exit"
           onClick={close}
-          className="rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 hover:border-accentmid hover:text-ink"
+          className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
         >
           {t.qrExit}
         </button>
@@ -330,7 +330,7 @@ export default function QuickReview({
             />
 
             {detail.explain.length > 0 && (
-              <p data-testid="quick-explain" className="text-[14.5px] font-medium text-warnink">
+              <p data-testid="quick-explain" className="text-[length:calc(14.5px*var(--fs))] font-medium text-warnink">
                 ⚠ {detail.explain.join(" · ")}
               </p>
             )}
@@ -354,7 +354,7 @@ export default function QuickReview({
               <p
                 data-testid="quick-calc"
                 data-diff={detail.calc.diff ?? ""}
-                className={`tnum rounded-lg border px-3 py-2 text-[15px] ${
+                className={`tnum rounded-lg border px-3 py-2 text-[length:calc(15px*var(--fs))] ${
                   detail.calc.diff === 0 ? "border-okedge bg-okbg text-okink" : "border-warnedge bg-warnbg text-warnink"
                 }`}
               >
@@ -367,15 +367,15 @@ export default function QuickReview({
           </div>
         ) : seen.size > 0 ? (
           <div data-testid="quick-done" className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-okedge bg-okbg p-5 text-okink">
-            <h2 className="text-[20px] font-bold">✓ {t.qrDoneTitle}</h2>
-            <p className="tnum text-[15px]">{t.qrDoneCount(seen.size)}</p>
+            <h2 className="text-[length:calc(20px*var(--fs))] font-bold">✓ {t.qrDoneTitle}</h2>
+            <p className="tnum text-[length:calc(15px*var(--fs))]">{t.qrDoneCount(seen.size)}</p>
             {breaks === 0 ? (
               <>
-                <p className="text-[16px] font-semibold">残高チェーン検証済</p>
-                <p className="text-[14.5px] leading-relaxed">{t.qrDoneChainOk}</p>
+                <p className="text-[length:calc(16px*var(--fs))] font-semibold">残高チェーン検証済</p>
+                <p className="text-[length:calc(14.5px*var(--fs))] leading-relaxed">{t.qrDoneChainOk}</p>
               </>
             ) : (
-              <p data-testid="quick-done-breaks" className="text-[14.5px] leading-relaxed text-warnink">
+              <p data-testid="quick-done-breaks" className="text-[length:calc(14.5px*var(--fs))] leading-relaxed text-warnink">
                 {t.qrDoneBreaks(breaks)}
               </p>
             )}
@@ -383,21 +383,21 @@ export default function QuickReview({
               <button
                 data-testid="quick-export"
                 onClick={onExport}
-                className="rounded-lg border border-accent bg-accent px-5 py-2.5 text-[15px] font-semibold text-accentink hover:brightness-110"
+                className="rounded-lg border border-accent bg-accent px-5 py-2.5 text-[length:calc(15px*var(--fs))] font-semibold text-accentink hover:brightness-110"
               >
                 {t.exportBtn}
               </button>
               <button
                 data-testid="quick-back"
                 onClick={close}
-                className="rounded-lg border border-rule bg-card px-4 py-2.5 text-[14px] text-ink2 hover:border-accentmid hover:text-ink"
+                className="rounded-lg border border-rule bg-card px-4 py-2.5 text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
               >
                 {t.qrBackToTable}
               </button>
             </div>
           </div>
         ) : (
-          <p data-testid="quick-empty" className="mx-auto max-w-3xl rounded-xl border border-rule bg-card p-4 text-[15px]">
+          <p data-testid="quick-empty" className="mx-auto max-w-3xl rounded-xl border border-rule bg-card p-4 text-[length:calc(15px*var(--fs))]">
             {t.qrNothing}
           </p>
         )}
@@ -410,7 +410,7 @@ export default function QuickReview({
             data-testid="quick-prev"
             onClick={() => go(-1)}
             disabled={pending.length < 2}
-            className="rounded-lg border border-rule px-3.5 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+            className="rounded-lg border border-rule px-3.5 py-2 text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
           >
             ← {t.qrPrev}
           </button>
@@ -418,7 +418,7 @@ export default function QuickReview({
             data-testid="quick-skip"
             onClick={() => go(1)}
             disabled={pending.length < 2}
-            className="rounded-lg border border-rule px-3.5 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+            className="rounded-lg border border-rule px-3.5 py-2 text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
           >
             {t.qrSkip} →
           </button>
@@ -426,7 +426,7 @@ export default function QuickReview({
           <button
             data-testid="quick-confirm"
             onClick={confirm}
-            className="rounded-lg border border-okink bg-okink px-5 py-2 text-[15px] font-semibold text-white hover:brightness-110"
+            className="rounded-lg border border-okink bg-okink px-5 py-2 text-[length:calc(15px*var(--fs))] font-semibold text-white hover:brightness-110"
           >
             ✓ {t.qrConfirm}
           </button>

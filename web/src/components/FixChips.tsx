@@ -14,14 +14,14 @@ export default function FixChips({ fixes, onApply }: { fixes: Fix[]; onApply: (f
   if (fixes.length === 0) return null;
   return (
     <div data-testid="quick-fixes" className="flex flex-wrap items-center gap-2">
-      <span className="text-[13px] text-ink3">{t.fixesLabel}</span>
+      <span className="text-[length:calc(13px*var(--fs))] text-ink3">{t.fixesLabel}</span>
       {fixes.map((f) => (
         <button
           key={f.kind}
           data-fix={f.kind}
           onClick={() => onApply(f)}
           title={t.fixesHint}
-          className="rounded-lg border border-accent/50 bg-accentpale px-3 py-1.5 text-[14px] font-semibold text-accent hover:bg-accent hover:text-accentink"
+          className="rounded-lg border border-accent/50 bg-accentpale px-3 py-1.5 text-[length:calc(14px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
         >
           {fixLabel(t, f)}
         </button>

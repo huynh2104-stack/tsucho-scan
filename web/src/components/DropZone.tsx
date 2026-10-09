@@ -42,10 +42,10 @@ export default function DropZone({
           <path d="M12 15.5V4m0 0L7.8 8.2M12 4l4.2 4.2" />
           <path d="M3.5 14.5v3.7A2.3 2.3 0 0 0 5.8 20.5h12.4a2.3 2.3 0 0 0 2.3-2.3v-3.7" />
         </svg>
-        <span className="text-[13.5px] font-semibold leading-snug">
+        <span className="text-[length:calc(13.5px*var(--fs))] font-semibold leading-snug">
           {t.dropTitle}
         </span>
-        <span className="text-[11px] leading-snug text-ink3">{t.dropHint}</span>
+        <span className="text-[length:calc(11px*var(--fs))] leading-snug text-ink3">{t.dropHint}</span>
       </button>
 
       <input

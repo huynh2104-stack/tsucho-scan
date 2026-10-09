@@ -16,11 +16,11 @@ export default function SheetBusy({ sheet, onDelete }: { sheet: Sheet; onDelete:
     <div className="canvas-bg flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
       {failed ? (
         <>
-          <p className="text-[15px] font-semibold text-danger">{t.stImportFailed}</p>
-          <p className="max-w-xs text-[12.5px] text-ink2">{t.importFailedMsg(sheet.error ?? "")}</p>
+          <p className="text-[length:calc(15px*var(--fs))] font-semibold text-danger">{t.stImportFailed}</p>
+          <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink2">{t.importFailedMsg(sheet.error ?? "")}</p>
           <button
             onClick={onDelete}
-            className="rounded-lg border border-danger/50 px-3 py-1.5 text-[12.5px] font-semibold text-danger hover:bg-danger/10"
+            className="rounded-lg border border-danger/50 px-3 py-1.5 text-[length:calc(12.5px*var(--fs))] font-semibold text-danger hover:bg-danger/10"
           >
             {t.deleteSheet}
           </button>
@@ -28,8 +28,8 @@ export default function SheetBusy({ sheet, onDelete }: { sheet: Sheet; onDelete:
       ) : (
         <>
           <span className="h-8 w-8 animate-spin rounded-full border-2 border-rule border-t-accent" aria-hidden />
-          <p className="text-[15px] font-semibold text-ink2">{t.sheetProcessing}</p>
-          <p className="max-w-xs text-[12.5px] text-ink3">{t.sheetProcessingHint}</p>
+          <p className="text-[length:calc(15px*var(--fs))] font-semibold text-ink2">{t.sheetProcessing}</p>
+          <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink3">{t.sheetProcessingHint}</p>
         </>
       )}
     </div>

@@ -64,7 +64,7 @@ function Th({
   return (
     <th
       style={width ? { width } : undefined}
-      className={`sticky top-0 whitespace-nowrap border-b border-rule bg-head px-2 py-2 text-[12px] font-semibold text-headink ${
+      className={`sticky top-0 whitespace-nowrap border-b border-rule bg-head px-2 py-2 text-[length:calc(12px*var(--fs))] font-semibold text-headink ${
         pinRight ? "right-0 z-20" : "z-10"
       } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"}`}
     >
@@ -283,7 +283,7 @@ function Cell({
         picked ? "bg-accent/25" : "bg-transparent"
       } ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""} ${
         money ? "tnum" : ""
-      } ${readOnly ? "tnum cursor-default text-[10.5px] text-ink3" : ""} ${tone ?? ""}`}
+      } ${readOnly ? "tnum cursor-default text-[length:calc(10.5px*var(--fs))] text-ink3" : ""} ${tone ?? ""}`}
     />
   );
 }
@@ -302,7 +302,7 @@ function SugChip({ field, right, title, onAccept }: { field: DictField; right: s
         e.stopPropagation();
         onAccept();
       }}
-      className="absolute right-1 top-1/2 z-[2] max-w-[1.9rem] -translate-y-1/2 overflow-hidden whitespace-nowrap rounded border border-accent/50 bg-accentpale px-1.5 py-0.5 text-[11px] font-semibold text-accent shadow-sm transition-[max-width] hover:max-w-[70%] hover:bg-accent hover:text-accentink focus:max-w-[70%] group-focus-within/c:max-w-[70%] group-hover/c:max-w-[70%]"
+      className="absolute right-1 top-1/2 z-[2] max-w-[1.9rem] -translate-y-1/2 overflow-hidden whitespace-nowrap rounded border border-accent/50 bg-accentpale px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-accent shadow-sm transition-[max-width] hover:max-w-[70%] hover:bg-accent hover:text-accentink focus:max-w-[70%] group-focus-within/c:max-w-[70%] group-hover/c:max-w-[70%]"
     >
       💡 {right}
     </button>
@@ -384,7 +384,7 @@ function Row({
         aria-label={t.restoreTitle(fmt(o[f]))}
         className={`absolute top-0 ${
           side === "l" ? "left-0" : "right-0"
-        } z-[1] flex h-4 w-4 items-center justify-center rounded border border-rule bg-card text-[11px] leading-none text-accent opacity-0 transition-opacity hover:bg-accentpale focus:opacity-100 group-hover/c:opacity-100`}
+        } z-[1] flex h-4 w-4 items-center justify-center rounded border border-rule bg-card text-[length:calc(11px*var(--fs))] leading-none text-accent opacity-0 transition-opacity hover:bg-accentpale focus:opacity-100 group-hover/c:opacity-100`}
       >
         ↺
       </button>
@@ -451,7 +451,7 @@ function Row({
         {restore("date")}
       </td>
       {cols.kind && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[12.5px]">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(12.5px*var(--fs))]">
           <Cell
             value={tx.kind ?? ""}
             field="kind"
@@ -545,7 +545,7 @@ function Row({
         {restore("balance", "l")}
       </td>
       {cols.store && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
           <Cell
             value={tx.store_code ?? ""}
             field="store_code"
@@ -556,7 +556,7 @@ function Row({
         </td>
       )}
       {cols.extra && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[11.5px] text-ink2">
+        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
           <Cell
             value={tx.extra_text ?? ""}
             field="extra_text"
@@ -567,7 +567,7 @@ function Row({
         </td>
       )}
       <td
-        className={`w-9 text-center text-[10.5px] font-bold ${
+        className={`w-9 text-center text-[length:calc(10.5px*var(--fs))] font-bold ${
           chk === "NG" ? "text-warnink" : chk === "OK" ? "text-inink" : "text-ink3"
         }`}
         title={tx.reason || undefined}
@@ -575,7 +575,7 @@ function Row({
         {chk}
       </td>
       <td
-        className="max-w-[140px] truncate px-2 py-0.5 text-[11px]"
+        className="max-w-[140px] truncate px-2 py-0.5 text-[length:calc(11px*var(--fs))]"
         title={[editTip, tx.reason].filter(Boolean).join("\n") || undefined}
       >
         {flag && memo && <span className="text-warnink">⚠ {memo}</span>}
@@ -608,7 +608,7 @@ function Row({
             title={confirmed ? t.rowUnconfirmTitle : `${t.rowConfirmTitle} (Ctrl+Enter)`}
             aria-label={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
             aria-pressed={confirmed}
-            className={`mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-[12px] font-bold leading-none transition-opacity ${
+            className={`mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-[length:calc(12px*var(--fs))] font-bold leading-none transition-opacity ${
               confirmed
                 ? "bg-okbg text-okink"
                 : flag
@@ -622,7 +622,7 @@ function Row({
         <button
           onClick={() => onDelete(ref_)}
           title={t.deleteRow}
-          className="inline-flex h-5 w-5 items-center justify-center rounded text-[13px] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-[length:calc(13px*var(--fs))] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
         >
           ×
         </button>
@@ -649,9 +649,9 @@ function LinkStrip({
 }) {
   if (link.status !== "ok" && link.status !== "break") return null;
   const box =
-    "mx-2.5 mt-2.5 flex h-8 flex-none items-center gap-2 overflow-hidden whitespace-nowrap rounded-lg border px-3 text-[11.5px]";
+    "mx-2.5 mt-2.5 flex h-8 flex-none items-center gap-2 overflow-hidden whitespace-nowrap rounded-lg border px-3 text-[length:calc(11.5px*var(--fs))]";
   const btn =
-    "flex-none rounded-md border border-rule bg-card px-2 py-0.5 text-[11px] font-semibold text-ink2 hover:border-accentmid hover:text-ink";
+    "flex-none rounded-md border border-rule bg-card px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-ink2 hover:border-accentmid hover:text-ink";
   if (link.status === "ok") {
     return (
       <div data-link="ok" className={`${box} border-rule2 bg-card2 text-ink3`}>
@@ -789,12 +789,12 @@ function AccountCard({
         {/* Chỉ đánh số khi MỘT mặt sổ chứa nhiều sổ khác nhau — nếu không, con
             số này nằm cạnh số thứ tự mặt sổ và gây nhầm hai thứ khác nhau. */}
         {ofTotal > 1 && (
-          <span className="tnum flex flex-none items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[10.5px] font-bold text-accentink">
+          <span className="tnum flex flex-none items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[length:calc(10.5px*var(--fs))] font-bold text-accentink">
             {t.accountNo(index + 1, ofTotal)}
           </span>
         )}
         <div className="min-w-0">
-        <p className="truncate text-[13.5px] font-bold">
+        <p className="truncate text-[length:calc(13.5px*var(--fs))] font-bold">
           {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt sổ
               thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang xem gì. */}
           {meta.bank_name || fallbackTitle}
@@ -803,32 +803,32 @@ function AccountCard({
           )}
         </p>
         {/* Tên file gốc + số trang — cho biết dòng này lấy từ đâu ra */}
-        <p className="truncate text-[10.5px] text-ink3">{sourceLabel}</p>
+        <p className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">{sourceLabel}</p>
         </div>
         <button
           data-act="edit-meta"
           onClick={() => onEditMeta(refs[0].sheet, refs[0].block)}
           title={t.bookInfoEdit}
           aria-label={t.bookInfoEdit}
-          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border border-rule text-[12px] text-ink3 hover:border-accent hover:bg-accentpale hover:text-accent"
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border border-rule text-[length:calc(12px*var(--fs))] text-ink3 hover:border-accent hover:bg-accentpale hover:text-accent"
         >
           ✎
         </button>
         <span className="flex-1" />
         {q && (
-          <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[11px] font-semibold text-accent">
+          <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-accent">
             {t.matched(counted.length)}
           </span>
         )}
         {needCheck > 0 && (
-          <span className="tnum rounded-md bg-warnbg px-2 py-0.5 text-[11px] font-semibold text-warnink">
+          <span className="tnum rounded-md bg-warnbg px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-warnink">
             {t.stNeedCheck(needCheck)}
           </span>
         )}
       </header>
 
       <div className="thin-scroll overflow-x-auto">
-        <table className="w-full border-collapse text-[13.5px]">
+        <table className="w-full border-collapse text-[length:calc(13.5px*var(--fs))]">
           {head}
           <tbody>
             {rows.map((tx, i) => (
@@ -869,7 +869,7 @@ function AccountCard({
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-card2 px-3 py-2">
         <button
           onClick={() => insertAfter && onAddRow(insertAfter)}
-          className="rounded-lg border border-dashed border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accent hover:text-accent"
+          className="rounded-lg border border-dashed border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accent hover:text-accent"
           title={t.addRowHint}
         >
           + {t.addRow}
@@ -877,7 +877,7 @@ function AccountCard({
         <button
           onClick={() => onAutoBalance(refs[0].sheet, refs[0].block)}
           title={t.autoBalanceHint}
-          className="rounded-lg border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink"
+          className="rounded-lg border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
         >
           {t.autoBalance}
         </button>
@@ -886,19 +886,19 @@ function AccountCard({
           onClick={() => onConfirmAll(refs[0].sheet, refs[0].block)}
           disabled={allConfirmed}
           title={t.confirmAllHint}
-          className="rounded-lg border border-okink/40 px-2 py-1 text-[11.5px] font-medium text-okink hover:bg-okbg disabled:opacity-40 disabled:hover:bg-transparent"
+          className="rounded-lg border border-okink/40 px-2 py-1 text-[length:calc(11.5px*var(--fs))] font-medium text-okink hover:bg-okbg disabled:opacity-40 disabled:hover:bg-transparent"
         >
           ✓ {ofTotal > 1 ? t.confirmAllBook : t.confirmAll}
         </button>
         <span className="flex-1" />
-        <span className="tnum text-[11.5px] text-ink3">
+        <span className="tnum text-[length:calc(11.5px*var(--fs))] text-ink3">
           {t.totalOut} <b className="text-outink">¥{yen(totalOut)}</b>
         </span>
-        <span className="tnum text-[11.5px] text-ink3">
+        <span className="tnum text-[length:calc(11.5px*var(--fs))] text-ink3">
           {t.totalIn} <b className="text-inink">¥{yen(totalIn)}</b>
         </span>
         {!q && (
-          <span className="tnum rounded-md bg-card3 px-2 py-0.5 text-[11.5px] text-ink2">
+          <span className="tnum rounded-md bg-card3 px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
             {t.lastBalance} <b className="text-ink">¥{yen(lastBal ?? null)}</b>
           </span>
         )}
@@ -1177,8 +1177,8 @@ export default function ReviewPane({
   if (scanned.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-[15px] font-semibold text-ink2">{t.reviewEmpty}</p>
-        <p className="max-w-xs text-[12.5px] text-ink3">{t.reviewEmptyHint}</p>
+        <p className="text-[length:calc(15px*var(--fs))] font-semibold text-ink2">{t.reviewEmpty}</p>
+        <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink3">{t.reviewEmptyHint}</p>
       </div>
     );
   }
@@ -1188,13 +1188,13 @@ export default function ReviewPane({
       {/* Đầu cột */}
       <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-card px-3 py-2">
         <div className="min-w-0">
-          <p className="text-[13.5px] font-bold">
+          <p className="text-[length:calc(13.5px*var(--fs))] font-bold">
             {t.reviewTitle}
             <span className="tnum ml-1.5 font-normal text-ink3">
               ({totalRows} {t.rowsShort})
             </span>
           </p>
-          <p className="text-[11px] text-ink3">{t.reviewSubtitle}</p>
+          <p className="text-[length:calc(11px*var(--fs))] text-ink3">{t.reviewSubtitle}</p>
         </div>
 
         <span className="flex-1" />
@@ -1203,7 +1203,7 @@ export default function ReviewPane({
           <button
             onClick={() => onModeChange("page")}
             aria-pressed={mode === "page"}
-            className={`px-2.5 py-1.5 text-[12px] ${
+            className={`px-2.5 py-1.5 text-[length:calc(12px*var(--fs))] ${
               mode === "page"
                 ? "bg-accent font-semibold text-accentink"
                 : "bg-card text-ink2 hover:bg-card2"
@@ -1214,7 +1214,7 @@ export default function ReviewPane({
           <button
             onClick={() => onModeChange("list")}
             aria-pressed={mode === "list"}
-            className={`border-l border-rule px-2.5 py-1.5 text-[12px] ${
+            className={`border-l border-rule px-2.5 py-1.5 text-[length:calc(12px*var(--fs))] ${
               mode === "list"
                 ? "bg-accent font-semibold text-accentink"
                 : "bg-card text-ink2 hover:bg-card2"
@@ -1235,17 +1235,17 @@ export default function ReviewPane({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder={t.filterPlaceholder}
-          className="min-w-0 flex-1 rounded-md border border-rule bg-card px-2 py-1 text-[12.5px] placeholder:text-ink3"
+          className="min-w-0 flex-1 rounded-md border border-rule bg-card px-2 py-1 text-[length:calc(12.5px*var(--fs))] placeholder:text-ink3"
         />
         {filter && (
           <button
             onClick={() => setFilter("")}
-            className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:text-ink"
+            className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:text-ink"
           >
             {t.filterClear}
           </button>
         )}
-        <span className="text-[10.5px] text-ink3">{t.filterNote}</span>
+        <span className="text-[length:calc(10.5px*var(--fs))] text-ink3">{t.filterNote}</span>
       </div>
 
       {/* Thân cột — CHÍNH khung này cuộn */}
@@ -1259,9 +1259,9 @@ export default function ReviewPane({
       >
         {mode === "page" ? (
           !activeSheet ? (
-            <p className="p-4 text-[12.5px] text-ink3">{t.pickSheetForPage}</p>
+            <p className="p-4 text-[length:calc(12.5px*var(--fs))] text-ink3">{t.pickSheetForPage}</p>
           ) : !store[activeSheet]?.blocks?.length ? (
-            <p className="p-4 text-[12.5px] text-ink3">
+            <p className="p-4 text-[length:calc(12.5px*var(--fs))] text-ink3">
               {t.sheetNoResult(sheetName[activeSheet] ?? activeSheet)}
             </p>
           ) : (
@@ -1272,7 +1272,7 @@ export default function ReviewPane({
             {scanned.map((s, si) => (
               <section key={s.id} data-sheet={s.id}>
                 <h3
-                  className={`sticky top-0 z-20 flex items-center gap-2 border-y border-rule px-3 py-1.5 text-[12px] font-semibold ${
+                  className={`sticky top-0 z-20 flex items-center gap-2 border-y border-rule px-3 py-1.5 text-[length:calc(12px*var(--fs))] font-semibold ${
                     activeSheet === s.id ? "bg-accentpale text-ink" : "bg-card3 text-ink2"
                   }`}
                 >
@@ -1295,7 +1295,7 @@ export default function ReviewPane({
 
       {/* Chân cột: cột phụ + nhắc sửa được */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-rule bg-card px-3 py-1.5">
-        <span className="text-[11px] uppercase tracking-wider text-ink3">
+        <span className="text-[length:calc(11px*var(--fs))] uppercase tracking-wider text-ink3">
           {t.optionalCols}
         </span>
         {(
@@ -1309,7 +1309,7 @@ export default function ReviewPane({
             key={c.key}
             onClick={() => onToggleCol(c.key)}
             aria-pressed={cols[c.key]}
-            className={`rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors ${
+            className={`rounded-md border px-1.5 py-0.5 text-[length:calc(11.5px*var(--fs))] transition-colors ${
               cols[c.key]
                 ? "border-accent bg-accentpale text-accent"
                 : "border-rule bg-card text-ink3 hover:text-ink"
@@ -1320,13 +1320,13 @@ export default function ReviewPane({
         ))}
         <span className="flex-1" />
         {pickedCount > 0 ? (
-          <span className="rounded-md bg-accentpale px-2 py-0.5 text-[11.5px] font-semibold text-accent">
+          <span className="rounded-md bg-accentpale px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold text-accent">
             {t.pickedCells(pickedCount)}
           </span>
         ) : (
-          <span className="text-[11px] text-ink3">{t.dragCopyHint}</span>
+          <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.dragCopyHint}</span>
         )}
-        <span className="text-[11px] text-ink3">{t.editableHint}</span>
+        <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.editableHint}</span>
       </div>
 
       {metaTarget && store[metaTarget.sheet]?.blocks[metaTarget.block] && (

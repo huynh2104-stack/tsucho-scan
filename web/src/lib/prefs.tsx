@@ -25,7 +25,7 @@ import {
 import { getPrefs, putPrefs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useT, type Lang } from "@/lib/i18n";
-import { DEFAULT_PREFS, mergePrefs, type Prefs } from "@/lib/prefs-defaults";
+import { DEFAULT_PREFS, FONT_SCALE_KEY, mergePrefs, type Prefs } from "@/lib/prefs-defaults";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 
 export type { Prefs };
@@ -91,6 +91,19 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
       live = false;
     };
   }, [userId]);
+
+  // Cỡ chữ lớn (3.4): chỉ áp khi ĐÃ nạp cài đặt thật — nạp chưa xong mà áp mặc định 1 thì chữ nhảy về cỡ chuẩn một nhịp.
+  // Nhớ ở localStorage để lần mở sau script ở layout.tsx đặt đúng ngay từ khung hình đầu.
+  const fontScale = prefs.fontScale;
+  useEffect(() => {
+    if (!loaded) return;
+    document.documentElement.style.setProperty("--fs", String(fontScale));
+    try {
+      localStorage.setItem(FONT_SCALE_KEY, String(fontScale));
+    } catch {
+      /* trình duyệt chặn localStorage: chỉ mất việc nhớ cho lần mở sau */
+    }
+  }, [loaded, fontScale]);
 
   const update = useCallback(
     (patch: Partial<Prefs>) => {

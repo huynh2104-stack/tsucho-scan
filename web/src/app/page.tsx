@@ -1281,7 +1281,7 @@ export default function Workbench() {
   // (Đặt SAU mọi hook: React cấm số lượng hook thay đổi giữa các lần render.)
   if (!ready || !user) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-[14px] text-ink2">
+      <div className="flex flex-1 items-center justify-center p-6 text-[length:calc(14px*var(--fs))] text-ink2">
         {t.authChecking}
       </div>
     );
@@ -1320,13 +1320,13 @@ export default function Workbench() {
         <p
           role="alert"
           aria-live="assertive"
-          className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[13px] text-danger"
+          className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[length:calc(13px*var(--fs))] text-danger"
         >
           {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
           <span>{errText(err)}</span>
           <button
             onClick={() => setErr(null)}
-            className="ml-auto flex-none text-[15px] leading-none hover:opacity-70"
+            className="ml-auto flex-none text-[length:calc(15px*var(--fs))] leading-none hover:opacity-70"
             aria-label={t.cancel}
           >
             ×
@@ -1361,7 +1361,7 @@ export default function Workbench() {
                 }
               }}
             />
-            <span className="text-[11.5px] leading-snug text-ink2">✨ {t.autoPrepToggle}</span>
+            <span className="text-[length:calc(11.5px*var(--fs))] leading-snug text-ink2">✨ {t.autoPrepToggle}</span>
           </div>
 
           {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
@@ -1386,10 +1386,10 @@ export default function Workbench() {
                   })();
                 }}
                 disabled={busy}
-                className="w-full rounded-lg border border-dashed border-accent bg-accentpale/40 px-3 py-2 text-[12.5px] font-semibold text-accent hover:bg-accentpale disabled:opacity-50"
+                className="w-full rounded-lg border border-dashed border-accent bg-accentpale/40 px-3 py-2 text-[length:calc(12.5px*var(--fs))] font-semibold text-accent hover:bg-accentpale disabled:opacity-50"
               >
                 ✨ {t.trySample}
-                <span className="mt-0.5 block text-[10.5px] font-normal text-ink3">
+                <span className="mt-0.5 block text-[length:calc(10.5px*var(--fs))] font-normal text-ink3">
                   {t.trySampleHint}
                 </span>
               </button>
@@ -1404,7 +1404,7 @@ export default function Workbench() {
                 setTicked(allTicked ? new Set() : new Set(sheets.map((s) => s.id)))
               }
             />
-            <span className="tnum whitespace-nowrap text-[12px] font-semibold">
+            <span className="tnum whitespace-nowrap text-[length:calc(12px*var(--fs))] font-semibold">
               {t.chosen(ticked.size)}
             </span>
             <span className="flex-1" />
@@ -1442,7 +1442,7 @@ export default function Workbench() {
               <button
                 onClick={() => void runAutoprep()}
                 title={t.autoPrepBtn}
-                className="rounded-md px-1 py-1 text-[13px] leading-none hover:bg-accentpale/70"
+                className="rounded-md px-1 py-1 text-[length:calc(13px*var(--fs))] leading-none hover:bg-accentpale/70"
               >
                 ✨
               </button>
@@ -1451,7 +1451,7 @@ export default function Workbench() {
               data-tour="scan"
               onClick={() => void runScan(tickedIds())}
               disabled={scanning || ticked.size === 0}
-              className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-accent bg-accent px-2.5 py-1 text-[12px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
+              className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-accent bg-accent px-2.5 py-1 text-[length:calc(12px*var(--fs))] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
             >
               {scanning ? (
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
@@ -1510,7 +1510,7 @@ export default function Workbench() {
             />
           </div>
 
-          <div className="flex items-center gap-2 border-t border-rule bg-card2 px-3 py-1.5 text-[10.5px] text-ink3">
+          <div className="flex items-center gap-2 border-t border-rule bg-card2 px-3 py-1.5 text-[length:calc(10.5px*var(--fs))] text-ink3">
             <span className="tnum">{t.totalSheets(sheets.length)}</span>
             <span className="flex-1" />
             <span>{t.shiftHint}</span>
@@ -1613,7 +1613,7 @@ export default function Workbench() {
                 onClick={undoEdit}
                 disabled={hist.past.length === 0}
                 title={`${t.undoEditLabel} (Ctrl+Z)`}
-                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
                 ↶ {t.undoEditLabel}
                 {hist.past.length > 0 && (
@@ -1624,7 +1624,7 @@ export default function Workbench() {
                 onClick={redoEdit}
                 disabled={hist.future.length === 0}
                 title={`${t.redoEditLabel} (Ctrl+Y)`}
-                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
                 ↷ {t.redoEditLabel}
               </button>
@@ -1635,12 +1635,12 @@ export default function Workbench() {
                 onClick={() => jumpBad(1)}
                 disabled={badCount === 0}
                 title={t.nextBadHint}
-                className="rounded-md border border-rule px-2 py-1 text-[11.5px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
+                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
               >
-                {t.nextBad} <kbd className="ml-0.5 rounded border border-rule px-1 text-[10px]">n</kbd>
+                {t.nextBad} <kbd className="ml-0.5 rounded border border-rule px-1 text-[length:calc(10px*var(--fs))]">n</kbd>
               </button>
               <span
-                className={`tnum rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${
+                className={`tnum rounded-md px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold ${
                   badCount > 0
                     ? "bg-warnbg text-warnink"
                     : "bg-okbg text-okink"
@@ -1656,7 +1656,7 @@ export default function Workbench() {
                     setQuickOpen(true);
                   }}
                   title={t.qrStartHint}
-                  className="tnum rounded-md border border-accent bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-accentink hover:brightness-110"
+                  className="tnum rounded-md border border-accent bg-accent px-2.5 py-1 text-[length:calc(11.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
                 >
                   ▶ {t.qrStart(totalNeed)}
                 </button>
@@ -1672,7 +1672,7 @@ export default function Workbench() {
                     data-links-badge
                     onClick={goFirstBreak}
                     title={t.linksBadgeHint(alarms.length)}
-                    className="tnum flex-none rounded-md bg-warnbg px-2 py-0.5 text-[11.5px] font-semibold text-warnink hover:brightness-95"
+                    className="tnum flex-none rounded-md bg-warnbg px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold text-warnink hover:brightness-95"
                   >
                     {t.linksBadge(alarms.length)}
                   </button>
@@ -1680,7 +1680,7 @@ export default function Workbench() {
                 {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng đã lưu, nên nói rõ ra. */}
                 {saveState !== "idle" && (
                   <span
-                    className={`flex-none text-[10.5px] ${
+                    className={`flex-none text-[length:calc(10.5px*var(--fs))] ${
                       saveState === "error" ? "font-semibold text-danger" : "text-ink3"
                     }`}
                   >
@@ -1692,12 +1692,12 @@ export default function Workbench() {
                   </span>
                 )}
                 {highlight && (
-                  <span className="truncate text-[10.5px] text-ink3">
+                  <span className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">
                     {highlight.method === "content" ? t.rowLinkExact : t.rowLinkEstimated}
                   </span>
                 )}
                 {selRow?.sheet === active && !highlight && anchorRows !== "[]" && (
-                  <span role="status" className="truncate text-[10.5px] text-ink3">
+                  <span role="status" className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">
                     {mappedRows?.key === rowMapKey ? t.rowLinkUnavailable : t.rowLinkLoading}
                   </span>
                 )}
@@ -1771,13 +1771,13 @@ export default function Workbench() {
               }
               onBlur={(e) => ws && void renameBook(ws.id, e.target.value)}
               placeholder={t.bookNamePlaceholder}
-              className="min-w-0 flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[13px] placeholder:text-ink3"
+              className="min-w-0 flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] placeholder:text-ink3"
             />
             <button
               data-tour="export"
               onClick={() => setShowExport(true)}
               disabled={Object.keys(store).length === 0}
-              className="flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M12 4v11m0 0-4-4m4 4 4-4" />
@@ -1804,7 +1804,7 @@ export default function Workbench() {
             key={p.id}
             onClick={() => setPane(p.id)}
             aria-current={pane === p.id}
-            className={`flex flex-1 items-center justify-center gap-1.5 border-t-2 py-2.5 text-[13px] ${
+            className={`flex flex-1 items-center justify-center gap-1.5 border-t-2 py-2.5 text-[length:calc(13px*var(--fs))] ${
               pane === p.id
                 ? "border-accent font-semibold text-accent"
                 : "border-transparent text-ink2"
@@ -1812,7 +1812,7 @@ export default function Workbench() {
           >
             {p.label}
             {p.n > 0 && (
-              <span className="tnum rounded bg-card3 px-1.5 text-[11px] text-ink3">
+              <span className="tnum rounded bg-card3 px-1.5 text-[length:calc(11px*var(--fs))] text-ink3">
                 {p.n}
               </span>
             )}
@@ -1821,7 +1821,7 @@ export default function Workbench() {
       </nav>
 
       {/* Giới hạn công cụ — không bao giờ giấu (WEB_PLAN §7.4-5) */}
-      <p className="flex items-start gap-2 border-t border-rule bg-card px-4 py-1.5 text-[11.5px] text-ink2">
+      <p className="flex items-start gap-2 border-t border-rule bg-card px-4 py-1.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
         <span className="font-bold text-accent">!</span>
         {t.caveat}
       </p>

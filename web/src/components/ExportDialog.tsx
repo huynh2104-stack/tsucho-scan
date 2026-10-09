@@ -45,7 +45,7 @@ function Choice({
           : "border-rule bg-card hover:border-accentmid"
       }`}
     >
-      <span className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+      <span className="flex items-center gap-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold">
         <span
           className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border ${
             checked ? "border-accent bg-accent" : "border-rule"
@@ -55,7 +55,7 @@ function Choice({
         </span>
         {title}
       </span>
-      {hint && <span className="pl-5 text-[11.5px] text-ink3">{hint}</span>}
+      {hint && <span className="pl-5 text-[length:calc(11.5px*var(--fs))] text-ink3">{hint}</span>}
     </button>
   );
 }
@@ -136,10 +136,10 @@ export default function ExportDialog({
         className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
       >
         <header className="flex-none border-b border-rule px-5 py-3">
-          <h2 id="exp-title" className="text-[16px] font-bold">
+          <h2 id="exp-title" className="text-[length:calc(16px*var(--fs))] font-bold">
             {t.exportTitle}
           </h2>
-          <p className="text-[12.5px] text-ink3">{t.exportSubtitle}</p>
+          <p className="text-[length:calc(12.5px*var(--fs))] text-ink3">{t.exportSubtitle}</p>
         </header>
 
         {/* Chỉ phần THÂN cuộn: nút Xuất ở chân luôn nằm trong tầm mắt dù hộp cao hơn màn hình (3 cách trình bày + tóm tắt) */}
@@ -148,11 +148,11 @@ export default function ExportDialog({
           <section
             data-export-summary
             data-issues={issues ? "yes" : "no"}
-            className={`rounded-lg border px-3 py-2 text-[12.5px] ${
+            className={`rounded-lg border px-3 py-2 text-[length:calc(12.5px*var(--fs))] ${
               issues ? "border-warnedge bg-warnbg text-warnink" : "border-okedge bg-okbg text-okink"
             }`}
           >
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider opacity-80">{t.sumTitle}</h3>
+            <h3 className="text-[length:calc(11px*var(--fs))] font-semibold uppercase tracking-wider opacity-80">{t.sumTitle}</h3>
             {issues ? (
               <>
                 <ul className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -171,7 +171,7 @@ export default function ExportDialog({
                     </li>
                   ))}
                 </ul>
-                <p className="mt-1 text-[11.5px] opacity-80">{t.sumHint}</p>
+                <p className="mt-1 text-[length:calc(11.5px*var(--fs))] opacity-80">{t.sumHint}</p>
               </>
             ) : (
               <p data-sum-ok className="mt-1 font-medium">
@@ -182,7 +182,7 @@ export default function ExportDialog({
 
           {/* 1. Định dạng */}
           <section className="flex flex-col gap-1.5">
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
+            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
               1. {t.expFormat}
             </h3>
             <div className="flex gap-2">
@@ -203,7 +203,7 @@ export default function ExportDialog({
 
           {/* 2. Phạm vi */}
           <section className="flex flex-col gap-1.5">
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
+            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
               2. {t.expScope}
             </h3>
             <div className="flex flex-col gap-1.5">
@@ -230,7 +230,7 @@ export default function ExportDialog({
 
           {/* 3. Cấu trúc — CSV chỉ có một bảng nên khoá lại */}
           <section className="flex flex-col gap-1.5">
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
+            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
               3. {t.expStructure}
             </h3>
             <div className="flex flex-col gap-1.5">
@@ -254,7 +254,7 @@ export default function ExportDialog({
               />
             </div>
 
-            <label className="mt-1 flex cursor-pointer items-center gap-2 text-[13px] text-ink2">
+            <label className="mt-1 flex cursor-pointer items-center gap-2 text-[length:calc(13px*var(--fs))] text-ink2">
               <input
                 type="checkbox"
                 checked={opts.add_total}
@@ -267,7 +267,7 @@ export default function ExportDialog({
 
           {/* Tên file */}
           <section className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
+            <label className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
               {t.expFileName}
             </label>
             <div className="flex items-center gap-2">
@@ -275,9 +275,9 @@ export default function ExportDialog({
                 value={opts.name}
                 onChange={(e) => set("name", e.target.value)}
                 placeholder={t.bookNamePlaceholder}
-                className="flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[14px]"
+                className="flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(14px*var(--fs))]"
               />
-              <span className="text-[13px] text-ink3">.{opts.format}</span>
+              <span className="text-[length:calc(13px*var(--fs))] text-ink3">.{opts.format}</span>
             </div>
           </section>
 
@@ -286,14 +286,14 @@ export default function ExportDialog({
         <footer className="flex flex-none items-center justify-end gap-2 border-t border-rule px-5 py-3">
           <button
             onClick={onCancel}
-            className="rounded-lg border border-rule px-4 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink"
+            className="rounded-lg border border-rule px-4 py-2 text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
           >
             {t.cancel}
           </button>
           <button
             onClick={() => onExport(opts)}
             disabled={busy}
-            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[14px] font-semibold text-white hover:brightness-110 disabled:opacity-45"
+            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[length:calc(14px*var(--fs))] font-semibold text-white hover:brightness-110 disabled:opacity-45"
           >
             {busy ? t.expWorking : issues ? t.expAnyway : t.expDownload}
           </button>

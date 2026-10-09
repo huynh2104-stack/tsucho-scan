@@ -162,7 +162,7 @@ export default function CasesPage() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold tracking-tight">{t.casesTitle}</h1>
-            <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-ink2">{t.casesSubtitle}</p>
+            <p className="mt-1 max-w-2xl text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{t.casesSubtitle}</p>
           </div>
           <button
             data-testid="case-new"
@@ -170,7 +170,7 @@ export default function CasesPage() {
               setNewName("");
               setCreating(true);
             }}
-            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[13.5px] font-semibold text-accentink hover:brightness-110"
+            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
           >
             {t.casesNew}
           </button>
@@ -184,7 +184,7 @@ export default function CasesPage() {
                 role="tab"
                 aria-selected={archivedTab === arch}
                 onClick={() => setArchivedTab(arch)}
-                className={`border-r border-rule px-3.5 py-1.5 text-[13px] last:border-r-0 ${
+                className={`border-r border-rule px-3.5 py-1.5 text-[length:calc(13px*var(--fs))] last:border-r-0 ${
                   archivedTab === arch
                     ? "bg-accent font-semibold text-white"
                     : "bg-card text-ink2 hover:bg-accentpale hover:text-ink"
@@ -201,18 +201,18 @@ export default function CasesPage() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t.casesSearch}
             aria-label={t.casesSearch}
-            className="min-w-[200px] flex-1 rounded-lg border border-rule bg-card px-3 py-1.5 text-[13.5px] placeholder:text-ink3"
+            className="min-w-[200px] flex-1 rounded-lg border border-rule bg-card px-3 py-1.5 text-[length:calc(13.5px*var(--fs))] placeholder:text-ink3"
           />
         </div>
 
         {failed && (
-          <p className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[13px] text-warnink" role="alert">
+          <p className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[length:calc(13px*var(--fs))] text-warnink" role="alert">
             {t.casesLoadFail}
           </p>
         )}
 
         {empty && !failed && (
-          <p className="rounded-xl border border-dashed border-rule px-4 py-10 text-center text-[13.5px] text-ink3">
+          <p className="rounded-xl border border-dashed border-rule px-4 py-10 text-center text-[length:calc(13.5px*var(--fs))] text-ink3">
             {query.trim() && (list?.length ?? 0) > 0
               ? t.casesNoMatch
               : archivedTab
@@ -251,38 +251,38 @@ export default function CasesPage() {
                         }}
                         placeholder={t.casesNamePlaceholder}
                         aria-label={t.casesNamePlaceholder}
-                        className="min-w-0 flex-1 rounded-lg border border-accent bg-card px-2 py-1 text-[15px] font-semibold"
+                        className="min-w-0 flex-1 rounded-lg border border-accent bg-card px-2 py-1 text-[length:calc(15px*var(--fs))] font-semibold"
                       />
                     ) : (
                       <span
                         onDoubleClick={() => startRename(c)}
                         title={t.casesRename}
                         data-testid="case-name"
-                        className="min-w-0 truncate text-[15px] font-semibold"
+                        className="min-w-0 truncate text-[length:calc(15px*var(--fs))] font-semibold"
                       >
                         {c.book_name || <span className="font-normal text-ink3">{t.casesUntitled}</span>}
                       </span>
                     )}
                     {c.id === currentId && (
-                      <span className="flex-none rounded bg-accentpale px-1.5 py-px text-[10.5px] font-bold text-accent">
+                      <span className="flex-none rounded bg-accentpale px-1.5 py-px text-[length:calc(10.5px*var(--fs))] font-bold text-accent">
                         {t.casesCurrent}
                       </span>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[length:calc(12px*var(--fs))] text-ink3">
                     <span>{t.casesCreated(fmt(c.created_at))}</span>
                     <span>{t.casesUpdated(fmt(c.updated_at))}</span>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-ink2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[length:calc(12.5px*var(--fs))] text-ink2">
                   <span className="tnum">{t.casesSheets(c.sheets)}</span>
                   {st.kind !== "empty" && <span className="tnum">{t.casesRows(c.rows)}</span>}
                   {st.kind === "empty" && <span className="text-ink3">{t.casesNoResult}</span>}
                   {st.kind === "done" && (
                     <span
                       data-testid="case-status"
-                      className="rounded border border-okedge bg-okbg px-2 py-0.5 text-[12px] font-semibold text-okink"
+                      className="rounded border border-okedge bg-okbg px-2 py-0.5 text-[length:calc(12px*var(--fs))] font-semibold text-okink"
                     >
                       {t.casesAllReviewed}
                     </span>
@@ -290,7 +290,7 @@ export default function CasesPage() {
                   {st.kind === "todo" && (
                     <span
                       data-testid="case-status"
-                      className="tnum rounded border border-warnedge bg-warnbg px-2 py-0.5 text-[12px] font-semibold text-warnink"
+                      className="tnum rounded border border-warnedge bg-warnbg px-2 py-0.5 text-[length:calc(12px*var(--fs))] font-semibold text-warnink"
                     >
                       {t.casesLeft(st.left)}
                     </span>
@@ -301,7 +301,7 @@ export default function CasesPage() {
                   <Link
                     href={`/?ws=${c.id}`}
                     data-testid="case-open"
-                    className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[13px] font-semibold text-accentink no-underline hover:brightness-110"
+                    className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13px*var(--fs))] font-semibold text-accentink no-underline hover:brightness-110"
                   >
                     {t.casesOpen}
                   </Link>
@@ -309,21 +309,21 @@ export default function CasesPage() {
                     onClick={() => startRename(c)}
                     title={t.casesRename}
                     aria-label={t.casesRename}
-                    className="rounded-lg border border-rule px-2.5 py-1.5 text-[13px] text-ink2 hover:border-accentmid hover:text-ink"
+                    className="rounded-lg border border-rule px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
                   >
                     ✎
                   </button>
                   <button
                     onClick={() => void toggleArchive(c)}
                     data-testid="case-archive"
-                    className="rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 hover:border-accentmid hover:text-ink"
+                    className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
                   >
                     {c.archived ? t.casesUnarchive : t.casesArchive}
                   </button>
                   <button
                     onClick={() => setToDelete(c)}
                     data-testid="case-delete"
-                    className="rounded-lg border border-rule px-3 py-1.5 text-[13px] text-danger hover:border-danger"
+                    className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] text-danger hover:border-danger"
                   >
                     {t.casesDelete}
                   </button>
@@ -353,10 +353,10 @@ export default function CasesPage() {
             className="w-full max-w-sm overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
           >
             <div className="flex flex-col gap-2 px-5 py-4">
-              <h2 id="newcase-title" className="text-[15px] font-bold">
+              <h2 id="newcase-title" className="text-[length:calc(15px*var(--fs))] font-bold">
                 {t.casesNewTitle}
               </h2>
-              <p className="text-[13px] leading-relaxed text-ink2">{t.casesNewHint}</p>
+              <p className="text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{t.casesNewHint}</p>
               <input
                 ref={newRef}
                 value={newName}
@@ -365,7 +365,7 @@ export default function CasesPage() {
                 placeholder={t.casesNamePlaceholder}
                 aria-label={t.casesNamePlaceholder}
                 data-testid="case-new-name"
-                className="rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[14px] placeholder:text-ink3"
+                className="rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(14px*var(--fs))] placeholder:text-ink3"
               />
             </div>
             <div className="flex justify-end gap-2 border-t border-rule bg-card2 px-5 py-3">
@@ -373,7 +373,7 @@ export default function CasesPage() {
                 type="button"
                 onClick={() => setCreating(false)}
                 disabled={busy}
-                className="rounded-lg border border-rule px-3.5 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
+                className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
               >
                 {t.cancel}
               </button>
@@ -381,7 +381,7 @@ export default function CasesPage() {
                 type="submit"
                 disabled={busy}
                 data-testid="case-create"
-                className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110 disabled:opacity-50"
+                className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110 disabled:opacity-50"
               >
                 {t.casesCreate}
               </button>

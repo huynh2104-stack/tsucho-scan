@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.3 (09/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **25/25 bước** (~65 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.4 (10/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **26/26 bước** (~65 s; cả kịch bản ở `--font-scale 1.3` cũng 26/26).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1051,7 +1051,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 3.1 Cài đặt người dùng (xong 09/10/2026)
 - [x] 3.2 Chế độ soát nhanh — **mốc demo B** (xong 09/10/2026)
 - [x] 3.3 Từ điển sửa lỗi (xong 09/10/2026)
-- [ ] 3.4 Cỡ chữ lớn
+- [x] 3.4 Cỡ chữ lớn (xong 10/10/2026)
 - [ ] 3.5 Bảng mượt
 - [ ] 4.1 Quét song song
 - [ ] 4.2 F5 theo dõi tiếp
@@ -1260,6 +1260,14 @@ Quan sát khi viết E2E (không sửa):
 - **Web**: `lib/corrections.ts` (thuần: `wrongKey`, `suggestFor`, `similarRows`, `learnableEdit`, `applyToRows`, `autoApplyAll`; 14 test, bẻ thử 12 chỗ → đỏ cả 12), `lib/corrections-provider.tsx` (tải từ điển MỘT lần, so khớp ở trình duyệt nên học xong là dòng giống sáng ngay), `components/Toast.tsx`. **Gợi ý** (`dictMode` = «chỉ gợi ý», mặc định): nút 💡 đáp án ở ô 摘要/区分 (lúc thường chỉ lộ biểu tượng cho khỏi che chữ máy đọc, rê chuột/đứng trong ô thì bung đủ chữ), bấm hoặc **Tab** để nhận; trong thẻ Soát nhanh cũng có. Sau khi học hiện toast «Đã nhớ: A → B · Áp dụng cho N dòng giống vậy?» [Áp dụng] [Không]; áp hàng loạt là MỘT bước Ctrl+Z. **Không học** khi xoá trắng ô, máy không đọc ra gì, dòng người thêm, sửa về đúng chữ máy. **Tự áp** (tuỳ chọn, tắt sẵn): chạy MỘT lượt mỗi khi kết quả mới nạp về (mở hồ sơ, quét xong) — không chạy sau mỗi lần người sửa ô — luôn có thông báo «Đã tự sửa N ô» + nút Hoàn tác. **Tắt**: không học, không gợi ý. ⚙ có mục «Từ điển sửa lỗi»: chọn chế độ (mỗi chế độ ghi ai nên dùng), bảng sai → đúng + số lần, xoá từng mục, xoá hết (có hỏi lại).
 - **Đánh dấu**: ô nhận theo từ điển (bấm 💡/Tab/Áp dụng/tự áp) là một lần sửa như mọi lần (nhớ chữ máy đọc vào `orig`, Ctrl+Z được) và lưu thêm `dict_fixed: [ô]`; người gõ lại ô đó thì dấu mất. Excel/CSV cột 確認メモ ghi riêng «辞書で補正: 摘要 A→B» (không lẫn «手修正»); bảng ghi «Sửa theo từ điển».
 - **Chưa làm / giới hạn**: (1) bấm ↺ khôi phục chữ máy đọc của một ô đã được tự áp thì lần nạp kết quả sau (chế độ tự áp) sẽ áp lại — muốn dừng thì chuyển sang «Chỉ gợi ý»; (2) cột 区分 có chip nhưng ô hẹp nên chỉ thấy 💡 cho tới khi rê chuột; (3) hits chỉ tăng khi HỌC (không tăng khi nhận gợi ý); (4) chữ katakana chưa ✓ vẫn tô vàng ở Excel kể cả khi do từ điển sửa (luật 1.4 giữ nguyên, có chủ ý); (5) tài khoản dùng thử dùng chung nên từ điển cũng chung giữa những người cùng vào; (6) chưa bẻ thử bằng E2E (chỉ bẻ phần logic).
+
+
+**Task 3.4 — xong 10/10/2026** (pytest **495** (không đổi) · `npm test` **209** (không đổi) · build xanh · E2E **26/26 bước** (thêm bước 26) và **26/26 khi chạy cả kịch bản ở cỡ chữ ×1.3** bằng `--font-scale 1.3`).
+- **Cách làm**: biến CSS `--fs` (1 / 1.15 / 1.3) trên `<html>`; codemod **243** chỗ ở 21 file: `text-[Npx]` → `text-[length:calc(Npx*var(--fs))]` (đã kiểm CSS sinh ra: 16 luật `font-size:calc(…)`, 0 luật nhầm thành `color`; phải ghi rõ gợi ý `length:` cho Tailwind). **Không** dùng CSS `zoom` cho cả trang: khung ảnh tính toạ độ chuột (cắt, nắn 4 góc, kéo ảnh) bằng `getBoundingClientRect` nên zoom làm lệch — nhân riêng cỡ chữ thì ảnh và toạ độ vẫn nguyên. `:root { --fs: 1 }` trong `globals.css` là mặc định (trang đăng nhập, máy chưa chọn gì); chỗ DUY NHẤT sinh ra giá trị khác 1 là `PrefsProvider` (chỉ áp khi ĐÃ nạp cài đặt thật, nếu không chữ nhảy về cỡ chuẩn một nhịp lúc đang tải) và script chống nháy trong `layout.tsx` (đọc `localStorage["tsucho.fs"]` — máy này đã dùng cỡ nào — đặt `--fs` trước khung hình đầu, cùng chỗ với chủ đề).
+- **Giao diện**: ⚙ → «Cỡ chữ» (Chuẩn / Lớn / Rất lớn) kèm dòng «ai nên bật» (3 thứ tiếng); tắt sẵn (= Chuẩn), lưu theo tài khoản như mọi tuỳ chọn.
+- **Kiểm bố cục** (Playwright, ảnh chụp 3 mức × 2 cỡ màn hình 1366×768 và 375×812): không tràn ngang ở mức nào (`scrollWidth = clientWidth`), kể cả khi mở hộp ⚙; chữ nút «Xuất file» đo được 13.5 / 15.525 / 17.55 px đúng bằng 13.5 × hệ số. Bảng vẫn cuộn ngang trong khung của nó.
+- **E2E bước 26**: chọn Lớn / Rất lớn trong ⚙ → máy chủ lưu, chữ đúng số, không tràn ngang; F5 → `--fs` đã có ngay từ `DOMContentLoaded` (script chống nháy); trình duyệt trắng chưa chọn gì ở trang đăng nhập đúng cỡ chuẩn (nhờ mặc định trong CSS); trình duyệt lạ đăng nhập cùng tài khoản thấy đúng cỡ đã lưu. Bẻ thử 3 chỗ (bỏ script đặt sớm, bỏ bước áp cỡ ở provider, bỏ mặc định CSS) → đỏ cả 3 (chỗ thứ ba lúc đầu sống sót vì provider che mất — đã thêm ca đo trang đăng nhập).
+- **Giới hạn thấy khi nhìn ảnh chụp**: (1) ở **1366×768 + Rất lớn** cột kết quả chật: các thanh công cụ cũng phình theo nên bảng chỉ còn thấy ~3 dòng, và thẻ Soát nhanh phải cuộn một chút để thấy hàng 出金/入金/残高 (nút «Đúng rồi» vẫn luôn thấy); màn hình cao hơn hoặc mức Lớn thì thoải mái hơn; (2) **chỉ chữ được phóng**: biểu tượng, độ cao dòng đặt cứng (thanh FixBar h-9, dải nối h-8), độ rộng cột bảng và ảnh sổ giữ nguyên; hai chỗ dùng cỡ có tên của Tailwind (`text-xl` ở tiêu đề trang Hồ sơ, `text-lg` ở lớp phủ kéo-thả) cũng chưa nhân; (3) khung chú thích của hướng dẫn (`Tour`) ước lượng chiều cao thẻ cố định nên ở mức lớn nhất có thể đặt hơi lệch chỗ.
 
 ---
 

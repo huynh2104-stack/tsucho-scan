@@ -9,6 +9,13 @@
    Nền navy đậm + nhấn xanh ngọc cho nút hành động (theo bản thiết kế đã chốt).
    Ba màu TRẠNG THÁI vẫn neo theo export.py để web và Excel cùng bộ mặt:
    người dùng thấy ô vàng trên web, mở Excel ra thấy đúng ô vàng đó. */
+/* Hệ số cỡ chữ (task 3.4, tuỳ chọn ⚙): 1 / 1.15 / 1.3. Mọi `text-[Npx]` là `text-[length:calc(Npx*var(--fs))]`.
+   Cố ý KHÔNG dùng CSS `zoom` cho cả trang: khung ảnh tính toạ độ chuột (cắt, nắn 4 góc, kéo ảnh) bằng
+   getBoundingClientRect nên zoom làm lệch; nhân riêng cỡ chữ thì ảnh và toạ độ vẫn nguyên. */
+:root {
+  --fs: 1;
+}
+
 :root {
   /* Giao diện sáng có SẮC CHỦ ĐẠO riêng: nền ngả xanh ngọc rất nhạt, không
      phải trắng trơn — để bản sáng cũng có nhận diện, không chỉ là bản tối lộn

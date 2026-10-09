@@ -44,8 +44,8 @@ export default function DupCompare({
 
   const panel = (s: Sheet, label: string) => (
     <figure className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <figcaption className="flex items-baseline gap-2 text-[12.5px]">
-        <span className="rounded bg-card3 px-1.5 py-0.5 text-[11px] font-semibold text-ink2">{label}</span>
+      <figcaption className="flex items-baseline gap-2 text-[length:calc(12.5px*var(--fs))]">
+        <span className="rounded bg-card3 px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-ink2">{label}</span>
         <span className="truncate font-semibold" title={s.name}>
           {s.name}
         </span>
@@ -77,10 +77,10 @@ export default function DupCompare({
         className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
       >
         <header className="flex flex-col gap-1 border-b border-rule px-5 py-3">
-          <h2 id="dup-title" className="text-[16px] font-bold">
+          <h2 id="dup-title" className="text-[length:calc(16px*var(--fs))] font-bold">
             {t.dupTitle}
           </h2>
-          <p className="text-[12.5px] text-ink2">
+          <p className="text-[length:calc(12.5px*var(--fs))] text-ink2">
             <b data-dup-match className="rounded bg-warnbg px-1.5 py-0.5 text-warnink">
               {t.dupMatch(pair.common, Math.min(pair.sizeA, pair.sizeB))}
             </b>{" "}
@@ -97,21 +97,21 @@ export default function DupCompare({
           <button
             data-dup="later"
             onClick={onLater}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
+            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
           >
             {t.dupLater}
           </button>
           <button
             data-dup="not"
             onClick={onNotDup}
-            className="rounded-lg border border-accent px-3.5 py-1.5 text-[13.5px] font-semibold text-accent hover:bg-accentpale"
+            className="rounded-lg border border-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accent hover:bg-accentpale"
           >
             {t.dupNotDup}
           </button>
           <button
             data-dup="delete"
             onClick={onDeleteRight}
-            className="rounded-lg border border-danger bg-danger px-3.5 py-1.5 text-[13.5px] font-semibold text-white hover:brightness-110"
+            className="rounded-lg border border-danger bg-danger px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-white hover:brightness-110"
           >
             {t.dupDeleteRight}
           </button>

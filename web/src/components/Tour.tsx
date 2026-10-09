@@ -189,19 +189,19 @@ export default function Tour({ onPane }: { onPane: (p: PaneId) => void }) {
         style={{ top: cardTop, left: cardLeft }}
       >
         <div className="flex flex-col gap-1.5 px-5 py-4">
-          <span className="tnum text-[11px] font-semibold uppercase tracking-wider text-accent">
+          <span className="tnum text-[length:calc(11px*var(--fs))] font-semibold uppercase tracking-wider text-accent">
             {t.tour.step(i + 1, steps.length)}
           </span>
-          <h2 id="tour-title" className="text-[15px] font-bold">
+          <h2 id="tour-title" className="text-[length:calc(15px*var(--fs))] font-bold">
             {step.title}
           </h2>
-          <p className="text-[13px] leading-relaxed text-ink2">{step.body}</p>
+          <p className="text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{step.body}</p>
         </div>
 
         <div className="flex items-center gap-2 border-t border-rule bg-card2 px-5 py-3">
           <button
             onClick={stop}
-            className="rounded-lg px-2.5 py-1.5 text-[13px] text-ink3 hover:text-ink"
+            className="rounded-lg px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] text-ink3 hover:text-ink"
           >
             {t.tour.skip}
           </button>
@@ -209,7 +209,7 @@ export default function Tour({ onPane }: { onPane: (p: PaneId) => void }) {
           {i > 0 && (
             <button
               onClick={() => setI((n) => n - 1)}
-              className="rounded-lg border border-rule px-3 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
+              className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
             >
               {t.tour.back}
             </button>
@@ -217,7 +217,7 @@ export default function Tour({ onPane }: { onPane: (p: PaneId) => void }) {
           <button
             ref={nextRef}
             onClick={() => (last ? stop() : setI((n) => n + 1))}
-            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[13.5px] font-semibold text-accentink hover:brightness-110"
+            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
           >
             {last ? t.tour.done : t.tour.next}
           </button>

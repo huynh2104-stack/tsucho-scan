@@ -28,7 +28,7 @@ function Group<T extends string | number>({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <span className="w-28 flex-none text-[13px] font-medium text-ink2">{label}</span>
+      <span className="w-28 flex-none text-[length:calc(13px*var(--fs))] font-medium text-ink2">{label}</span>
       <div className="flex overflow-hidden rounded-lg border border-rule" role="group" aria-label={label}>
         {options.map((o) => (
           <button
@@ -36,7 +36,7 @@ function Group<T extends string | number>({
             type="button"
             aria-pressed={value === o.id}
             onClick={() => onPick(o.id)}
-            className={`border-r border-rule px-3 py-1.5 text-[13px] last:border-r-0 ${
+            className={`border-r border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] last:border-r-0 ${
               value === o.id
                 ? "bg-accent font-semibold text-white"
                 : "bg-card text-ink2 hover:bg-accentpale hover:text-ink"
@@ -75,34 +75,34 @@ function DictionarySection() {
 
   return (
     <section data-testid="dict-section" className="flex flex-col gap-2.5">
-      <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">{t.dictTitle}</h3>
-      <p className="text-[12.5px] leading-relaxed text-ink2">{t.dictIntro}</p>
+      <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">{t.dictTitle}</h3>
+      <p className="text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">{t.dictIntro}</p>
       <Group<"suggest" | "auto" | "off">
         label={t.dictModeLabel}
         value={prefs.dictMode}
         options={modes.map((m) => ({ id: m.id, label: m.label }))}
         onPick={(m) => update({ dictMode: m })}
       />
-      <p data-testid="dict-mode-hint" className="rounded-lg bg-card2 px-3 py-2 text-[12px] leading-relaxed text-ink3">
+      <p data-testid="dict-mode-hint" className="rounded-lg bg-card2 px-3 py-2 text-[length:calc(12px*var(--fs))] leading-relaxed text-ink3">
         {hint}
       </p>
 
-      <h4 className="mt-1 text-[12.5px] font-semibold text-ink2">
+      <h4 className="mt-1 text-[length:calc(12.5px*var(--fs))] font-semibold text-ink2">
         {t.dictListTitle} <span className="tnum font-normal text-ink3">({entries.length})</span>
       </h4>
       {failed && (
-        <p role="alert" className="rounded-lg border border-warnedge bg-warnbg px-3 py-1.5 text-[12px] font-medium text-warnink">
+        <p role="alert" className="rounded-lg border border-warnedge bg-warnbg px-3 py-1.5 text-[length:calc(12px*var(--fs))] font-medium text-warnink">
           {t.dictFail}
         </p>
       )}
       {loaded && entries.length === 0 ? (
-        <p data-testid="dict-empty" className="text-[12.5px] text-ink3">
+        <p data-testid="dict-empty" className="text-[length:calc(12.5px*var(--fs))] text-ink3">
           {t.dictEmpty}
         </p>
       ) : (
         <div className="max-h-56 overflow-y-auto rounded-lg border border-rule">
-          <table className="w-full border-collapse text-[12.5px]">
-            <thead className="sticky top-0 bg-card2 text-left text-[11px] text-ink3">
+          <table className="w-full border-collapse text-[length:calc(12.5px*var(--fs))]">
+            <thead className="sticky top-0 bg-card2 text-left text-[length:calc(11px*var(--fs))] text-ink3">
               <tr>
                 <th className="px-2 py-1 font-medium">{t.dictColWrong}</th>
                 <th className="px-2 py-1 font-medium">{t.dictColRight}</th>
@@ -122,7 +122,7 @@ function DictionarySection() {
                       onClick={() => void guard(() => remove(e.id))}
                       title={t.dictDelete}
                       aria-label={t.dictDelete}
-                      className="rounded px-1.5 text-[14px] leading-none text-ink3 hover:bg-danger/10 hover:text-danger"
+                      className="rounded px-1.5 text-[length:calc(14px*var(--fs))] leading-none text-ink3 hover:bg-danger/10 hover:text-danger"
                     >
                       ×
                     </button>
@@ -135,18 +135,18 @@ function DictionarySection() {
       )}
       {entries.length > 0 &&
         (confirmClear ? (
-          <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+          <div className="flex flex-wrap items-center gap-2 text-[length:calc(12.5px*var(--fs))]">
             <span className="text-danger">{t.dictClearConfirm(entries.length)}</span>
             <button
               data-testid="dict-clear-yes"
               onClick={() => void guard(clear).then(() => setConfirmClear(false))}
-              className="rounded-lg border border-danger bg-danger px-3 py-1 text-[12.5px] font-semibold text-white hover:brightness-110"
+              className="rounded-lg border border-danger bg-danger px-3 py-1 text-[length:calc(12.5px*var(--fs))] font-semibold text-white hover:brightness-110"
             >
               {t.dictClearYes}
             </button>
             <button
               onClick={() => setConfirmClear(false)}
-              className="rounded-lg border border-rule px-3 py-1 text-[12.5px] text-ink2 hover:border-accentmid hover:text-ink"
+              className="rounded-lg border border-rule px-3 py-1 text-[length:calc(12.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
             >
               {t.cancel}
             </button>
@@ -155,7 +155,7 @@ function DictionarySection() {
           <button
             data-testid="dict-clear"
             onClick={() => setConfirmClear(true)}
-            className="self-start rounded-lg border border-rule px-3 py-1 text-[12.5px] text-danger hover:border-danger"
+            className="self-start rounded-lg border border-rule px-3 py-1 text-[length:calc(12.5px*var(--fs))] text-danger hover:border-danger"
           >
             {t.dictClearAll}
           </button>
@@ -167,7 +167,12 @@ function DictionarySection() {
 export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const { t, lang } = useT();
   const { mode } = useTheme();
-  const { chooseLang, chooseTheme, saveFailed } = usePrefs();
+  const { chooseLang, chooseTheme, saveFailed, prefs, update } = usePrefs();
+  const sizes: { id: 1 | 1.15 | 1.3; label: string }[] = [
+    { id: 1, label: t.fontStd },
+    { id: 1.15, label: t.fontLarge },
+    { id: 1.3, label: t.fontXL },
+  ];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -196,10 +201,10 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
       >
         <header className="flex-none border-b border-rule px-5 py-3">
-          <h2 id="settings-title" className="text-[16px] font-bold">
+          <h2 id="settings-title" className="text-[length:calc(16px*var(--fs))] font-bold">
             {t.settingsTitle}
           </h2>
-          <p className="text-[12.5px] text-ink3">{t.settingsNote}</p>
+          <p className="text-[length:calc(12.5px*var(--fs))] text-ink3">{t.settingsNote}</p>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
@@ -207,14 +212,14 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
             <p
               role="alert"
               data-testid="settings-save-failed"
-              className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[12.5px] font-medium text-warnink"
+              className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[length:calc(12.5px*var(--fs))] font-medium text-warnink"
             >
               {t.settingsSaveFailed}
             </p>
           )}
 
           <section className="flex flex-col gap-2.5">
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">{t.settingsLook}</h3>
+            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">{t.settingsLook}</h3>
             <Group<Lang>
               label={t.settingsLang}
               value={lang}
@@ -224,13 +229,24 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
             <Group<ThemeMode> label={t.theme} value={mode} options={themes} onPick={chooseTheme} />
           </section>
 
+          <section data-testid="font-section" className="flex flex-col gap-2.5">
+            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">{t.fontLabel}</h3>
+            <Group<1 | 1.15 | 1.3>
+              label={t.fontLabel}
+              value={prefs.fontScale}
+              options={sizes}
+              onPick={(v) => update({ fontScale: v })}
+            />
+            <p className="rounded-lg bg-card2 px-3 py-2 text-[length:calc(12px*var(--fs))] leading-relaxed text-ink3">{t.fontHint}</p>
+          </section>
+
           <DictionarySection />
         </div>
 
         <footer className="flex flex-none items-center justify-end border-t border-rule px-5 py-3">
           <button
             onClick={onClose}
-            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[14px] font-semibold text-white hover:brightness-110"
+            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[length:calc(14px*var(--fs))] font-semibold text-white hover:brightness-110"
           >
             {t.settingsClose}
           </button>

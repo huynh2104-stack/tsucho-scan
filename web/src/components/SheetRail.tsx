@@ -110,7 +110,7 @@ export default function SheetRail({
 
   if (sheets.length === 0) {
     return (
-      <p className="px-4 py-6 text-center text-[12.5px] leading-relaxed text-ink3">
+      <p className="px-4 py-6 text-center text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink3">
         {t.railEmpty}
       </p>
     );
@@ -233,7 +233,7 @@ export default function SheetRail({
                     /* Chưa có ảnh (đang tách trang / nhập hỏng): vẽ ô chờ thay vì ảnh hỏng */
                     <span className="flex h-full w-full items-center justify-center bg-rule2/60">
                       {proc === "failed" ? (
-                        <span className="text-[15px] font-bold text-danger">!</span>
+                        <span className="text-[length:calc(15px*var(--fs))] font-bold text-danger">!</span>
                       ) : (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-rule border-t-accent" />
                       )}
@@ -280,11 +280,11 @@ export default function SheetRail({
                           el.blur();
                         }
                       }}
-                      className="w-full rounded border border-accent bg-card px-1 py-0.5 text-[12.5px] font-semibold focus:outline-none"
+                      className="w-full rounded border border-accent bg-card px-1 py-0.5 text-[length:calc(12.5px*var(--fs))] font-semibold focus:outline-none"
                     />
                   ) : (
                     <span
-                      className="break-words text-[12.5px] font-semibold leading-snug"
+                      className="break-words text-[length:calc(12.5px*var(--fs))] font-semibold leading-snug"
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         setEditing(s.id);
@@ -294,12 +294,12 @@ export default function SheetRail({
                       {s.name}
                     </span>
                   )}
-                  <span className="break-all text-[10.5px] leading-tight text-ink3">
+                  <span className="break-all text-[length:calc(10.5px*var(--fs))] leading-tight text-ink3">
                     {s.origin}
                     {s.page ? ` · ${t.pageLabel(s.page)}` : ""}
                   </span>
 
-                  <span className="flex flex-wrap items-center gap-1 text-[10px]">
+                  <span className="flex flex-wrap items-center gap-1 text-[length:calc(10px*var(--fs))]">
                     {status && (
                       <span
                         className={`rounded px-1.5 py-px font-semibold ${status.cls}`}

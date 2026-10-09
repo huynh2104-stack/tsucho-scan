@@ -50,7 +50,7 @@ export default function ImportProgress({
     <div className="mx-2 mb-2 flex flex-col gap-1.5" role="status" aria-live="polite" data-import-progress>
       {uploads.map((u) => (
         <div key={u.key} className="rounded-lg border border-accent/40 bg-accentpale/40 px-2.5 py-2">
-          <div className="flex items-start gap-2 text-[11.5px]">
+          <div className="flex items-start gap-2 text-[length:calc(11.5px*var(--fs))]">
             <span className="min-w-0 flex-1 break-all font-semibold leading-snug">{u.name}</span>
             <span className="tnum flex-none text-ink2">
               {u.pct >= 100 ? t.uploadPreparing : t.uploadingFile(u.pct)}
@@ -61,7 +61,7 @@ export default function ImportProgress({
       ))}
       {working && (
         <div className="rounded-lg border border-accent/40 bg-accentpale/40 px-2.5 py-2">
-          <div className="text-[11.5px] leading-snug">
+          <div className="text-[length:calc(11.5px*var(--fs))] leading-snug">
             <div className="tnum font-semibold">{t.importProgress(done, total)}</div>
             <div className="text-ink2">{stageLabel}</div>
           </div>

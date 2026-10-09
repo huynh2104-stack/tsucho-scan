@@ -66,12 +66,12 @@ export default function ConfirmDialog({
         className="w-full max-w-sm overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
       >
         <div className="flex flex-col gap-2 px-5 py-4">
-          <h2 id="cf-title" className="text-[15px] font-bold">
+          <h2 id="cf-title" className="text-[length:calc(15px*var(--fs))] font-bold">
             {title}
           </h2>
-          <p className="text-[13px] leading-relaxed text-ink2">{message}</p>
+          <p className="text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{message}</p>
           {warning && (
-            <p className="rounded-lg border border-warnedge bg-warnbg px-2.5 py-1.5 text-[12.5px] font-medium text-warnink">
+            <p className="rounded-lg border border-warnedge bg-warnbg px-2.5 py-1.5 text-[length:calc(12.5px*var(--fs))] font-medium text-warnink">
               {warning}
             </p>
           )}
@@ -80,14 +80,14 @@ export default function ConfirmDialog({
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
+            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
           >
             {t.cancel}
           </button>
           <button
             ref={confirmRef}
             onClick={onConfirm}
-            className={`rounded-lg border px-3.5 py-1.5 text-[13.5px] font-semibold ${
+            className={`rounded-lg border px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold ${
               danger
                 ? "border-danger bg-danger text-white hover:brightness-110"
                 : "border-accent bg-accent text-accentink hover:brightness-110"

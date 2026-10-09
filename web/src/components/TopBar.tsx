@@ -63,12 +63,12 @@ export default function TopBar() {
         </span>
         <span className="flex flex-col leading-tight">
           <span className="flex items-center gap-1.5">
-            <span className="text-[15px] font-bold tracking-tight">{t.appName}</span>
-            <span className="rounded bg-accentpale px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wider text-accent">
+            <span className="text-[length:calc(15px*var(--fs))] font-bold tracking-tight">{t.appName}</span>
+            <span className="rounded bg-accentpale px-1.5 py-px text-[length:calc(9.5px*var(--fs))] font-bold uppercase tracking-wider text-accent">
               JP 通帳
             </span>
           </span>
-          <span className="text-[10.5px] text-ink3">{t.tagline}</span>
+          <span className="text-[length:calc(10.5px*var(--fs))] text-ink3">{t.tagline}</span>
         </span>
       </Link>
 
@@ -80,27 +80,27 @@ export default function TopBar() {
               href="/cases/"
               data-tour="cases"
               title={t.casesLinkTitle}
-              className="flex flex-none items-center gap-1.5 rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 no-underline hover:border-accent hover:bg-accentpale hover:text-accent"
+              className="flex flex-none items-center gap-1.5 rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] text-ink2 no-underline hover:border-accent hover:bg-accentpale hover:text-accent"
             >
               <span aria-hidden>←</span>
               {t.casesLink}
             </Link>
           )}
           {onCases && (
-            <span data-tour="cases" className="px-1 text-[13px] font-semibold text-ink">
+            <span data-tour="cases" className="px-1 text-[length:calc(13px*var(--fs))] font-semibold text-ink">
               {t.casesTitle}
             </span>
           )}
           {!onCases && current && (
             <span className="flex min-w-0 items-center gap-1.5" data-testid="current-case">
               <span
-                className="max-w-[240px] truncate text-[13.5px] font-semibold"
+                className="max-w-[240px] truncate text-[length:calc(13.5px*var(--fs))] font-semibold"
                 title={current.name || t.casesUntitled}
               >
                 {current.name || <span className="font-normal text-ink3">{t.casesUntitled}</span>}
               </span>
               {current.archived && (
-                <span className="flex-none rounded bg-card2 px-1.5 py-px text-[10.5px] font-semibold text-ink3">
+                <span className="flex-none rounded bg-card2 px-1.5 py-px text-[length:calc(10.5px*var(--fs))] font-semibold text-ink3">
                   {t.casesArchivedTag}
                 </span>
               )}
@@ -123,7 +123,7 @@ export default function TopBar() {
             onClick={() => chooseTheme(th.id)}
             aria-pressed={mode === th.id}
             title={th.label}
-            className={`flex items-center gap-1.5 border-r border-rule px-2.5 py-1.5 text-[13px] last:border-r-0 ${
+            className={`flex items-center gap-1.5 border-r border-rule px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] last:border-r-0 ${
               mode === th.id
                 ? "bg-accent font-semibold text-white"
                 : "bg-card text-ink2 hover:bg-accentpale hover:text-ink"
@@ -146,7 +146,7 @@ export default function TopBar() {
             key={l}
             onClick={() => chooseLang(l)}
             aria-pressed={lang === l}
-            className={`border-r border-rule px-3 py-1.5 text-[13px] last:border-r-0 ${
+            className={`border-r border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] last:border-r-0 ${
               lang === l
                 ? "bg-accent font-semibold text-white"
                 : "bg-card text-ink2 hover:bg-accentpale hover:text-ink"
@@ -167,7 +167,7 @@ export default function TopBar() {
             onClick={() => setSettingsOpen(true)}
             title={t.settingsBtn}
             aria-label={t.settingsBtn}
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[14px] text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
           >
             ⚙
           </button>
@@ -176,16 +176,16 @@ export default function TopBar() {
             onClick={startTour}
             title={t.helpBtn}
             aria-label={t.helpBtn}
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[13px] font-bold text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[length:calc(13px*var(--fs))] font-bold text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
           >
             ?
           </button>
-          <span className="max-w-[190px] truncate text-[13px] text-ink2" title={user.email}>
+          <span className="max-w-[190px] truncate text-[length:calc(13px*var(--fs))] text-ink2" title={user.email}>
             {user.email}
           </span>
           <button
             onClick={logout}
-            className="rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 hover:bg-accentpale hover:text-ink"
+            className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13px*var(--fs))] text-ink2 hover:bg-accentpale hover:text-ink"
           >
             {t.signOut}
           </button>

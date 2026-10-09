@@ -4,6 +4,7 @@ import { AuthProvider } from "@/lib/auth";
 import { CaseProvider } from "@/lib/case";
 import { CorrectionsProvider } from "@/lib/corrections-provider";
 import { PrefsProvider } from "@/lib/prefs";
+import { FONT_SCALES, FONT_SCALE_KEY } from "@/lib/prefs-defaults";
 import { LangProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_KEY } from "@/lib/theme";
 import { TourProvider } from "@/lib/tour";
@@ -28,6 +29,11 @@ const themeScript = `
   } catch (e) {
     document.documentElement.dataset.theme = "light";
   }
+  // Cỡ chữ lớn (tuỳ chọn): đặt sớm cùng chủ đề để chữ không nhảy cỡ sau khi tải xong
+  try {
+    var fs = parseFloat(localStorage.getItem(${JSON.stringify(FONT_SCALE_KEY)}));
+    if (${JSON.stringify(FONT_SCALES)}.indexOf(fs) >= 0) document.documentElement.style.setProperty("--fs", String(fs));
+  } catch (e) {}
 })();
 `;
 

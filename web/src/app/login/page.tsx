@@ -110,7 +110,7 @@ export default function LoginPage() {
         {/* ── Cột trái: lối vào nhanh. Không lặp lại logo — thanh trên đã có. ── */}
         {coDemo && (
           <div className="min-w-0">
-            <h2 className="text-[19px] font-bold tracking-tight">{t.demoHead}</h2>
+            <h2 className="text-[length:calc(19px*var(--fs))] font-bold tracking-tight">{t.demoHead}</h2>
             <ul className="m-0 mt-4 grid list-none gap-2 p-0">
               {demo!.accounts.map((tk) => (
                 <li key={tk.email}>
@@ -127,31 +127,31 @@ export default function LoginPage() {
                     className="flex w-full items-center justify-between gap-3 rounded-xl border border-rule bg-card px-4 py-3 text-left transition-colors hover:border-accent disabled:opacity-60"
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-[14px] font-semibold text-ink">
+                      <span className="block truncate text-[length:calc(14px*var(--fs))] font-semibold text-ink">
                         {tk.label}
                       </span>
                       {/* KHÔNG cắt cụt: có người muốn tự gõ tay chứ không bấm
                           nút, mà mật khẩu bị "…" thì chịu. Cho xuống dòng. */}
-                      <span className="block font-mono text-[11.5px] break-all text-ink2">
+                      <span className="block font-mono text-[length:calc(11.5px*var(--fs))] break-all text-ink2">
                         {tk.email} · {tk.password}
                       </span>
                     </span>
-                    <span className="flex-none text-[12.5px] font-semibold text-accent">
+                    <span className="flex-none text-[length:calc(12.5px*var(--fs))] font-semibold text-accent">
                       {dangVao === tk.email && busy ? t.authWorking : t.demoUse}
                     </span>
                   </button>
                 </li>
               ))}
             </ul>
-            <p className="m-0 mt-3 max-w-[52ch] text-[12.5px] leading-relaxed text-ink2">
+            <p className="m-0 mt-3 max-w-[52ch] text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">
               {t.demoNote(demo!.scan_limit)}
             </p>
-            <p className="m-0 mt-4 max-w-[52ch] text-[12.5px] leading-relaxed text-ink2">
+            <p className="m-0 mt-4 max-w-[52ch] text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">
               {t.authPrivacy}
             </p>
             <a
               href={TRANG_GIOI_THIEU}
-              className="mt-4 inline-block text-[13px] text-accent underline underline-offset-2"
+              className="mt-4 inline-block text-[length:calc(13px*var(--fs))] text-accent underline underline-offset-2"
             >
               {t.authBackHome}
             </a>
@@ -166,14 +166,14 @@ export default function LoginPage() {
           }}
           className="rounded-2xl border border-rule bg-card p-6 shadow-[var(--shadow)] sm:p-7"
         >
-          <h1 className="text-[18px] font-bold tracking-tight">
+          <h1 className="text-[length:calc(18px*var(--fs))] font-bold tracking-tight">
             {mode === "up" ? t.authHeadUp : t.authHeadIn}
           </h1>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink2">
+          <p className="mt-1.5 text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">
             {coDemo ? t.demoOr : t.authPrivacy}
           </p>
 
-          <label className="mt-5 block text-[13px] font-semibold text-ink2" htmlFor="email">
+          <label className="mt-5 block text-[length:calc(13px*var(--fs))] font-semibold text-ink2" htmlFor="email">
             {t.authEmail}
           </label>
           <input
@@ -183,17 +183,17 @@ export default function LoginPage() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[15px] text-ink outline-none focus:border-accent"
+            className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[length:calc(15px*var(--fs))] text-ink outline-none focus:border-accent"
           />
 
           <div className="mt-4 flex items-baseline justify-between gap-3">
-            <label className="block text-[13px] font-semibold text-ink2" htmlFor="password">
+            <label className="block text-[length:calc(13px*var(--fs))] font-semibold text-ink2" htmlFor="password">
               {t.authPassword}
             </label>
             <button
               type="button"
               onClick={() => setHienMk((v) => !v)}
-              className="text-[12px] text-accent underline underline-offset-2"
+              className="text-[length:calc(12px*var(--fs))] text-accent underline underline-offset-2"
             >
               {hienMk ? t.authHidePw : t.authShowPw}
             </button>
@@ -206,15 +206,15 @@ export default function LoginPage() {
             autoComplete={mode === "up" ? "new-password" : "current-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[15px] text-ink outline-none focus:border-accent"
+            className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[length:calc(15px*var(--fs))] text-ink outline-none focus:border-accent"
           />
-          {mode === "up" && <p className="mt-1.5 text-[12px] text-ink2">{t.authPasswordHint}</p>}
+          {mode === "up" && <p className="mt-1.5 text-[length:calc(12px*var(--fs))] text-ink2">{t.authPasswordHint}</p>}
 
           {err !== null && (
             <p
               role="alert"
               aria-live="assertive"
-              className="mt-4 rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[13px] text-warnink"
+              className="mt-4 rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[length:calc(13px*var(--fs))] text-warnink"
             >
               {errText(err)}
             </p>
@@ -223,7 +223,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={busy}
-            className="mt-5 w-full rounded-lg bg-accent px-4 py-2.5 text-[15px] font-semibold text-accentink transition-transform active:scale-[0.99] disabled:opacity-60"
+            className="mt-5 w-full rounded-lg bg-accent px-4 py-2.5 text-[length:calc(15px*var(--fs))] font-semibold text-accentink transition-transform active:scale-[0.99] disabled:opacity-60"
           >
             {busy ? t.authWorking : mode === "up" ? t.signUp : t.signIn}
           </button>
@@ -234,7 +234,7 @@ export default function LoginPage() {
               setMode(mode === "up" ? "in" : "up");
               setErr(null);
             }}
-            className="mt-4 w-full text-[13px] text-accent underline underline-offset-2"
+            className="mt-4 w-full text-[length:calc(13px*var(--fs))] text-accent underline underline-offset-2"
           >
             {mode === "up" ? t.authToIn : t.authToUp}
           </button>

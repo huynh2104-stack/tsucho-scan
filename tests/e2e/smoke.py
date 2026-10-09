@@ -66,6 +66,9 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     điển lưu dict_fixed và Excel ghi 辞書で補正; không học khi xoá trắng ô
  25 ⚙ → từ điển: danh sách, xoá từng mục, «Tự áp dụng» (áp một lượt khi nạp kết quả, có thông báo + Hoàn tác), «Tắt»
     (không học, không gợi ý), xoá hết
+ 26 ⚙ → cỡ chữ Lớn / Rất lớn: chữ nút phóng đúng 1.15× / 1.3×, lưu theo tài khoản, sống qua F5 (script chống nháy đặt
+    --fs từ khung hình đầu), máy lạ đăng nhập thấy đúng cỡ, không tràn ngang ở 1366×768 và 375×812
+Chạy toàn bộ kịch bản ở cỡ chữ lớn:  python tests/e2e/smoke.py --font-scale 1.3
 """
 from __future__ import annotations
 
@@ -231,6 +234,13 @@ def step_register(pg, base: str, ctx: dict) -> str:
     pg.fill("#password", PASSWORD)
     pg.click("button[type=submit]")
     pg.locator('[data-tour="drop"]').wait_for(timeout=15000)      # bàn làm việc đã hiện
+    if ctx.get("font_scale"):                                     # --font-scale: chạy cả kịch bản ở cỡ chữ lớn
+        assert pg.request.put(f"{base}/api/me/prefs", data={"fontScale": ctx["font_scale"]}).ok
+        pg.reload()
+        pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+        wait_until(lambda: pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()") == str(ctx["font_scale"]),
+                   "cỡ chữ lớn đã áp")
+        return f"đã đăng ký {EMAIL} và vào bàn làm việc (cỡ chữ ×{ctx['font_scale']})"
     return f"đã đăng ký {EMAIL} và vào bàn làm việc"
 
 
@@ -1886,6 +1896,80 @@ def step_dictionary_modes(pg, base: str, ctx: dict) -> str:
             "«Tắt»: không gợi ý, không học · xoá hết có hỏi lại")
 
 
+def step_font_scale(pg, base: str, ctx: dict) -> str:
+    """Task 3.4: cỡ chữ lớn (tuỳ chọn ⚙, tắt sẵn). Nhân riêng cỡ chữ bằng biến --fs chứ không zoom cả trang."""
+    def prefs():
+        return pg.request.get(f"{base}/api/me/prefs").json()
+
+    def fs_var():
+        return pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()")
+
+    def export_px():
+        return pg.evaluate("parseFloat(getComputedStyle(document.querySelector('[data-tour=export]')).fontSize)")
+
+    def overflow():
+        return pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+
+    start = ctx.get("font_scale") or 1                    # cả kịch bản đang chạy ở cỡ này: bước này phải trả về đúng cỡ đó
+    pg.goto(f"{base}/")
+    pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+    base_px = export_px() / start                         # chữ nút «Xuất file» là 13.5px ở cỡ chuẩn
+    assert abs(base_px - 13.5) < 0.05, base_px
+    dialog = pg.locator("[data-testid=settings-dialog]")
+    try:
+        pg.locator("[data-testid=settings-btn]").click()
+        dialog.wait_for(timeout=5000)
+        assert "Cỡ chữ" in dialog.inner_text() and "Dành cho người mắt yếu" in dialog.locator("[data-testid=font-section]").inner_text()
+        for label, scale in (("Lớn", 1.15), ("Rất lớn", 1.3)):
+            dialog.locator("[data-testid=font-section]").get_by_role("button", name=label, exact=True).click()
+            wait_until(lambda: prefs()["fontScale"] == scale, f"máy chủ lưu fontScale {scale}", timeout=15)
+            wait_until(lambda: fs_var() == str(scale), f"--fs = {scale}")
+            assert abs(export_px() - 13.5 * scale) < 0.05, export_px()
+            assert overflow() <= 0, f"tràn ngang {overflow()}px ở ×{scale}"
+        pg.keyboard.press("Escape")
+        dialog.wait_for(state="detached", timeout=5000)
+
+        # ── Sống qua F5: --fs đã đặt TRƯỚC khi React chạy (script chống nháy), không nhảy cỡ ──
+        seen = []
+        pg.add_init_script("document.addEventListener('DOMContentLoaded', () => { window.__fs0 = getComputedStyle(document.documentElement).getPropertyValue('--fs').trim(); });")
+        pg.reload()
+        pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+        seen.append(pg.evaluate("window.__fs0"))
+        assert seen == ["1.3"], f"--fs lúc DOMContentLoaded: {seen}"
+        assert fs_var() == "1.3"
+
+        # ── Màn hình hẹp: không tràn ngang ở mức lớn nhất ──
+        for w, h in ((1366, 768), (375, 812)):
+            pg.set_viewport_size({"width": w, "height": h})
+            time.sleep(0.4)
+            assert overflow() <= 0, f"{w}×{h}: tràn ngang {overflow()}px"
+        pg.set_viewport_size({"width": 1440, "height": 900})
+
+        # ── Máy lạ: trình duyệt trắng đăng nhập cùng tài khoản → thấy đúng cỡ đã lưu ──
+        other = pg.context.browser.new_context(locale="vi-VN", viewport={"width": 1280, "height": 800})
+        try:
+            pg2 = other.new_page()
+            pg2.set_default_timeout(10000)
+            pg2.goto(f"{base}/login/")
+            px = pg2.evaluate("parseFloat(getComputedStyle(document.querySelector('button[type=submit]')).fontSize)")
+            assert abs(px - 15) < 0.05, f"máy lạ chưa chọn gì: chữ phải đúng cỡ chuẩn (15px) nhờ --fs mặc định trong CSS, đang là {px}"
+            pg2.fill("#email", EMAIL)
+            pg2.fill("#password", PASSWORD)
+            pg2.click("button[type=submit]")
+            pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
+            wait_until(lambda: pg2.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()") == "1.3",
+                       "máy lạ nhận cỡ chữ đã lưu")
+        finally:
+            other.close()
+    finally:
+        assert pg.request.put(f"{base}/api/me/prefs", data={"fontScale": start}).ok
+        pg.goto(f"{base}/")
+        pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+        wait_until(lambda: fs_var() == str(start), "trả về cỡ chữ ban đầu")
+    return ("chọn Lớn/Rất lớn trong ⚙ → máy chủ lưu, chữ nút ×1.15/×1.3 đúng số · không tràn ngang (1366×768, 375×812) · "
+            "F5: --fs đã có từ DOMContentLoaded · máy lạ đăng nhập thấy đúng cỡ")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1912,6 +1996,7 @@ STEPS = [
     ("23. Soát nhanh: xác nhận và hoàn thành", step_quick_finish),
     ("24. Từ điển sửa lỗi: học, gợi ý, áp hàng loạt", step_dictionary),
     ("25. Từ điển: quản lý, tự áp, tắt", step_dictionary_modes),
+    ("26. Cỡ chữ lớn", step_font_scale),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
@@ -1919,10 +2004,10 @@ NEED_ALL = 3
 
 # ── chạy ──────────────────────────────────────────────────────────────
 
-def run(base: str, tmp: Path, headed: bool) -> int:
+def run(base: str, tmp: Path, headed: bool, font_scale: float | None = None) -> int:
     from playwright.sync_api import sync_playwright
 
-    ctx: dict = {"tmp": str(tmp)}
+    ctx: dict = {"tmp": str(tmp), "font_scale": font_scale}
     ok = 0
     page_errors: list[str] = []
     with sync_playwright() as p:
@@ -1976,6 +2061,7 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--build", action="store_true", help="chạy npm run build trước khi thử")
     ap.add_argument("--headed", action="store_true", help="hiện cửa sổ trình duyệt để xem")
+    ap.add_argument("--font-scale", type=float, choices=[1.15, 1.3], default=None, help="chạy cả kịch bản ở cỡ chữ lớn (task 3.4)")
     ap.add_argument("--server-python", default=sys.executable, help="python chạy uvicorn")
     args = ap.parse_args()
 
@@ -2011,7 +2097,7 @@ def main() -> int:
                 return False
 
         wait_until(healthy, "máy chủ trả lời /api/health", timeout=60)
-        return run(base, tmp, args.headed)
+        return run(base, tmp, args.headed, args.font_scale)
     finally:
         server.terminate()
         try:

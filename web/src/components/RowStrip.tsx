@@ -40,7 +40,7 @@ export default function RowStrip({
 
   if (stale) {
     return (
-      <div data-testid="quick-strip-stale" className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[13px] text-warnink">
+      <div data-testid="quick-strip-stale" className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[length:calc(13px*var(--fs))] text-warnink">
         <b className="font-semibold">⚠ {t.staleTitle}</b> <span>{t.staleMsg}</span>
       </div>
     );
@@ -51,7 +51,7 @@ export default function RowStrip({
       <div
         data-testid="quick-strip-empty"
         role="status"
-        className="flex h-24 items-center justify-center rounded-lg border border-dashed border-rule bg-card2 px-3 text-center text-[13px] text-ink3"
+        className="flex h-24 items-center justify-center rounded-lg border border-dashed border-rule bg-card2 px-3 text-center text-[length:calc(13px*var(--fs))] text-ink3"
       >
         {bandsState === "loading" ? t.rowLinkLoading : t.rowLinkUnavailable}
       </div>
@@ -101,7 +101,7 @@ export default function RowStrip({
             {!solid && i === 0 && (
               <span
                 data-testid="quick-strip-estimated"
-                className="absolute right-1.5 top-1.5 rounded bg-card/90 px-1.5 py-0.5 text-[11px] font-medium text-ink3"
+                className="absolute right-1.5 top-1.5 rounded bg-card/90 px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-medium text-ink3"
               >
                 {t.qrEstimated}
               </span>

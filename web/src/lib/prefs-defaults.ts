@@ -33,6 +33,10 @@ export const DEFAULT_PREFS: Prefs = {
   theme: null,
 };
 
+/** Khoá localStorage nhớ hệ số cỡ chữ của MÁY NÀY — script chống nháy ở layout.tsx đọc nó trước khi vẽ khung hình đầu. */
+export const FONT_SCALE_KEY = "tsucho.fs";
+export const FONT_SCALES = [1, 1.15, 1.3] as const;
+
 /** Gộp một phần thay đổi vào cài đặt hiện có (không sửa đối tượng cũ). */
 export function mergePrefs(base: Prefs, patch: Partial<Prefs>): Prefs {
   return { ...base, ...patch };
