@@ -788,6 +788,57 @@ def _split_by_sheet(accounts: list[dict], names: dict[str, str]) -> list[dict]:
     return [groups[s] for s in order]
 
 
+EXPORT_STRUCTURES = ("per_sheet", "per_account", "merged")
+
+
+def _account_title(bank_name: str | None, account_no: str) -> str:
+    """Tên tab cho một tài khoản: «ngân hàng 口座番号». Tab Excel dài tối đa 28 ký tự (xem `export._sheet_title`)
+    nên nếu quá dài thì cắt TÊN NGÂN HÀNG chứ không cắt số tài khoản — số mới là thứ phân biệt các tab."""
+    room = 28 - len(account_no) - 1
+    if not bank_name:
+        return account_no
+    return f"{bank_name[:max(room, 0)]} {account_no}" if room > 0 else account_no
+
+
+def _group_by_account(accounts: list[dict], names: dict[str, str]) -> list[dict]:
+    """Gom các mặt sổ cùng MỘT TÀI KHOẢN thành một sheet (task 2.4), theo thứ tự xuất hiện đầu tiên ở cột trái.
+
+    - Có số tài khoản: cùng `(bank_name, account_no)` thì chung một sheet, kể cả khi các mặt không đứng liền nhau
+      (mặt ①, ③ của sổ A xen mặt ② của sổ B ⇒ A một sheet gồm ①③, B một sheet).
+    - Không có số tài khoản (ảnh lẻ không bìa): không biết mặt nào cùng sổ nên MỖI MẶT một sheet, giống `per_sheet`.
+    - Chỗ nối giữa hai mặt trong cùng sheet luôn được đánh `block_start` (kể cả khi client không gửi dấu này) — chuỗi
+      số dư tính theo từng khối, không được nối ngầm xuyên mặt rồi báo lỗi giả ở dòng đầu mặt sau.
+    """
+    order: list[tuple] = []
+    groups: dict[tuple, dict] = {}
+    last_sheet: dict[tuple, str] = {}
+    for ai, acc in enumerate(accounts):
+        bank = (acc.get("bank_name") or "").strip() or None
+        number = (acc.get("account_no") or "").strip() or None
+        for tx in acc["transactions"]:
+            sid = tx.get("sheet_id") or "?"
+            key = ("account", bank, number) if number else ("sheet", sid, None)
+            if key not in groups:
+                order.append(key)
+                groups[key] = {
+                    "bank_name": acc.get("bank_name"),
+                    "store_no": acc.get("store_no"),
+                    "account_no": acc.get("account_no"),
+                    "holder": acc.get("holder"),
+                    "sheet_title": _account_title(bank, number) if number else (names.get(sid) or sid),
+                    "transactions": [],
+                }
+            g = groups[key]
+            for field in ("store_no", "holder"):          # mặt đầu thiếu tên chủ mà mặt sau có thì lấy của mặt sau
+                if not g.get(field) and acc.get(field):
+                    g[field] = acc[field]
+            if key in last_sheet and last_sheet[key] != (ai, sid):
+                tx = {**tx, "block_start": True}
+            last_sheet[key] = (ai, sid)
+            g["transactions"].append(tx)
+    return [groups[k] for k in order]
+
+
 @app.post("/api/ws/{ws_id}/export")
 def export(ws_id: str, user: CurrentUser, body: dict = Body(...)):
     """Xuất theo tuỳ chọn người dùng.
@@ -822,9 +873,13 @@ def export(ws_id: str, user: CurrentUser, body: dict = Body(...)):
     add_total = bool(body.get("add_total"))
 
     structure = body.get("structure")
+    if structure is not None and structure not in EXPORT_STRUCTURES:
+        raise HTTPException(400, "structure chỉ nhận per_sheet, per_account hoặc merged")
     if structure == "per_sheet":
         names = {s.id: s.name for s in ws.sheets}
         accounts = _split_by_sheet(accounts, names)
+    elif structure == "per_account":
+        accounts = _group_by_account(accounts, {s.id: s.name for s in ws.sheets})
     elif structure == "merged":
         # KHÔNG đặt điều kiện len(accounts) > 1: các khối cùng ngân hàng và cùng
         # số tài khoản đã được gộp từ trước, nên nhiều mặt sổ vẫn có thể ra đúng

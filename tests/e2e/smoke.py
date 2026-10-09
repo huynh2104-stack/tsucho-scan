@@ -48,6 +48,10 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
  18 sửa thông tin sổ (✎ ở đầu thẻ sổ): mặt ② bị xoá hết thông tin → sửa 銀行名 ở mặt ① và áp cho mặt sau →
     server lưu cả hai (cờ edited) → một Ctrl+Z hoàn tác cả hai, «Làm lại» làm lại cả hai → xuất Excel: ô B1 của
     cả hai sheet = tên mới; bỏ tick «áp dụng» thì mặt sau giữ nguyên; hộp không có gì để điền khi không còn mặt sau
+ 19 hộp Xuất file: «Tóm tắt trước khi xuất» sạch → «✓ Đã soát hết…»; tạo đủ ba việc (dòng chưa soát + đổi thứ tự gây đứt
+    chuỗi + thêm sổ mẫu lần nữa gây trùng) → ba mục khớp cột trái, nút đổi thành «Vẫn xuất», phạm vi «mặt đang xem»
+    đếm lại; bấm từng mục nhảy tới đúng chỗ (con trỏ vào dòng vàng / dải đứt / hộp so sánh); «Gộp theo tài khoản» →
+    Excel đúng số sheet (các mặt cùng tài khoản chung một tab), B1/B3 và số dòng khớp
 """
 from __future__ import annotations
 
@@ -77,7 +81,7 @@ VI = {
     "skipTour": "Bỏ qua",                        # tour.skip
     "trySample": "Thử với sổ mẫu",               # trySample
     "allChecked": "Đã soát hết",                 # allChecked
-    "download": "Xuất file tải về",              # expDownload
+    "download": re.compile("Xuất file tải về|Vẫn xuất"),   # expDownload; hoặc expAnyway khi «Tóm tắt trước khi xuất» còn việc
 }
 BADGE_LEFT = re.compile(r"^Còn (\d+) dòng cần soát$")   # badLeft(n)
 
@@ -879,8 +883,8 @@ def step_duplicate_pages(pg, base: str, ctx: dict) -> str:
     pg.locator('[data-tour="export"]').click()
     dialog = pg.locator("[role=dialog][aria-labelledby=exp-title]")
     dialog.wait_for(timeout=5000)
-    warn = dialog.locator("[data-dup-warn]")
-    wait_until(lambda: warn.count() == 1 and "2 cặp mặt sổ có thể trùng nhau" in warn.inner_text(), "cảnh báo trùng ở hộp Xuất file")
+    warn = dialog.locator('[data-sum="dup"]')
+    wait_until(lambda: warn.count() == 1 and "2 cặp có thể trùng" in warn.inner_text(), "tóm tắt ở hộp Xuất file báo 2 cặp trùng")
     assert dialog.get_by_role("button", name=VI["download"]).is_enabled(), "cảnh báo không được chặn việc xuất"
     pg.keyboard.press("Escape")
     dialog.wait_for(state="detached", timeout=5000)
@@ -1172,6 +1176,157 @@ def step_book_info(pg, base: str, ctx: dict) -> str:
             "hết mặt sau thì hộp báo không có gì để điền · Esc không lưu")
 
 
+def step_export_summary(pg, base: str, ctx: dict) -> str:
+    """Task 2.4: «Tóm tắt trước khi xuất» (không chặn, mỗi mục nhảy tới chỗ cần xem) và cấu trúc «Gộp theo tài khoản».
+    Cuối bước trả hồ sơ về đúng như trước."""
+    from openpyxl import load_workbook
+
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    ws_id = j("/api/ws")["workspaces"][0]["id"]
+    data = j(f"/api/ws/{ws_id}")
+    order0 = [x["id"] for x in data["sheets"]]
+    by_name = {x["name"]: x["id"] for x in data["sheets"]}
+    s1, s2 = by_name[SAMPLE_SHEET_NAME], by_name[SHEET2_NAME]
+    orig = {sid: (data["results"][sid]["blocks"], data["results"][sid].get("link_ok")) for sid in (s1, s2)}
+
+    dialog = pg.locator("[role=dialog][aria-labelledby=exp-title]")
+    summary = pg.locator("[data-export-summary]")
+
+    def put(sid, blocks, link_ok):
+        r = pg.request.put(f"{base}/api/ws/{ws_id}/results/{sid}", data={"blocks": blocks, "link_ok": link_ok})
+        assert r.ok, r.text()
+
+    def open_export():
+        pg.locator('[data-tour="export"]').click()
+        dialog.wait_for(timeout=5000)
+
+    def close_export():
+        pg.keyboard.press("Escape")
+        dialog.wait_for(state="detached", timeout=5000)
+
+    def reload_to_workbench():
+        pg.goto(f"{base}/")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        wait_until(lambda: pg.locator('[data-tour="rail"] li[data-need]').count() > 0, "cột trái có số cần soát")
+
+    # ── 1. Hồ sơ sạch: tóm tắt báo ổn, nút giữ nhãn thường ──
+    reload_to_workbench()
+    open_export()
+    assert summary.get_attribute("data-issues") == "no", summary.inner_text()
+    assert "Đã soát hết · không có chỗ đứt · không có cặp trùng" in summary.inner_text(), summary.inner_text()
+    assert dialog.get_by_role("button", name="Xuất file tải về").is_enabled()
+    assert dialog.get_by_role("button", name="Vẫn xuất").count() == 0
+    close_export()
+
+    # ── 2. Tạo đủ ba việc: dòng chưa soát (mặt ②), đứt chuỗi (đổi thứ tự), cặp trùng (thêm sổ mẫu lần nữa) ──
+    blocks2 = [{**b, "rows": [{k: v for k, v in r.items() if k not in ("reviewed", "reviewed_at")} for r in b["rows"]]}
+               for b in orig[s2][0]]
+    put(s2, blocks2, None)
+    put(s1, orig[s1][0], None)                                                # bỏ «Không phải lỗi» của bước 15
+    new_order = [s2, s1] + [i for i in order0 if i not in (s1, s2)]
+    assert pg.request.post(f"{base}/api/ws/{ws_id}/reorder", data={"sheet_ids": new_order}).ok
+    added = pg.request.post(f"{base}/api/ws/{ws_id}/sample").json()["added"]
+    assert len(added) == 2, added
+    reload_to_workbench()
+    chips_break = pg.locator("[data-link-chip]")
+    chips_dup = pg.locator("[data-dup-chip]")
+    wait_until(lambda: chips_break.count() == 1 and chips_dup.count() == 2, "cột trái thấy 1 chỗ đứt và 2 huy hiệu trùng")
+    rail_total = sum(int(e.get_attribute("data-need")) for e in pg.locator('[data-tour="rail"] li[data-need]').all())
+    assert rail_total >= 2, f"cần ít nhất 2 dòng cần soát (mặt ② và bản sao), cột trái cộng được {rail_total}"
+
+    open_export()
+    wait_until(lambda: summary.get_attribute("data-issues") == "yes", "tóm tắt báo còn việc")
+    assert summary.locator('[data-sum="need"]').inner_text().strip() == f"Còn {rail_total} dòng cần soát", summary.inner_text()
+    assert summary.locator('[data-sum="break"]').inner_text().strip() == "1 chỗ đứt giữa các mặt", summary.inner_text()
+    assert summary.locator('[data-sum="dup"]').inner_text().strip() == "2 cặp có thể trùng", summary.inner_text()
+    anyway = dialog.get_by_role("button", name="Vẫn xuất")
+    assert anyway.is_enabled(), "tóm tắt chỉ nhắc, không được chặn việc xuất"
+    assert dialog.get_by_role("button", name="Xuất file tải về").count() == 0
+    close_export()
+
+    # Phạm vi «mặt đang xem»: mặt ① không có việc gì (chỗ đứt và cặp trùng cần CẢ HAI mặt trong phạm vi)
+    pg.locator('[data-tour="rail"] li', has_text=SAMPLE_SHEET_NAME).first.click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+    open_export()
+    dialog.get_by_role("button", name=re.compile("Chỉ mặt sổ đang xem")).click()
+    wait_until(lambda: summary.get_attribute("data-issues") == "no", "phạm vi mặt ① thì không còn việc")
+    dialog.get_by_role("button", name=re.compile("Toàn bộ mặt sổ đã quét")).click()
+    wait_until(lambda: summary.get_attribute("data-issues") == "yes", "về toàn bộ thì còn việc")
+    close_export()
+
+    # ── 3. Mỗi mục nhảy tới đúng chỗ ──
+    open_export()
+    summary.locator('[data-sum="need"]').click()
+    dialog.wait_for(state="detached", timeout=5000)
+    wait_until(lambda: (focused(pg) or {}).get("state") == "review", "con trỏ vào ô của dòng cần soát đầu tiên")
+    open_export()
+    summary.locator('[data-sum="break"]').click()
+    dialog.wait_for(state="detached", timeout=5000)
+    wait_until(lambda: pg.locator('[data-link="break"]').count() >= 1, "nhảy tới dải «đứt chuỗi»")
+    open_export()
+    summary.locator('[data-sum="dup"]').click()
+    dialog.wait_for(state="detached", timeout=5000)
+    box = pg.locator("[data-dup-compare]")
+    box.wait_for(timeout=5000)
+    box.locator('[data-dup="later"]').click()
+    box.wait_for(state="detached", timeout=5000)
+
+    # ── 4. «Gộp theo tài khoản»: cùng bank + số tài khoản thì chung một tab (cho bản sao thứ hai sang tài khoản khác) ──
+    copy2 = j(f"/api/ws/{ws_id}")["results"][added[1]]
+    for blk in copy2["blocks"]:
+        blk["meta"]["account_no"] = "9999999"
+    put(added[1], copy2["blocks"], None)
+    reload_to_workbench()                                                     # trình duyệt mới là nguồn của file xuất: nạp lại bản vừa sửa qua API
+    results = j(f"/api/ws/{ws_id}")["results"]
+    sheets_now = [x["id"] for x in j(f"/api/ws/{ws_id}")["sheets"]]
+    expect: dict = {}                                                         # (bank, account) hoặc id mặt → số dòng
+    for sid in sheets_now:
+        if sid not in results:
+            continue
+        for b in results[sid]["blocks"]:
+            m = b["meta"]
+            key = (m.get("bank_name"), m.get("account_no")) if m.get("account_no") else ("sheet", sid)
+            expect[key] = expect.get(key, 0) + len(b["rows"])
+    assert len(expect) >= 1
+
+    open_export()
+    dialog.get_by_role("button", name=re.compile("Gộp theo tài khoản")).click()
+    with pg.expect_download(timeout=30000) as info:
+        anyway.click()
+    path = Path(ctx["tmp"]) / "theo-tai-khoan.xlsx"
+    info.value.save_as(path)
+    dialog.wait_for(state="detached", timeout=10000)
+    wb = load_workbook(path)                                                  # giữ công thức: dòng dữ liệu nào cũng có ô 残高チェック
+    assert len(wb.worksheets) == len(expect), f"{len(wb.worksheets)} tab, kỳ vọng {len(expect)}: {expect}"
+    got = []
+    for w in wb.worksheets:
+        n = 0
+        for r in range(9, w.max_row + 1):                                     # dòng dữ liệu liền nhau, hết khi gặp dòng trống hẳn
+            if all(w.cell(row=r, column=c).value is None for c in range(1, w.max_column + 1)):
+                break
+            n += 1
+        got.append(n)
+    assert sorted(got) == sorted(expect.values()), f"số dòng mỗi tab {sorted(got)} ≠ kỳ vọng {sorted(expect.values())}"
+    assert all(w["A1"].value == "銀行" and w["A3"].value == "口座番号" for w in wb.worksheets)
+    assert sorted(str(w["B3"].value) for w in wb.worksheets) == ["0000001", "9999999"][: len(wb.worksheets)] or len(wb.worksheets) == 1,         [w["B3"].value for w in wb.worksheets]
+    assert len(wb.worksheets) == 2 and any("9999999" in w.title for w in wb.worksheets), [w.title for w in wb.worksheets]
+
+    # ── 5. Trả hồ sơ về như cũ ──
+    for sid in added:
+        assert pg.request.delete(f"{base}/api/ws/{ws_id}/sheets/{sid}").ok
+    assert pg.request.post(f"{base}/api/ws/{ws_id}/reorder", data={"sheet_ids": order0}).ok
+    put(s1, orig[s1][0], orig[s1][1])
+    put(s2, orig[s2][0], orig[s2][1])
+    reload_to_workbench()
+    back = j(f"/api/ws/{ws_id}")
+    assert [x["id"] for x in back["sheets"]] == order0 and back["dup_ok"] == []
+    assert back["results"][s1]["blocks"] == orig[s1][0] and back["results"][s2]["blocks"] == orig[s2][0]
+    return (f"sạch → «✓ Đã soát hết…» · còn việc → «Còn {rail_total} dòng · 1 chỗ đứt · 2 cặp trùng» khớp cột trái, nút «Vẫn xuất» không chặn · "
+            f"phạm vi mặt đang xem đếm lại · mỗi mục nhảy tới đúng chỗ · Gộp theo tài khoản → {len(expect)} tab (cùng tài khoản chung tab, tài khoản khác tách tab), số dòng khớp")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1191,6 +1346,7 @@ STEPS = [
     ("16. Hai ảnh chụp cùng một trang", step_duplicate_pages),
     ("17. Danh sách hồ sơ", step_cases),
     ("18. Sửa thông tin sổ", step_book_info),
+    ("19. Tóm tắt trước khi xuất + xuất theo tài khoản", step_export_summary),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

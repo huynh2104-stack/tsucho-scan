@@ -52,13 +52,13 @@ import {
 import { useAuth } from "@/lib/auth";
 import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
+import { exportSummary, scopeIds, type ExportSummary } from "@/lib/exportsummary";
 import {
   analyzeRows,
   applyEdit,
   applyFix,
   blankRow,
   dupBadges,
-  dupPairsIn,
   duplicatePairs,
   explainOpen,
   insertRowAfter,
@@ -188,6 +188,8 @@ export default function Workbench() {
   const [jumpNext, setJumpNext] = useState<TxRef | null>(null);
   // Cặp mặt sổ nghi cùng một trang đang mở hộp so sánh hai ảnh (task 1.7)
   const [dupOpen, setDupOpen] = useState<DupPair | null>(null);
+  /** Mặt sổ cần nhảy tới dòng cần soát đầu tiên (từ «Tóm tắt trước khi xuất»); null = không có việc chờ. */
+  const [goNeed, setGoNeed] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -410,6 +412,14 @@ export default function Workbench() {
      `dupPairs` đã loại các cặp người dùng bảo「Không phải trùng」(lưu ở server, `ws.dup_ok`). */
   const dupPairs = useMemo(() => duplicatePairs(sheets, store, ws?.dup_ok ?? []), [sheets, store, ws?.dup_ok]);
   const dupBadge = useMemo(() => dupBadges(dupPairs), [dupPairs]);
+
+  /* Tóm tắt trước khi xuất, cho từng phạm vi (hộp Xuất file tự chọn phạm vi nào hiện phạm vi đó). Dùng đúng
+     `perSheet`-style định nghĩa «cần soát», `alarms` và `dupPairs` ở trên nên không thể lệch với màn hình. */
+  const exportSummaries = useMemo(() => {
+    const make = (scope: "current" | "ticked" | "all") =>
+      exportSummary(sheets, store, scopeIds(scope, store, active, ticked), links, dupPairs);
+    return { current: make("current"), ticked: make("ticked"), all: make("all") };
+  }, [sheets, store, active, ticked, links, dupPairs]);
   const dupWith = useMemo(
     () => Object.fromEntries(Object.entries(dupBadge).map(([b, p]) => [b, sheets.find((x) => x.id === p.a)?.name ?? p.a])),
     [dupBadge, sheets],
@@ -677,6 +687,15 @@ export default function Workbench() {
     setJumpNext(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpNext, flatRows]);
+
+  /* Từ «Tóm tắt trước khi xuất»: đợi bảng của mặt sổ đích vẽ xong (flatRows tính theo mặt đang xem) rồi nhảy tới
+     dòng cần soát đầu tiên của nó. */
+  useEffect(() => {
+    if (!goNeed || active !== goNeed) return;
+    jumpBad(1, null);
+    setGoNeed(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goNeed, active, flatRows]);
 
   /** Thanh gợi ý: vì sao dòng đang chọn vàng + các phương án sửa một chạm (null nếu dòng không cần soát). */
   const fixBar = useMemo(() => {
@@ -997,6 +1016,21 @@ export default function Workbench() {
       const r = prev[to];
       return r?.link_ok ? { ...prev, [to]: { ...r, link_ok: null } } : prev;
     });
+  /** Bấm một mục trong «Tóm tắt trước khi xuất»: đóng hộp rồi nhảy tới chỗ đó. */
+  const jumpFromExport = (kind: "need" | "break" | "dup", s: ExportSummary) => {
+    setShowExport(false);
+    if (kind === "need" && s.firstNeed) {
+      setActive(s.firstNeed);
+      setPane("result");
+      setGoNeed(s.firstNeed);                 // effect bên dưới đặt con trỏ vào ô lệch SAU khi bảng của mặt đó vẽ xong
+    } else if (kind === "break" && s.firstBreak) {
+      setMode("list");
+      setActive(s.firstBreak.to);
+      setPane("result");
+    } else if (kind === "dup" && s.firstDup) {
+      setDupOpen(s.firstDup);
+    }
+  };
   /** Bấm chip「⚠ N chỗ đứt」: sang dạng danh sách và cuộn tới mặt sổ có chỗ đứt đầu tiên. */
   const goFirstBreak = () => {
     if (!alarms.length) return;
@@ -1707,11 +1741,8 @@ export default function Workbench() {
         tickedCount={ticked.size}
         totalCount={Object.keys(store).length || sheets.length}
         hasCurrent={!!active}
-        dupCount={{
-          current: 0,
-          ticked: dupPairsIn(dupPairs, ticked),
-          all: dupPairs.length,
-        }}
+        summary={exportSummaries}
+        onJump={jumpFromExport}
         busy={exporting}
         onCancel={() => setShowExport(false)}
         onExport={doExport}

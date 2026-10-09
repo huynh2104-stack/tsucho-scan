@@ -9,12 +9,13 @@
  */
 
 import { useEffect, useState } from "react";
+import { hasIssues, type ExportSummary } from "@/lib/exportsummary";
 import { useT } from "@/lib/i18n";
 
 export type ExportOpts = {
   format: "xlsx" | "csv";
   scope: "current" | "ticked" | "all";
-  structure: "per_sheet" | "merged";
+  structure: "per_sheet" | "per_account" | "merged";
   add_total: boolean;
   name: string;
 };
@@ -65,7 +66,8 @@ export default function ExportDialog({
   tickedCount,
   totalCount,
   hasCurrent,
-  dupCount,
+  summary,
+  onJump,
   busy,
   onCancel,
   onExport,
@@ -75,8 +77,10 @@ export default function ExportDialog({
   tickedCount: number;
   totalCount: number;
   hasCurrent: boolean;
-  /** Số cặp mặt sổ nghi trùng nhau trong từng phạm vi xuất — cảnh báo, không chặn. */
-  dupCount: Record<ExportOpts["scope"], number>;
+  /** Tóm tắt từng phạm vi xuất (dòng cần soát, chỗ đứt, cặp trùng) — chỉ nhắc, không chặn. */
+  summary: Record<ExportOpts["scope"], ExportSummary>;
+  /** Bấm một mục trong tóm tắt: đóng hộp và nhảy tới chỗ đó. */
+  onJump: (kind: "need" | "break" | "dup", s: ExportSummary) => void;
   busy: boolean;
   onCancel: () => void;
   onExport: (o: ExportOpts) => void;
@@ -111,6 +115,13 @@ export default function ExportDialog({
   const set = <K extends keyof ExportOpts>(k: K, v: ExportOpts[K]) =>
     setOpts((p) => ({ ...p, [k]: v }));
 
+  const sum = summary[opts.scope];
+  const issues = hasIssues(sum);
+  const items: { kind: "need" | "break" | "dup"; label: string; tip?: string }[] = [];
+  if (sum.need > 0) items.push({ kind: "need", label: t.sumNeed(sum.need) });
+  if (sum.breaks > 0) items.push({ kind: "break", label: t.sumBreak(sum.breaks) });
+  if (sum.dups > 0) items.push({ kind: "dup", label: t.sumDup(sum.dups), tip: t.expDupWarn(sum.dups) });
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
@@ -122,16 +133,53 @@ export default function ExportDialog({
         aria-modal="true"
         aria-labelledby="exp-title"
         onClick={(e) => e.stopPropagation()}
-        className="max-h-full w-full max-w-lg overflow-auto rounded-xl border border-rule bg-card shadow-2xl"
+        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
       >
-        <header className="border-b border-rule px-5 py-3">
+        <header className="flex-none border-b border-rule px-5 py-3">
           <h2 id="exp-title" className="text-[16px] font-bold">
             {t.exportTitle}
           </h2>
           <p className="text-[12.5px] text-ink3">{t.exportSubtitle}</p>
         </header>
 
-        <div className="flex flex-col gap-4 px-5 py-4">
+        {/* Chỉ phần THÂN cuộn: nút Xuất ở chân luôn nằm trong tầm mắt dù hộp cao hơn màn hình (3 cách trình bày + tóm tắt) */}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+          {/* Tóm tắt: chỉ NHẮC, không chặn — mỗi mục là liên kết nhảy tới chỗ đó */}
+          <section
+            data-export-summary
+            data-issues={issues ? "yes" : "no"}
+            className={`rounded-lg border px-3 py-2 text-[12.5px] ${
+              issues ? "border-warnedge bg-warnbg text-warnink" : "border-okedge bg-okbg text-okink"
+            }`}
+          >
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider opacity-80">{t.sumTitle}</h3>
+            {issues ? (
+              <>
+                <ul className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  {items.map((it, i) => (
+                    <li key={it.kind} className="flex items-center gap-2">
+                      {i > 0 && <span aria-hidden>·</span>}
+                      <button
+                        type="button"
+                        data-sum={it.kind}
+                        title={it.tip}
+                        onClick={() => onJump(it.kind, sum)}
+                        className="font-semibold underline decoration-dotted underline-offset-2 hover:no-underline"
+                      >
+                        {it.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-[11.5px] opacity-80">{t.sumHint}</p>
+              </>
+            ) : (
+              <p data-sum-ok className="mt-1 font-medium">
+                ✓ {t.sumOk}
+              </p>
+            )}
+          </section>
+
           {/* 1. Định dạng */}
           <section className="flex flex-col gap-1.5">
             <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
@@ -185,12 +233,18 @@ export default function ExportDialog({
             <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink3">
               3. {t.expStructure}
             </h3>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-1.5">
               <Choice
                 checked={opts.structure === "per_sheet"}
                 onSelect={() => set("structure", "per_sheet")}
                 title={t.expPerSheet}
                 hint={opts.format === "csv" ? t.expPerSheetCsv : t.expPerSheetHint}
+              />
+              <Choice
+                checked={opts.structure === "per_account"}
+                onSelect={() => set("structure", "per_account")}
+                title={t.expPerAccount}
+                hint={opts.format === "csv" ? t.expPerAccountCsv : t.expPerAccountHint}
               />
               <Choice
                 checked={opts.structure === "merged"}
@@ -227,18 +281,9 @@ export default function ExportDialog({
             </div>
           </section>
 
-          {dupCount[opts.scope] > 0 && (
-            <p
-              role="alert"
-              data-dup-warn
-              className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[12.5px] font-medium text-warnink"
-            >
-              ⚠ {t.expDupWarn(dupCount[opts.scope])}
-            </p>
-          )}
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-rule px-5 py-3">
+        <footer className="flex flex-none items-center justify-end gap-2 border-t border-rule px-5 py-3">
           <button
             onClick={onCancel}
             className="rounded-lg border border-rule px-4 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink"
@@ -250,7 +295,7 @@ export default function ExportDialog({
             disabled={busy}
             className="rounded-lg border border-accent bg-accent px-4 py-2 text-[14px] font-semibold text-white hover:brightness-110 disabled:opacity-45"
           >
-            {busy ? t.expWorking : t.expDownload}
+            {busy ? t.expWorking : issues ? t.expAnyway : t.expDownload}
           </button>
         </footer>
       </div>

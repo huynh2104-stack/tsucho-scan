@@ -600,7 +600,7 @@ export async function exportFile(
   wsId: string,
   body: {
     format: "xlsx" | "csv";
-    structure: "per_sheet" | "merged";
+    structure: "per_sheet" | "per_account" | "merged";
     add_total: boolean;
     name: string;
     sheet_ids?: string[];

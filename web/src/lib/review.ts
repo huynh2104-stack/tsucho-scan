@@ -890,7 +890,3 @@ export function dupBadges(pairs: DupPair[]): Record<string, DupPair> {
   return out;
 }
 
-/** Số cặp nghi trùng mà CẢ HAI mặt đều nằm trong phạm vi xuất file. */
-export function dupPairsIn(pairs: DupPair[], ids: ReadonlySet<string>): number {
-  return pairs.filter((p) => ids.has(p.a) && ids.has(p.b)).length;
-}

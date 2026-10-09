@@ -11,7 +11,6 @@ import {
   blankRow,
   chainChecks,
   dupBadges,
-  dupPairsIn,
   duplicatePairs,
   editChanges,
   explainOpen,
@@ -863,11 +862,3 @@ test("dupBadges: mỗi mặt nghi là bản chụp lại chỉ gắn với mặt
   assert.equal(sau.c.a, "b");
 });
 
-test("dupPairsIn: chỉ đếm cặp mà CẢ HAI mặt đều nằm trong phạm vi xuất file", () => {
-  const store = { a: withBalances("a", BAL), b: withBalances("b", BAL), c: withBalances("c", BAL) };
-  const pairs = duplicatePairs(ids("a", "b", "c"), store);
-  assert.equal(dupPairsIn(pairs, new Set(["a", "b", "c"])), 3);
-  assert.equal(dupPairsIn(pairs, new Set(["a", "b"])), 1);
-  assert.equal(dupPairsIn(pairs, new Set(["a"])), 0);
-  assert.equal(dupPairsIn(pairs, new Set()), 0);
-});
