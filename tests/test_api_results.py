@@ -242,3 +242,52 @@ def test_api_put_nhan_link_ok_va_tra_400_khi_sai(client):
     assert client.put(url, json={"blocks": rows}).json()["link_ok"] == {"prev": "s0", "diff": 7}     # không gửi ⇒ giữ
     assert "link_ok" not in client.put(url, json={"blocks": rows, "link_ok": None}).json()
     assert client.put(url, json={"blocks": rows, "link_ok": {"prev": "s0", "diff": "x"}}).status_code == 400
+
+
+# ── Task 2.3: sửa thông tin sổ (meta của khối) ───────────────────────────────────────────
+
+def test_meta_do_nguoi_dung_sua_duoc_luu_nguyen_ven_ke_ca_edited_va_khoa_la(ws):
+    meta = {"bank_name": "見本銀行", "store_no": None, "account_no": "0012345", "holder": "ヤマダ タロウ",
+            "edited": True, "khoa_tuong_lai": [1]}
+    results.save_edits(ws.id, "s1", [{"meta": meta, "rows": [_row("A", 1)]}])
+    assert results.load_all(ws.id)["s1"]["blocks"][0]["meta"] == meta
+
+
+def test_meta_khuyet_hoac_rong_van_luu_duoc_nhu_truoc(ws):
+    results.save_edits(ws.id, "s1", [{"rows": [_row("A", 1)]}, {"meta": None, "rows": []}, {"meta": {}, "rows": []}])
+    assert "s1" in results.load_all(ws.id)
+
+
+@pytest.mark.parametrize("meta, khoa", [
+    ("abc", "định dạng"),
+    ([], "định dạng"),
+    ({"bank_name": 5}, "bank_name"),
+    ({"account_no": {"a": 1}}, "account_no"),
+    ({"holder": ["x"]}, "holder"),
+    ({"store_no": "9" * 201}, "store_no"),
+    ({"bank_name": "ok", "edited": "co"}, "edited"),
+    ({"edited": 1}, "edited"),
+])
+def test_meta_sai_kieu_bi_tu_choi_va_khong_ghi_gi(ws, meta, khoa):
+    with pytest.raises(ValueError, match=khoa):
+        results.save_edits(ws.id, "s1", [{"meta": meta, "rows": [_row("A", 1)]}])
+    assert "s1" not in results.load_all(ws.id)
+
+
+def test_meta_dai_dung_bang_tran_van_nhan(ws):
+    results.save_edits(ws.id, "s1", [{"meta": {"holder": "あ" * 200}, "rows": [_row("A", 1)]}])
+    assert len(results.load_all(ws.id)["s1"]["blocks"][0]["meta"]["holder"]) == 200
+
+
+def test_api_tra_400_khi_meta_sai_kieu(client):
+    from test_api_auth import register
+
+    register(client)
+    wid = client.post("/api/ws").json()["id"]
+    w = workspace.load(wid)
+    w.sheets.append(workspace.Sheet(id="s1", name="a", origin="a.png"))
+    w.save()
+    url = f"/api/ws/{wid}/results/s1"
+    assert client.put(url, json={"blocks": [{"meta": {"bank_name": {"x": 1}}, "rows": []}]}).status_code == 400
+    ok = client.put(url, json={"blocks": [{"meta": {"bank_name": "A銀行", "edited": True}, "rows": []}]})
+    assert ok.status_code == 200 and ok.json()["blocks"][0]["meta"]["bank_name"] == "A銀行"

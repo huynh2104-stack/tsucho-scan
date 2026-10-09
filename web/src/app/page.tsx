@@ -50,6 +50,7 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
 import {
   analyzeRows,
@@ -918,6 +919,11 @@ export default function Workbench() {
     // vào `orig`, và trả lại đúng mảng cũ nếu không có gì đổi (gõ lại giá trị đang có).
     patchRows(ref.sheet, ref.block, (rows) => applyEdit(rows, ref.row, field, value));
 
+  /** Lưu thông tin sổ (銀行名…) của một khối, và điền luôn cho các mặt sau chưa có thông tin nếu `propagate`.
+   *  Đi qua commitStore nên Ctrl+Z hoàn tác CẢ lượt (kể cả các mặt được điền theo) và autosave tự lưu. */
+  const saveMeta = (ref: BlockRef, draft: MetaDraft, propagate: boolean) =>
+    commitStore((prev) => applyMetaEdit(sheets.map((s) => s.id), prev, ref, draft, propagate));
+
   /** Bấm ✓ / bỏ ✓「đã soát」của một dòng. Đi qua patchRows nên Ctrl+Z hoàn tác được và autosave tự lưu. */
   const toggleReviewed: RowActionFn = (ref) => {
     const now = Math.floor(Date.now() / 1000);       // lấy giờ NGOÀI hàm cập nhật state (React có thể gọi nó hai lần)
@@ -1590,6 +1596,7 @@ export default function Workbench() {
               onConfirmAll={confirmAll}
               onAddRow={addRow}
               onAutoBalance={autoBalance}
+              onSaveMeta={saveMeta}
               links={linkByTo}
               onDismissLink={dismissLink}
               onUndismissLink={undismissLink}

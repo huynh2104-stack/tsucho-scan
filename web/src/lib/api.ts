@@ -64,6 +64,8 @@ export type AccountMeta = {
   store_no: string | null;
   account_no: string | null;
   holder: string | null;
+  /** Người dùng đã sửa/điền tay (task 2.3). File Excel không thể hiện; máy quét không bao giờ đặt cờ này. */
+  edited?: boolean;
 };
 
 /** Một khối dòng cùng một sổ, trong phạm vi một mặt sổ. */

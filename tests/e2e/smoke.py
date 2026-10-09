@@ -45,6 +45,9 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     mới (Enter) → mở đúng hồ sơ đó, hai hồ sơ không lẫn mặt sổ; mở lại hồ sơ cũ; đổi tên bằng bấm đúp (Esc bỏ);
     lưu trữ ↔ bỏ lưu trữ; hồ sơ lưu trữ không tự mở lại ở trang chủ; xoá phải BẤM nút (Enter chỉ huỷ hộp, không xoá) và xoá thật;
     hướng dẫn có bước chỉ vào liên kết «Hồ sơ»
+ 18 sửa thông tin sổ (✎ ở đầu thẻ sổ): mặt ② bị xoá hết thông tin → sửa 銀行名 ở mặt ① và áp cho mặt sau →
+    server lưu cả hai (cờ edited) → một Ctrl+Z hoàn tác cả hai, «Làm lại» làm lại cả hai → xuất Excel: ô B1 của
+    cả hai sheet = tên mới; bỏ tick «áp dụng» thì mặt sau giữ nguyên; hộp không có gì để điền khi không còn mặt sau
 """
 from __future__ import annotations
 
@@ -1058,6 +1061,117 @@ def step_cases(pg, base: str, ctx: dict) -> str:
             "lưu trữ không tự mở lại · xoá phải bấm nút và xoá thật")
 
 
+def step_book_info(pg, base: str, ctx: dict) -> str:
+    """Task 2.3: sửa thông tin sổ ở đầu thẻ. Sổ mẫu mặt ② bị xoá hết thông tin (như sổ không có bìa), sửa mặt ① rồi áp
+    cho mặt sau. Cuối bước trả thông tin hai mặt về như cũ để các bước sau không bị ảnh hưởng."""
+    from openpyxl import load_workbook
+
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    ws_id = j("/api/ws")["workspaces"][0]["id"]
+    data = j(f"/api/ws/{ws_id}")
+    by_name = {s["name"]: s["id"] for s in data["sheets"]}
+    sid1, sid2 = by_name[SAMPLE_SHEET_NAME], by_name[SHEET2_NAME]
+    meta1 = dict(data["results"][sid1]["blocks"][0]["meta"])
+    original = {sid: [dict(b["meta"]) for b in data["results"][sid]["blocks"]] for sid in (sid1, sid2)}
+    assert meta1["bank_name"] and meta1["account_no"], f"sổ mẫu mặt ① phải có ngân hàng + số tài khoản: {meta1}"
+    EMPTY = {"bank_name": None, "store_no": None, "account_no": None, "holder": None}
+
+    def set_meta(sid, metas):
+        """Ghi thẳng meta các khối của một mặt sổ qua API (giữ nguyên dòng)."""
+        blocks = j(f"/api/ws/{ws_id}")["results"][sid]["blocks"]
+        for b, m in zip(blocks, metas):
+            b["meta"] = m
+        r = pg.request.put(f"{base}/api/ws/{ws_id}/results/{sid}", data={"blocks": blocks})
+        assert r.ok, r.text()
+
+    def metas_on_server(sid):
+        return [b["meta"] for b in j(f"/api/ws/{ws_id}")["results"][sid]["blocks"]]
+
+    def open_sheet1():
+        pg.goto(f"{base}/")
+        pg.get_by_text(SAMPLE_SHEET_NAME).first.click(timeout=15000)
+        pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+
+    dialog = pg.locator("[data-testid=bookinfo-dialog]")
+    field = lambda name: dialog.locator(f'input[data-field="{name}"]')
+
+    # ── Mặt ② mất hết thông tin; sửa mặt ① và áp cho mặt sau ──
+    set_meta(sid2, [EMPTY] * len(original[sid2]))
+    open_sheet1()
+    pg.locator('[data-act="edit-meta"]').first.click()
+    dialog.wait_for(timeout=5000)
+    assert field("bank_name").input_value() == meta1["bank_name"], "hộp phải hiện sẵn thông tin hiện tại"
+    assert field("account_no").input_value() == meta1["account_no"]
+    tick = dialog.locator("[data-testid=bookinfo-propagate]")
+    assert tick.is_checked(), "ô áp cho mặt sau phải bật sẵn khi có mặt sau trống"
+    assert "Áp dụng cho 1 mặt sổ phía sau chưa có thông tin" in dialog.inner_text(), dialog.inner_text()
+    field("bank_name").fill("テスト銀行")
+    dialog.locator("[data-testid=bookinfo-save]").click()
+    dialog.wait_for(state="detached", timeout=5000)
+    assert "テスト銀行" in pg.locator("[data-account-head]").first.inner_text(), "tiêu đề thẻ sổ phải đổi ngay"
+
+    def both_new():
+        m1, m2 = metas_on_server(sid1), metas_on_server(sid2)
+        return (m1[0]["bank_name"] == "テスト銀行" and m1[0].get("edited") is True
+                and m2[0]["bank_name"] == "テスト銀行" and m2[0].get("edited") is True
+                and m2[0]["account_no"] == meta1["account_no"])
+    wait_until(both_new, "server lưu cả hai mặt (cờ edited) và mặt ② được điền số tài khoản", timeout=15)
+
+    # ── Một Ctrl+Z hoàn tác cả hai; «Làm lại» làm lại cả hai ──
+    pg.keyboard.press("Control+z")
+    wait_until(lambda: metas_on_server(sid1)[0]["bank_name"] == meta1["bank_name"]
+               and metas_on_server(sid2)[0]["bank_name"] is None, "Ctrl+Z hoàn tác cả hai mặt sổ", timeout=15)
+    assert "edited" not in metas_on_server(sid1)[0], "hoàn tác phải trả về đúng bản trước, không còn cờ edited"
+    pg.get_by_role("button", name=re.compile("Làm lại")).first.click()
+    wait_until(both_new, "Làm lại áp lại cả hai mặt", timeout=15)
+
+    # ── Xuất Excel: ô B1 của cả hai sheet đúng tên mới ──
+    path = export_xlsx(pg, ctx, "thong-tin-so.xlsx")
+    pg.keyboard.press("Escape")
+    wb = load_workbook(path, data_only=True)
+    banks = [(w["A1"].value, w["B1"].value, w["B3"].value) for w in wb.worksheets]
+    assert len(banks) >= 2 and all(a == "銀行" for a, _, _ in banks), banks
+    assert all(b == "テスト銀行" for _, b, _ in banks), f"B1 các sheet: {[b for _, b, _ in banks]}"
+    assert all(n == meta1["account_no"] for _, _, n in banks), f"B3 các sheet: {[n for _, _, n in banks]}"
+
+    # ── Bỏ tick «áp dụng»: mặt sau giữ nguyên ──
+    set_meta(sid2, [EMPTY] * len(original[sid2]))
+    set_meta(sid1, original[sid1])
+    open_sheet1()
+    pg.locator('[data-act="edit-meta"]').first.click()
+    dialog.wait_for(timeout=5000)
+    dialog.locator("[data-testid=bookinfo-propagate]").uncheck()
+    field("bank_name").fill("テスト銀行2")
+    field("bank_name").press("Enter")                                    # Enter trong ô = Lưu
+    dialog.wait_for(state="detached", timeout=5000)
+    wait_until(lambda: metas_on_server(sid1)[0]["bank_name"] == "テスト銀行2", "mặt ① đã lưu tên mới")
+    assert metas_on_server(sid2)[0]["bank_name"] is None, "bỏ tick thì mặt ② không được điền"
+
+    # ── Mặt ② nay là mặt cuối có kết quả: không còn gì để điền; Esc đóng hộp mà không đổi gì ──
+    pg.get_by_text(SHEET2_NAME).first.click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+    pg.locator('[data-act="edit-meta"]').first.click()
+    dialog.wait_for(timeout=5000)
+    assert dialog.locator("[data-testid=bookinfo-propagate]").count() == 0
+    assert "không có mặt sổ nào còn thiếu thông tin" in dialog.inner_text(), dialog.inner_text()
+    field("bank_name").fill("không lưu")
+    pg.keyboard.press("Escape")
+    dialog.wait_for(state="detached", timeout=5000)
+    time.sleep(1.2)                                                      # quá hạn autosave (800 ms) mà vẫn không đổi
+    assert metas_on_server(sid2)[0]["bank_name"] is None, "Esc không được lưu gì"
+
+    # ── Trả về như cũ cho các bước sau ──
+    for sid in (sid1, sid2):
+        set_meta(sid, original[sid])
+    open_sheet1()
+    assert metas_on_server(sid1) == original[sid1] and metas_on_server(sid2) == original[sid2]
+    return ("hộp hiện sẵn thông tin hiện tại · áp cho mặt sau (tick bật sẵn, «1 mặt sổ») · server lưu cả hai + cờ edited · "
+            "một Ctrl+Z hoàn tác cả hai, Làm lại áp lại · Excel: B1 và B3 của mọi sheet đúng · bỏ tick thì mặt sau giữ nguyên · "
+            "hết mặt sau thì hộp báo không có gì để điền · Esc không lưu")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1076,6 +1190,7 @@ STEPS = [
     ("15. Chỗ nối số dư giữa các mặt sổ", step_sheet_links),
     ("16. Hai ảnh chụp cùng một trang", step_duplicate_pages),
     ("17. Danh sách hồ sơ", step_cases),
+    ("18. Sửa thông tin sổ", step_book_info),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

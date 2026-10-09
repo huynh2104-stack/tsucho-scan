@@ -31,6 +31,8 @@ import {
   type SheetLink,
 } from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
+import { followersOf, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
+import BookInfoDialog from "@/components/BookInfoDialog";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
 
@@ -660,6 +662,7 @@ function AccountCard({
   onConfirmAll,
   onAddRow,
   onAutoBalance,
+  onEditMeta,
   selected,
   onSelectRow,
   rowBase,
@@ -687,6 +690,8 @@ function AccountCard({
   /** Chèn một dòng trống NGAY DƯỚI dòng `ref`. */
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
+  /** Mở hộp sửa thông tin sổ (銀行名/店番号/口座番号/名義) của khối này. */
+  onEditMeta: (sheet: string, block: number) => void;
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
   /** Số thứ tự dòng đầu tiên của khối này trong TOÀN lưới. */
@@ -721,7 +726,7 @@ function AccountCard({
 
   return (
     <section className="m-2.5 overflow-hidden rounded-xl border border-rule bg-card shadow-[var(--shadow)]">
-      <header className="flex flex-wrap items-center gap-2 border-b border-rule bg-card2 px-3 py-2">
+      <header data-account-head className="flex flex-wrap items-center gap-2 border-b border-rule bg-card2 px-3 py-2">
         {/* Chỉ đánh số khi MỘT mặt sổ chứa nhiều sổ khác nhau — nếu không, con
             số này nằm cạnh số thứ tự mặt sổ và gây nhầm hai thứ khác nhau. */}
         {ofTotal > 1 && (
@@ -741,6 +746,15 @@ function AccountCard({
         {/* Tên file gốc + số trang — cho biết dòng này lấy từ đâu ra */}
         <p className="truncate text-[10.5px] text-ink3">{sourceLabel}</p>
         </div>
+        <button
+          data-act="edit-meta"
+          onClick={() => onEditMeta(refs[0].sheet, refs[0].block)}
+          title={t.bookInfoEdit}
+          aria-label={t.bookInfoEdit}
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border border-rule text-[12px] text-ink3 hover:border-accent hover:bg-accentpale hover:text-accent"
+        >
+          ✎
+        </button>
         <span className="flex-1" />
         {q && (
           <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[11px] font-semibold text-accent">
@@ -844,6 +858,7 @@ export default function ReviewPane({
   onConfirmAll,
   onAddRow,
   onAutoBalance,
+  onSaveMeta,
   links,
   onDismissLink,
   onUndismissLink,
@@ -867,6 +882,8 @@ export default function ReviewPane({
   /** Chèn một dòng trống ngay dưới dòng `ref`. */
   onAddRow: (ref: TxRef) => void;
   onAutoBalance: (sheet: string, block: number) => void;
+  /** Lưu thông tin sổ người dùng vừa sửa; `propagate` = điền luôn cho các mặt sau chưa có thông tin (xem `applyMetaEdit`). */
+  onSaveMeta: (ref: BlockRef, draft: MetaDraft, propagate: boolean) => void;
   /** Kết quả kiểm chỗ nối với mặt sổ đứng trước, khoá theo id mặt sổ ĐƯỢC kiểm (xem `sheetLinks`). */
   links: Record<string, SheetLink>;
   onDismissLink: (link: SheetLink) => void;
@@ -879,6 +896,8 @@ export default function ReviewPane({
   const g = t.colGloss;
   const scroller = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("");
+  /** Khối đang mở hộp «Thông tin sổ» (null = đóng). */
+  const [metaTarget, setMetaTarget] = useState<BlockRef | null>(null);
 
   /* ── Bôi đen nhiều ô để chép sang Excel ────────────────────────────
      Kéo chuột từ ô này sang ô khác là chọn cả hình chữ nhật; Ctrl+C chép ra
@@ -1061,6 +1080,7 @@ export default function ReviewPane({
         onConfirmAll={onConfirmAll}
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
+        onEditMeta={(sheet, block) => setMetaTarget({ sheet, block })}
         selected={selected}
         onSelectRow={onSelectRow}
         rowBase={rowBase[`${sheetId}:${bi}`] ?? 0}
@@ -1237,6 +1257,19 @@ export default function ReviewPane({
         )}
         <span className="text-[11px] text-ink3">{t.editableHint}</span>
       </div>
+
+      {metaTarget && store[metaTarget.sheet]?.blocks[metaTarget.block] && (
+        <BookInfoDialog
+          key={`${metaTarget.sheet}:${metaTarget.block}`}
+          meta={store[metaTarget.sheet].blocks[metaTarget.block].meta}
+          followers={followersOf(sheets.map((s) => s.id), store, metaTarget).length}
+          onCancel={() => setMetaTarget(null)}
+          onSave={(draft, propagate) => {
+            onSaveMeta(metaTarget, draft, propagate);
+            setMetaTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }

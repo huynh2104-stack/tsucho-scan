@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.2 (09/10) — pytest **387 passed** · `npm test` **144 pass** · build xanh · E2E `smoke.py` **17/17 bước** (~45 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.3 (09/10) — pytest **399 passed** · `npm test` **162 pass** · build xanh · E2E `smoke.py` **18/18 bước** (~50 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1046,7 +1046,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.7 Ảnh chụp trùng trang (xong 09/10/2026) — **hết giai đoạn 1**
 - [x] 2.1 Backend hồ sơ (xong 09/10/2026)
 - [x] 2.2 Trang hồ sơ (xong 09/10/2026)
-- [ ] 2.3 Sửa thông tin sổ
+- [x] 2.3 Sửa thông tin sổ (xong 09/10/2026)
 - [ ] 2.4 Xuất theo tài khoản
 - [ ] 3.1 Cài đặt người dùng
 - [ ] 3.2 Chế độ soát nhanh — **mốc demo B**
@@ -1212,6 +1212,17 @@ Quan sát khi viết E2E (không sửa):
 - **Bẻ thử E2E** (build lại từng lần): (a) trang chủ mở lại hồ sơ đã lưu trữ → bước 17 đỏ ở «trang chủ bỏ qua hồ sơ lưu trữ»; (b) hộp xoá cho Enter xác nhận → đỏ ở «Enter không được xoá hồ sơ». Cả hai bị bắt. Lần đầu viết bước 17 tôi cũng đoán sai hành vi Enter (tưởng hộp còn mở, thực ra Enter rơi vào nút Huỷ nên hộp đóng) — test đã sửa theo đúng thiết kế.
 - **Kiểm bằng mắt** (Playwright, dữ liệu tạm): trang danh sách tiếng Việt và tiếng Nhật, hộp xoá, màn hình hẹp 390px (thẻ xuống dòng gọn), thanh trên ở bàn làm việc có tên + «← Hồ sơ». **Chưa thử**: dữ liệu thật của anh (danh sách hồ sơ thật), trang `/cases/` trên bản triển khai Render.
 - **Giới hạn cần biết**: chưa có sắp xếp tuỳ chọn hay phân trang (sửa gần nhất lên đầu; vài chục hồ sơ thì ổn); nhãn «Đang mở» chỉ đúng với TRÌNH DUYỆT này (đổi máy thì không có); mở hồ sơ lưu trữ không tự bỏ lưu trữ — chỉ hiện thẻ; `GET /api/ws` vẫn nạp kết quả của mọi hồ sơ (xem ghi chú 2.1 về chỉ mục).
+
+
+**Task 2.3 — xong 09/10/2026** (pytest **399** (+12) · `npm test` **162** (+18) · build xanh · E2E **18/18 bước**, thêm bước 18).
+- **Giao diện**: nút ✎ ở đầu mỗi thẻ sổ (`ReviewPane.AccountCard`, `data-act="edit-meta"`) mở hộp **«Thông tin sổ»** (`components/BookInfoDialog.tsx`): bốn ô 銀行名 / 店番号 / 口座番号 / 名義 (hiện sẵn giá trị đang có, Enter = Lưu, Esc = bỏ, phím gõ trong hộp không lọt ra phím tắt của bảng) + ô tick **«Áp dụng cho N mặt sổ phía sau chưa có thông tin»** bật sẵn (không có mặt sau để điền thì thay bằng một dòng báo, không hiện ô tick). Lưu qua `commitStore` ⇒ **một Ctrl+Z hoàn tác cả lượt** (kể cả các mặt sau được điền theo; E2E kiểm), autosave lo phần lưu; `meta.edited = true` ở mọi khối đã đổi (Excel không thể hiện).
+- **Logic thuần `web/src/lib/bookinfo.ts`** (18 test): `cleanField` (cắt khoảng trắng kể cả dấu cách toàn góc, trống → null, **số tài khoản/cửa hàng toàn góc ０１２ → số thường** vì việc gộp sổ và kiểm chỗ nối so sánh CHUỖI, cắt theo ký tự không cắt đôi chữ Hán hiếm), `hasInfo` (= có tên ngân hàng HOẶC số tài khoản, đúng định nghĩa «chưa có thông tin» của kế hoạch), `followersOf`, `applyMetaEdit` (trả lại ĐÚNG kho cũ nếu không đổi gì ⇒ không tạo bước Ctrl+Z; mặt sổ không đụng giữ nguyên tham chiếu; giữ khoá lạ của meta).
+- **Quy tắc «áp cho mặt sau» CHẶT hơn kế hoạch, có chủ ý** (kế hoạch: «điền cho các khối liền sau trống, dừng ở khối đầu tiên đã có thông tin»): chỉ khối **cuối** của một mặt sổ mới nối sang mặt sau (mặt có hai sổ thì sổ đứng trước không liên quan mặt kế); đi các mặt sau theo thứ tự cột trái, bỏ qua mặt chưa quét; **dừng** ở mặt có từ hai sổ trở lên trong một ảnh (không biết sổ nào nối tiếp — điền bừa còn tệ hơn để trống) hoặc ở khối đã có thông tin riêng. Mặt sau chỉ được **điền chỗ trống** (ô đã có chữ, vd tên chủ, giữ nguyên). Cái giá: ảnh có hai sổ cùng thiếu bìa thì không tự lan được, người dùng sửa tay từng sổ.
+- **Máy chủ** (`results.validate_meta`, gọi trong `validate_rows`): từ khi người dùng sửa được `meta`, một giá trị không phải chữ (vd `{"bank_name": {"x":1}}`) sẽ làm hỏng file Excel ở bước xuất — nay chặn ngay lúc lưu (400): bốn trường phải là chữ hoặc null, tối đa 200 ký tự (chỉ chặn rác — dữ liệu thật dài ≤ 7 ký tự, đo trên 48 khối đang có), `edited` phải là đúng/sai, khoá khác giữ nguyên, thiếu `meta` hoặc `meta = null` vẫn nhận như trước. 12 test; bẻ thử 5 chỗ (kiểm kiểu chữ, trần độ dài, kiểm `edited`, bỏ lời gọi `validate_meta`, kiểm dict) thì test đỏ cả 5.
+- **Bẻ thử phía web**: 10 chỗ trong `bookinfo.ts` (bỏ `propagate`, bỏ cờ `edited`, không dừng ở khối có thông tin / mặt hai sổ, khối không-cuối vẫn nối, ghi đè ô đã có chữ, không phát hiện «không đổi», bỏ NFKC, không cắt độ dài, `hasInfo` chỉ ngân hàng) → `npm test` đỏ cả 10; và ô tick bị bỏ qua ở hộp thoại → E2E bước 18 đỏ ở «bỏ tick thì mặt ② không được điền».
+- **E2E bước 18**: xoá hết thông tin mặt ② (như sổ không bìa) → sửa 銀行名 ở mặt ① và áp → server lưu cả hai (cờ `edited`, số tài khoản của ② được điền) → **một Ctrl+Z hoàn tác cả hai**, «Làm lại» áp lại cả hai → xuất Excel: **B1 (銀行) và B3 (口座番号) của mọi sheet đúng** → bỏ tick thì mặt ② giữ nguyên → khi không còn mặt sau, hộp báo không có gì để điền → Esc không lưu → trả thông tin hai mặt về như cũ.
+- **Việc thấy trong lúc làm, chưa giải quyết**: một lần chạy E2E (lần bẻ thử, máy đang bận) bước 11 báo «server xoá reviewed sau khi bỏ ✓» quá 15 s; chạy lại 4 lần liền đều xanh 18/18 nên chưa tái hiện được — ghi lại để nếu thấy lại thì điều tra autosave/`_write_atomic` trên Windows (thử lại khi `os.replace` bị chương trình khác giữ file).
+- **Chưa làm / giới hạn**: sửa thông tin sổ chỉ ở bàn làm việc (chưa có ô «nhập hàng loạt cho cả hồ sơ»); thông tin sửa tay mất khi **quét lại** mặt sổ đó (dữ liệu mới thay hết, giống `link_ok`); `edited` hiện chỉ là cờ lưu — chưa có chỗ nào dùng để cảnh báo «đây là thông tin gõ tay». Hộp mới chưa thử trên máy hẹp (390px) — hộp `max-w-md` co theo chiều ngang như hộp «Hồ sơ mới».
 
 ---
 

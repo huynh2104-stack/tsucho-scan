@@ -93,10 +93,35 @@ def validate_link_ok(value) -> None:
         raise ValueError("link_ok không hợp lệ")
 
 
+# Thông tin sổ của một khối (task 2.3): bốn trường chữ hoặc null. Giá trị thật chỉ vài ký tự; trần này chỉ để
+# chặn dữ liệu rác (một ô dài vài MB làm hỏng cả file Excel), không phải giới hạn nghiệp vụ.
+META_KEYS = ("bank_name", "store_no", "account_no", "holder")
+META_MAX = 200
+
+
+def validate_meta(meta) -> None:
+    """`meta` của một khối: bốn trường chữ (hoặc null) + `edited` (đúng/sai, người đã sửa tay). Khoá khác được GIỮ NGUYÊN.
+
+    Trước task 2.3 không ai sửa `meta` nên không cần kiểm; nay người dùng sửa được, một giá trị không phải chữ
+    (vd `{"a": 1}`) sẽ làm file Excel hỏng ở bước xuất — chặn ngay từ lúc lưu.
+    """
+    if meta is None:
+        return
+    if not isinstance(meta, dict):
+        raise ValueError("Thông tin sổ không đúng định dạng")
+    for key in META_KEYS:
+        value = meta.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > META_MAX):
+            raise ValueError(f"Thông tin sổ không hợp lệ ({key})")
+    if "edited" in meta and not isinstance(meta["edited"], bool):
+        raise ValueError("Thông tin sổ không hợp lệ (edited)")
+
+
 def validate_rows(blocks: list[dict]) -> None:
     """Kiểm tối thiểu dữ liệu người dùng gửi lên. Mọi khoá khác của dòng được GIỮ NGUYÊN
     (orig, reviewed, inferred…, kể cả khoá của phiên bản sau này) để không mất công soát."""
     for block in blocks:
+        validate_meta(block.get("meta"))
         for row in block["rows"]:
             if not isinstance(row, dict):
                 raise ValueError("Dòng không đúng định dạng")
