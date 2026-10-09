@@ -20,6 +20,7 @@ import type { EditField, ResultStore, RowBands, Sheet, Tx } from "@/lib/api";
 import { useT, type Dict } from "@/lib/i18n";
 import {
   calcOf,
+  chainBreaks,
   flattenRows,
   pendingOf,
   progress,
@@ -132,6 +133,8 @@ export default function QuickReview({
   onActivate,
   onEdit,
   onFix,
+  onConfirm,
+  onExport,
   onClose,
 }: {
   wsId: string;
@@ -146,6 +149,10 @@ export default function QuickReview({
   onActivate: (sheetId: string) => void;
   onEdit: (ref: RowRef, field: EditField, value: string | number | null) => void;
   onFix: (ref: RowRef, fix: Fix) => void;
+  /** Bấm ✓ «Đúng rồi»: người đã nhìn dòng này và chấp nhận (cùng việc với nút ✓ ở bảng). */
+  onConfirm: (ref: RowRef) => void;
+  /** Soát xong: sang hộp Xuất file. */
+  onExport: () => void;
   /** Thoát. `ref` = dòng đang xem (null nếu đã xong) để bảng nhảy về đúng dòng đó. */
   onClose: (ref: RowRef | null, field: FocusField | null) => void;
 }) {
@@ -193,8 +200,12 @@ export default function QuickReview({
     if (next) setCur(next.key);
   };
   const close = () => onClose(row ? row.ref : null, row ? row.field : null);
+  const confirm = () => {
+    if (row) onConfirm(row.ref);                // dòng hết «cần soát» ⇒ thẻ tự sang dòng kế (resolveCurrent)
+  };
 
-  // Phím: n = bỏ qua, p = quay lại, Esc = thoát. Gõ trong ô thì n/p là chữ, không phải phím lệnh.
+  // Phím: Ctrl+Enter = ✓ rồi sang dòng kế (cả khi đang gõ dở — ô được ghi nhận trước), Enter (không đang gõ) cũng vậy,
+  // n = bỏ qua, p = quay lại, Esc = thoát. Gõ trong ô thì n/p là chữ, không phải phím lệnh.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
@@ -206,6 +217,17 @@ export default function QuickReview({
         }
         e.preventDefault();
         close();
+        return;
+      }
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (typing) (el as HTMLElement).blur();       // ghi nốt chữ đang gõ dở trước đã
+        confirm();
+        return;
+      }
+      if (e.key === "Enter" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && el?.tagName !== "BUTTON") {
+        e.preventDefault();
+        confirm();
         return;
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -222,6 +244,7 @@ export default function QuickReview({
   });
 
   const prog = progress(seen, pending, rowKey);
+  const breaks = chainBreaks(rows);
   const sheet = row ? sheets.find((s) => s.id === row.ref.sheet) : undefined;
   const block = row ? store[row.ref.sheet]?.blocks[row.ref.block] : undefined;
   const tx: Tx | undefined = row && block ? block.rows[row.ref.row] : undefined;
@@ -314,22 +337,35 @@ export default function QuickReview({
 
             <FixChips fixes={detail.fixes} onApply={(fix) => onFix(ref, fix)} />
 
-            <div className="flex items-center gap-2">
+          </div>
+        ) : seen.size > 0 ? (
+          <div data-testid="quick-done" className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-okedge bg-okbg p-5 text-okink">
+            <h2 className="text-[20px] font-bold">✓ {t.qrDoneTitle}</h2>
+            <p className="tnum text-[15px]">{t.qrDoneCount(seen.size)}</p>
+            {breaks === 0 ? (
+              <>
+                <p className="text-[16px] font-semibold">残高チェーン検証済</p>
+                <p className="text-[14.5px] leading-relaxed">{t.qrDoneChainOk}</p>
+              </>
+            ) : (
+              <p data-testid="quick-done-breaks" className="text-[14.5px] leading-relaxed text-warnink">
+                {t.qrDoneBreaks(breaks)}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
-                data-testid="quick-prev"
-                onClick={() => go(-1)}
-                disabled={pending.length < 2}
-                className="rounded-lg border border-rule px-4 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+                data-testid="quick-export"
+                onClick={onExport}
+                className="rounded-lg border border-accent bg-accent px-5 py-2.5 text-[15px] font-semibold text-accentink hover:brightness-110"
               >
-                ← {t.qrPrev}
+                {t.exportBtn}
               </button>
               <button
-                data-testid="quick-skip"
-                onClick={() => go(1)}
-                disabled={pending.length < 2}
-                className="rounded-lg border border-rule px-4 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+                data-testid="quick-back"
+                onClick={close}
+                className="rounded-lg border border-rule bg-card px-4 py-2.5 text-[14px] text-ink2 hover:border-accentmid hover:text-ink"
               >
-                {t.qrSkip} →
+                {t.qrBackToTable}
               </button>
             </div>
           </div>
@@ -339,6 +375,36 @@ export default function QuickReview({
           </p>
         )}
       </div>
+
+      {/* Thanh nút CỐ ĐỊNH ở chân: thẻ dài (3 đoạn ảnh + 6 ô) cuộn được, nhưng nút «Đúng rồi» luôn nằm trong tầm mắt */}
+      {row && (
+        <div className="flex flex-none flex-wrap items-center gap-2 border-t border-rule bg-card px-4 py-2.5">
+          <button
+            data-testid="quick-prev"
+            onClick={() => go(-1)}
+            disabled={pending.length < 2}
+            className="rounded-lg border border-rule px-3.5 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+          >
+            ← {t.qrPrev}
+          </button>
+          <button
+            data-testid="quick-skip"
+            onClick={() => go(1)}
+            disabled={pending.length < 2}
+            className="rounded-lg border border-rule px-3.5 py-2 text-[14px] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-40"
+          >
+            {t.qrSkip} →
+          </button>
+          <span className="flex-1" />
+          <button
+            data-testid="quick-confirm"
+            onClick={confirm}
+            className="rounded-lg border border-okink bg-okink px-5 py-2 text-[15px] font-semibold text-white hover:brightness-110"
+          >
+            ✓ {t.qrConfirm}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

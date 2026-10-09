@@ -58,6 +58,9 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     theo thứ tự cột trái (ảnh giữa đổi theo mặt sổ), n/p đi tới/lui, Esc thoát và bảng nhảy về đúng dòng đó
  22 thẻ có dải ảnh phóng to (1–3 đoạn, ảnh tải xong, nét liền/đứt đúng, ghi «vị trí ước lượng»), phép tính số dư đúng số,
     lý do + chip gợi ý; gõ lại số dư đúng → dòng hết vàng và tự sang dòng kế (mặt sổ ②), Ctrl+Z hoàn tác, chip một chạm
+ 23 «✓ Đúng rồi — tiếp»: Ctrl+Enter / nút / Enter đều ✓ rồi sang dòng kế, lưu lên máy chủ; ✓ hết thì thẻ hoàn thành —
+    còn dòng chuỗi số dư lệch thì nói thẳng, sửa hết thì «残高チェーン検証済 … không phát hiện được dòng sót»; Ctrl+Z đưa
+    thẻ trở lại; nút Xuất file mở hộp xuất
 """
 from __future__ import annotations
 
@@ -1580,6 +1583,89 @@ def step_quick_card(pg, base: str, ctx: dict) -> str:
             "phép tính đúng từng số · ô gây lệch tô vàng · gõ số dư đúng → lưu, tự sang dòng kế (mặt ②, ảnh giữa đổi) · Ctrl+Z · chip một chạm")
 
 
+def step_quick_finish(pg, base: str, ctx: dict) -> str:
+    """Task 3.2 (bước 3): xác nhận từng dòng bằng một phím, thẻ hoàn thành, nút Xuất file."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    tmp = temp_sample_ws(pg, base)
+    ws_id, s1, s2 = tmp["ws"], tmp["s1"], tmp["s2"]
+    quick = pg.locator("[data-testid=quick-review]")
+    card = pg.locator("[data-testid=quick-card]")
+    progress = pg.locator("[data-testid=quick-progress]")
+    done = pg.locator("[data-testid=quick-done]")
+    confirm = pg.locator("[data-testid=quick-confirm]")
+
+    def reviewed(sid):
+        res = j(f"/api/ws/{ws_id}")["results"][sid]
+        return [r.get("reviewed") for b in res["blocks"] for r in b["rows"]]
+
+    break_sheet_state(pg, base, ws_id, s1, s2)
+    try:
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        pg.locator("[data-testid=quick-start]").click()
+        card.wait_for(timeout=5000)
+        wait_until(lambda: "Dòng 1/3" in progress.inner_text(), "dòng 1/3")
+        assert "Đúng rồi — tiếp (Ctrl+Enter)" in confirm.inner_text(), confirm.inner_text()
+
+        # ── Ba cách xác nhận: Ctrl+Enter (kể cả khi đang gõ dở), nút, Enter ──
+        pg.locator('[data-qf="description"]').click()                      # đang đứng trong một ô, chữ gõ dở phải được ghi lại
+        pg.locator('[data-qf="description"]').fill("ghi chú gõ dở")
+        pg.keyboard.press("Control+Enter")
+        wait_until(lambda: "Dòng 2/3" in progress.inner_text(), "Ctrl+Enter ✓ rồi sang dòng kế")
+        wait_until(lambda: sum(1 for v in reviewed(s1) if v) == 1, "máy chủ lưu ✓ của dòng 1", timeout=15)
+        descs = [r["description"] for r in j(f"/api/ws/{ws_id}")["results"][s1]["blocks"][0]["rows"]]
+        assert "ghi chú gõ dở" in descs, "chữ đang gõ dở phải được ghi lại cùng lúc ✓"
+        confirm.click()
+        wait_until(lambda: "Dòng 3/3 · Mặt「" + SHEET2_NAME in progress.inner_text(), "nút ✓ rồi sang mặt ②")
+        pg.evaluate("document.activeElement && document.activeElement.blur()")
+        pg.keyboard.press("Enter")
+        done.wait_for(timeout=5000)
+        assert card.count() == 0 and pg.locator("[data-testid=quick-confirm]").count() == 0, "xong thì thẻ và thanh nút biến mất"
+        assert pg.locator("[data-testid=quick-start]").count() == 0, "chưa thoát chế độ: nút bắt đầu chưa hiện"
+
+        # ── Còn dòng chuỗi số dư lệch (đã ✓): nói thẳng, KHÔNG khoe «chuỗi khớp» ──
+        breaks = pg.locator("[data-testid=quick-done-breaks]")
+        assert breaks.count() == 1 and "vẫn lệch" in breaks.inner_text(), done.inner_text()
+        assert "残高チェーン検証済" not in done.inner_text()
+
+        # ── Ctrl+Z ×3 đưa thẻ trở lại (hoàn tác cả ✓ lẫn chữ gõ dở) ──
+        for _ in range(4):
+            pg.keyboard.press("Control+z")
+        card.wait_for(timeout=5000)
+        time.sleep(0.5)
+        assert "/3" in progress.inner_text(), progress.inner_text()
+        # Thẻ ở lại dòng đầu tiên được hoàn tác (mặt ②); p, p lùi về dòng đầu của mặt ①
+        wait_until(lambda: "Mặt「" + SHEET2_NAME in progress.inner_text(), "thẻ trở lại ở dòng được hoàn tác đầu tiên (mặt ②)")
+        pg.keyboard.press("p")
+        pg.keyboard.press("p")
+        wait_until(lambda: "Dòng 1/3 · Mặt「" + SAMPLE_SHEET_NAME in progress.inner_text(), "p, p lùi về dòng đầu của mặt ①")
+
+        # ── Sửa thật (chip một chạm làm cả dòng kế hết lệch) rồi ✓ dòng cuối → thẻ hoàn thành «sạch» ──
+        pg.locator('[data-fix="balance"]').click()
+        wait_until(lambda: "Mặt「" + SHEET2_NAME in progress.inner_text(), "chip rồi sang mặt ②")
+        confirm.click()
+        done.wait_for(timeout=5000)
+        assert pg.locator("[data-testid=quick-done-breaks]").count() == 0, done.inner_text()
+        assert "残高チェーン検証済" in done.inner_text() and "không phát hiện được dòng bị sót" in done.inner_text(), done.inner_text()
+        assert "Đã xử lý 3 dòng" in done.inner_text(), done.inner_text()
+
+        # ── Xuất file mở hộp xuất; hết cần soát nên tóm tắt báo sạch ──
+        pg.locator("[data-testid=quick-export]").click()
+        quick.wait_for(state="detached", timeout=5000)
+        dialog = pg.locator("[role=dialog][aria-labelledby=exp-title]")
+        dialog.wait_for(timeout=5000)
+        assert pg.locator("[data-export-summary]").get_attribute("data-issues") == "no"
+        pg.keyboard.press("Escape")
+        dialog.wait_for(state="detached", timeout=5000)
+        assert pg.locator("[data-testid=quick-start]").count() == 0, "hết dòng cần soát: không còn nút Soát nhanh"
+    finally:
+        drop_temp_ws(pg, base, tmp)
+    return ("Ctrl+Enter (kể cả chữ gõ dở) / nút / Enter đều ✓ và sang dòng kế · lưu lên máy chủ · ✓ hết mà chuỗi còn lệch thì nói thẳng · "
+            "Ctrl+Z đưa thẻ trở lại · sửa bằng chip + ✓ cuối → «残高チェーン検証済 … không phát hiện được dòng sót» · Xuất file mở hộp xuất")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1603,6 +1689,7 @@ STEPS = [
     ("20. Cài đặt theo tài khoản", step_settings),
     ("21. Soát nhanh", step_quick_review),
     ("22. Soát nhanh: nội dung thẻ", step_quick_card),
+    ("23. Soát nhanh: xác nhận và hoàn thành", step_quick_finish),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

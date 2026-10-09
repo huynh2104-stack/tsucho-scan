@@ -1658,6 +1658,13 @@ export default function Workbench() {
                 onActivate={setActive}
                 onEdit={editCell}
                 onFix={(ref, fix) => patchRows(ref.sheet, ref.block, (rows) => applyFix(rows, ref.row, fix))}
+                onConfirm={(ref) =>
+                  patchRows(ref.sheet, ref.block, (rows) => setReviewed(rows, ref.row, true, Math.floor(Date.now() / 1000)))
+                }
+                onExport={() => {
+                  setQuickOpen(false);
+                  setShowExport(true);
+                }}
                 onClose={closeQuick}
               />
             ) : (

@@ -7,7 +7,7 @@
  */
 
 import type { ResultStore, RowBands, Tx } from "./api.ts";
-import { analyzeRows, type FocusField } from "./review.ts";
+import { analyzeRows, type Chain, type FocusField } from "./review.ts";
 
 /** Địa chỉ một dòng trong kho (cùng dạng với `TxRef` của ReviewPane). */
 export type RowRef = { sheet: string; block: number; row: number };
@@ -20,6 +20,8 @@ export type QRow = {
   need: boolean;
   /** Ô gây lệch (để đặt con trỏ khi thoát về bảng). */
   field: FocusField;
+  /** Kết quả cột 検算 của dòng (NG = chuỗi số dư lệch ở dòng này, kể cả khi người đã ✓). */
+  chk: Chain;
 };
 
 export const rowKey = (tx: Tx, ref: RowRef): string => tx.rid ?? `${ref.sheet}:${ref.block}:${ref.row}`;
@@ -34,7 +36,7 @@ export function flattenRows(order: string[], store: ResultStore): QRow[] {
       const infos = analyzeRows(block.rows);
       block.rows.forEach((tx, ri) => {
         const ref = { sheet: sid, block: bi, row: ri };
-        out.push({ key: rowKey(tx, ref), ref, need: infos[ri].need, field: infos[ri].field });
+        out.push({ key: rowKey(tx, ref), ref, need: infos[ri].need, field: infos[ri].field, chk: infos[ri].chk });
       });
     });
   }
@@ -42,6 +44,9 @@ export function flattenRows(order: string[], store: ResultStore): QRow[] {
 }
 
 export const pendingOf = (rows: QRow[]): QRow[] => rows.filter((r) => r.need);
+
+/** Số dòng mà chuỗi số dư VẪN lệch (NG) — kể cả những dòng người đã ✓. Thẻ «xong» chỉ được nói «chuỗi số dư khớp» khi bằng 0. */
+export const chainBreaks = (rows: QRow[]): number => rows.filter((r) => r.chk === "NG").length;
 
 /**
  * Dòng đang xem sau mỗi lần dữ liệu đổi.
@@ -53,7 +58,8 @@ export const pendingOf = (rows: QRow[]): QRow[] => rows.filter((r) => r.need);
 export function resolveCurrent(rows: QRow[], cur: string | null, lastIdx: number): { row: QRow | null; idx: number } {
   const idx = cur == null ? -1 : rows.findIndex((r) => r.key === cur);
   if (idx >= 0 && rows[idx].need) return { row: rows[idx], idx };
-  const start = idx >= 0 ? idx + 1 : Math.min(Math.max(lastIdx, 0), rows.length);
+  // Chưa có dòng hiện tại (mới vào, hoặc vừa xong hết rồi Ctrl+Z) thì bắt đầu từ ĐẦU danh sách
+  const start = cur == null ? 0 : idx >= 0 ? idx + 1 : Math.min(Math.max(lastIdx, 0), rows.length);
   for (let i = start; i < rows.length; i++) if (rows[i].need) return { row: rows[i], idx: i };
   for (let i = 0; i < start && i < rows.length; i++) if (rows[i].need) return { row: rows[i], idx: i };
   return { row: null, idx: -1 };
@@ -123,7 +129,7 @@ export function stripRect(bands: RowBands | null, index: number): StripRect | nu
  * không vừa một cột (`STRIP_COL_PX`) thì cắt thành các đoạn, mỗi đoạn lấn sang đoạn kế một chút (5%) để một cột chữ
  * nằm sát chỗ cắt vẫn đọc trọn ở ít nhất một đoạn.
  */
-export const STRIP_ROW_PX = 36;
+export const STRIP_ROW_PX = 30;
 export const STRIP_COL_PX = 600;
 export const STRIP_MAX_SEGMENTS = 3;
 export const STRIP_OVERLAP = 0.05;

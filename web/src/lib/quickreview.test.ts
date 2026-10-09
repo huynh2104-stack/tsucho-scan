@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ResultStore, RowBands, Tx } from "./api.ts";
-import { calcOf, flattenRows, pendingOf, progress, resolveCurrent, rowKey, sheetRowIndex, stepFrom, stripRect, stripSegments, STRIP_COL_PX, type QRow } from "./quickreview.ts";
+import { calcOf, chainBreaks, flattenRows, pendingOf, progress, resolveCurrent, rowKey, sheetRowIndex, stepFrom, stripRect, stripSegments, STRIP_COL_PX, type QRow } from "./quickreview.ts";
 
 const row = (over: Partial<Tx> = {}): Tx => ({
   date: "2025-04-25", date_raw: null, kind: null, description: "x", extra_text: null, store_code: null,
@@ -74,6 +74,11 @@ test("resolveCurrent: dòng hiện tại bị xoá mà phía trước còn dòng
   const idx = rows.findIndex((r) => r.key === "s1-bad1");
   const daXoa = rows.filter((r) => r.key !== "s1-bad1");
   assert.equal(resolveCurrent(daXoa, "s1-bad1", idx).row?.key, "s2-bad0");
+});
+
+test("resolveCurrent: chưa có dòng hiện tại (mới vào, hoặc vừa xong hết rồi Ctrl+Z) thì bắt đầu từ dòng cần soát ĐẦU TIÊN, bất kể vị trí cũ", () => {
+  const rows = flatOf({ s1: [2, 1], s2: [1, 2] });
+  assert.equal(resolveCurrent(rows, null, 7).row?.key, "s1-bad0");
 });
 
 test("resolveCurrent: hết phía sau thì quay về dòng cần soát đầu tiên; không còn dòng nào thì null", () => {
@@ -182,7 +187,7 @@ test("calcOf: số dư trước − rút + gửi = kỳ vọng, chênh = in − 
 test("stripSegments: dòng đã đủ lớn / tờ sổ hẹp thì MỘT đoạn; tờ rộng với chữ nhỏ thì cắt thành nhiều đoạn (tối đa 3)", () => {
   const rect = stripRect(bandsOf(5, { x0: 0, x1: 1 }), 2)!;                 // dòng cao 0.1 ảnh
   assert.equal(stripSegments(rect, 400, 1000).length, 1, "ảnh 400px rộng: dòng cao 100px, đã to sẵn");
-  assert.equal(stripSegments(rect, 4000, 1000).length, 3, "ảnh 4000px rộng: phóng lên vẫn rộng ≥ 3 cột → chặn ở 3");
+  assert.equal(stripSegments(rect, 12000, 1000).length, 3, "ảnh 12000px rộng: phóng lên vẫn rộng ≥ 3 cột → chặn ở 3");
   const nho = stripRect(bandsOf(5, { x0: 0, x1: 1, bands: Array.from({ length: 5 }, (_, i) => ({ y0: 0.1 + i * 0.02, y1: 0.12 + i * 0.02 })) }), 2)!;
   assert.equal(stripSegments(nho, 1400, 1000).length, 3, "dòng cao 20px → phóng 2.2 lần: bề ngang 3000px+");
 });
@@ -202,4 +207,12 @@ test("stripSegments: dải cao 0 hoặc ảnh không rõ kích thước không l
   const segs = stripSegments(rect, 1000, 1000);
   assert.ok(segs.length >= 1 && segs.every((x) => Number.isFinite(x.x0) && Number.isFinite(x.x1)));
   assert.equal(STRIP_COL_PX > 0, true);
+});
+
+test("chainBreaks: đếm dòng chuỗi số dư vẫn lệch — kể cả dòng người đã ✓ (✓ thắng «cần soát», không thắng chuỗi lệch)", () => {
+  const rows = flatOf({ s1: [2, 2], s2: [3, 0] });
+  assert.equal(chainBreaks(rows), 2);
+  const daXacNhan = rows.map((r) => (r.chk === "NG" ? { ...r, need: false } : r));
+  assert.equal(chainBreaks(daXacNhan), 2, "người ✓ thì hết «cần soát» nhưng chuỗi vẫn lệch");
+  assert.equal(chainBreaks(flatOf({ s1: [3, 0] })), 0);
 });
