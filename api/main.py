@@ -180,8 +180,10 @@ def me(user: CurrentUser) -> dict:
 # ── Không gian làm việc & mặt sổ ─────────────────────────────────────
 
 @app.post("/api/ws")
-def create_ws(user: CurrentUser) -> dict:
-    return workspace.to_json(workspace.create(owner=user.id))
+def create_ws(user: CurrentUser, body: dict | None = Body(None)) -> dict:
+    """Tạo hồ sơ mới. Có thể đặt tên ngay (`book_name`); không có thì để trống, đặt sau cũng được."""
+    name = (body or {}).get("book_name", "")
+    return workspace.to_json(workspace.create(owner=user.id, book_name=name if isinstance(name, str) else ""))
 
 
 @app.get("/api/ws")
@@ -191,18 +193,21 @@ def list_ws(user: CurrentUser) -> dict:
     Có cái này thì xoá bộ nhớ trình duyệt hay đổi máy vẫn tìm lại được việc
     đang làm dở, không bị mồ côi dữ liệu.
     """
-    return {
-        "workspaces": [
-            {
-                "id": ws.id,
-                "book_name": ws.book_name,
-                "created_at": ws.created_at,
-                "sheets": len(ws.sheets),
-                "scanned": sum(1 for s in ws.sheets if s.scanned),
-            }
-            for ws in workspace.list_for(user.id)
-        ]
-    }
+    out = []
+    for ws in workspace.list_for(user.id):
+        stats = results.case_stats(ws, results.load_all(ws.id))
+        out.append({
+            "id": ws.id,
+            "book_name": ws.book_name,
+            "created_at": ws.created_at,
+            # «Lần sửa cuối» tính cả việc sửa ô trong bảng (ghi vào file kết quả, không đụng meta.json)
+            "updated_at": max(ws.updated_at, stats.pop("results_updated_at")),
+            "archived": ws.archived,
+            "sheets": len(ws.sheets),
+            "scanned": sum(1 for s in ws.sheets if s.scanned),
+            **stats,                          # rows, need, confirmed — theo review.py
+        })
+    return {"workspaces": out}
 
 
 @app.get("/api/ws/{ws_id}")
@@ -218,10 +223,25 @@ def get_ws(ws_id: str, user: CurrentUser) -> dict:
 
 @app.patch("/api/ws/{ws_id}")
 def rename_book(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Đổi tên hồ sơ (`book_name`) và/hoặc cất/mở lại (`archived`). Trường nào không gửi thì giữ nguyên."""
     ws = _ws(ws_id, user)
-    ws.book_name = str(body.get("book_name", ""))[:80]
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        if "book_name" in body:
+            ws.book_name = str(body["book_name"] or "")[: workspace.BOOK_NAME_MAX]
+        if "archived" in body:
+            if not isinstance(body["archived"], bool):
+                raise HTTPException(400, "archived phải là true hoặc false")
+            ws.archived = body["archived"]
+        ws.save()
+        return workspace.to_json(ws)
+
+
+@app.delete("/api/ws/{ws_id}")
+def delete_ws(ws_id: str, user: CurrentUser) -> dict:
+    """Xoá HẲN hồ sơ (ảnh lẫn kết quả). Chỉ chủ sở hữu; hồ sơ của người khác → 404."""
+    ws = _ws(ws_id, user)
+    workspace.delete(ws)
+    return {"deleted": ws_id}
 
 
 @app.post("/api/ws/{ws_id}/sheets")
@@ -236,21 +256,22 @@ async def add_sheets(
     nhận, file xấu nằm trong `errors`; chỉ khi KHÔNG file nào nhận được mới trả 400.
     """
     ws = _ws(ws_id, user)
+    # Đọc hết file trước: khoá của hồ sơ là RLock theo LUỒNG, không được giữ qua một `await`
+    uploads = [(f.filename or "file", await f.read()) for f in files]
     added: list[workspace.Sheet] = []
     errors: list[dict] = []
-    for f in files:
-        name = f.filename or "file"
-        data = await f.read()
-        try:
-            made, job = workspace.prepare_upload(ws, name, data, auto=auto)
-        except ValueError as e:
-            errors.append({"file": name, "message": str(e)})
-            continue
-        added += made
-        imgjobs.submit(workspace.process_upload, job)
-    if errors and not added:
-        raise HTTPException(400, errors[0]["message"])
-    return {"added": [s.id for s in added], "errors": errors, **workspace.to_json(ws)}
+    with workspace.locked(ws_id):
+        for name, data in uploads:
+            try:
+                made, job = workspace.prepare_upload(ws, name, data, auto=auto)
+            except ValueError as e:
+                errors.append({"file": name, "message": str(e)})
+                continue
+            added += made
+            imgjobs.submit(workspace.process_upload, job)
+        if errors and not added:
+            raise HTTPException(400, errors[0]["message"])
+        return {"added": [s.id for s in added], "errors": errors, **workspace.to_json(ws)}
 
 
 @app.get("/api/ws/{ws_id}/sheets")
@@ -268,30 +289,32 @@ def autoprep_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> di
     cũ không còn khớp, phải quét lại.
     """
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if not ids:
-        raise HTTPException(400, "Chưa chọn mặt sổ nào")
-    force = bool(body.get("force"))
-    queued, skipped = [], []
-    for sid in ids:
-        s = _sheet_ready(ws, sid)
-        if s.scanned and not force:
-            skipped.append(sid)
-            continue
-        s.status = "analyzing"
-        queued.append(sid)
-    if queued:
-        ws.save()
-        imgjobs.submit(workspace.autoprep_sheets, ws.id, queued)
-    return {"queued": queued, "skipped": skipped, **workspace.to_json(ws)}
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if not ids:
+            raise HTTPException(400, "Chưa chọn mặt sổ nào")
+        force = bool(body.get("force"))
+        queued, skipped = [], []
+        for sid in ids:
+            s = _sheet_ready(ws, sid)
+            if s.scanned and not force:
+                skipped.append(sid)
+                continue
+            s.status = "analyzing"
+            queued.append(sid)
+        if queued:
+            ws.save()
+            imgjobs.submit(workspace.autoprep_sheets, ws.id, queued)
+        return {"queued": queued, "skipped": skipped, **workspace.to_json(ws)}
 
 
 @app.delete("/api/ws/{ws_id}/sheets/{sheet_id}")
 def delete_sheet(ws_id: str, sheet_id: str, user: CurrentUser) -> dict:
     ws = _ws(ws_id, user)
-    workspace.remove(ws, sheet_id)
-    results.drop(ws_id, sheet_id)
-    return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
+    with workspace.locked(ws_id):
+        workspace.remove(ws, sheet_id)
+        results.drop(ws_id, sheet_id)
+        return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.patch("/api/ws/{ws_id}/sheets/{sheet_id}")
@@ -302,9 +325,10 @@ def rename_sheet(
     body: dict = Body(...),
 ) -> dict:
     ws = _ws(ws_id, user)
-    _sheet(ws, sheet_id).name = str(body.get("name", ""))[:80]
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        _sheet(ws, sheet_id).name = str(body.get("name", ""))[:80]
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/reorder")
@@ -314,13 +338,14 @@ def reorder_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dic
     Cột kết quả tự đi theo vì nó luôn lặp theo `ws.sheets`.
     """
     ws = _ws(ws_id, user)
-    order = body.get("sheet_ids") or []
-    known = {s.id: s for s in ws.sheets}
-    if sorted(order) != sorted(known):
-        raise HTTPException(400, "Danh sách thứ tự không khớp với các mặt sổ hiện có")
-    ws.sheets = [known[i] for i in order]
-    ws.save()
-    return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
+    with workspace.locked(ws_id):
+        order = body.get("sheet_ids") or []
+        known = {s.id: s for s in ws.sheets}
+        if sorted(order) != sorted(known):
+            raise HTTPException(400, "Danh sách thứ tự không khớp với các mặt sổ hiện có")
+        ws.sheets = [known[i] for i in order]
+        ws.save()
+        return {**workspace.to_json(ws), "results": results.load_all(ws_id)}
 
 
 @app.post("/api/ws/{ws_id}/dup-ok")
@@ -328,14 +353,15 @@ def dup_ok(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """「Không phải trùng」: người dùng đã so hai mặt sổ và xác nhận chúng là hai trang khác nhau
     (task 1.7). Id lạ hoặc hai id giống nhau → 400."""
     ws = _ws(ws_id, user)
-    a, b = body.get("a"), body.get("b")
-    if not isinstance(a, str) or not isinstance(b, str):
-        raise HTTPException(400, "Thiếu mã hai mặt sổ")
-    try:
-        workspace.mark_not_duplicate(ws, a, b)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        a, b = body.get("a"), body.get("b")
+        if not isinstance(a, str) or not isinstance(b, str):
+            raise HTTPException(400, "Thiếu mã hai mặt sổ")
+        try:
+            workspace.mark_not_duplicate(ws, a, b)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return workspace.to_json(ws)
 
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/image")
@@ -361,120 +387,126 @@ def sheet_image(
 def rotate_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Xoay THẬT nhiều mặt sổ cùng lúc — dùng cho Ctrl/Shift chọn nhiều."""
     ws = _ws(ws_id, user)
-    degrees = int(body.get("degrees", 90))
-    if degrees % 90 != 0:
-        raise HTTPException(400, "Chỉ xoay theo bội số 90°")
-    ids = body.get("sheet_ids") or []
-    if not ids:
-        raise HTTPException(400, "Chưa chọn mặt sổ nào")
-    for sid in ids:
-        workspace.rotate(ws, _sheet_ready(ws, sid), degrees % 360)
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        degrees = int(body.get("degrees", 90))
+        if degrees % 90 != 0:
+            raise HTTPException(400, "Chỉ xoay theo bội số 90°")
+        ids = body.get("sheet_ids") or []
+        if not ids:
+            raise HTTPException(400, "Chưa chọn mặt sổ nào")
+        for sid in ids:
+            workspace.rotate(ws, _sheet_ready(ws, sid), degrees % 360)
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/crop")
 def crop_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Cắt — CHỈ nhận đúng một mặt sổ (vùng cắt của ảnh này không hợp ảnh khác)."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if len(ids) != 1:
-        raise HTTPException(
-            400, "Cắt chỉ áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
-        )
-    box = body.get("box") or {}
-    try:
-        rect = (
-            float(box["left"]), float(box["top"]),
-            float(box["right"]), float(box["bottom"]),
-        )
-    except (KeyError, TypeError, ValueError) as e:
-        raise HTTPException(400, "Vùng cắt không hợp lệ") from e
-    try:
-        workspace.crop(ws, _sheet_ready(ws, ids[0]), rect)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if len(ids) != 1:
+            raise HTTPException(
+                400, "Cắt chỉ áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
+            )
+        box = body.get("box") or {}
+        try:
+            rect = (
+                float(box["left"]), float(box["top"]),
+                float(box["right"]), float(box["bottom"]),
+            )
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(400, "Vùng cắt không hợp lệ") from e
+        try:
+            workspace.crop(ws, _sheet_ready(ws, ids[0]), rect)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/perspective")
 def warp_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Nắn phối cảnh — CHỈ một mặt sổ (4 góc của ảnh này không hợp ảnh khác)."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if len(ids) != 1:
-        raise HTTPException(
-            400, "Nắn phối cảnh áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
-        )
-    def diem(raw) -> list[tuple[float, float]]:
-        return [(float(p[0]), float(p[1])) for p in raw or []]
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if len(ids) != 1:
+            raise HTTPException(
+                400, "Nắn phối cảnh áp dụng cho một mặt sổ — hãy chọn đúng một ảnh."
+            )
+        def diem(raw) -> list[tuple[float, float]]:
+            return [(float(p[0]), float(p[1])) for p in raw or []]
 
-    try:
-        quad = diem(body.get("corners"))
-        mids = diem(body.get("mids"))       # điểm giữa cạnh, có thể bỏ trống
-    except (TypeError, ValueError, IndexError) as e:
-        raise HTTPException(400, "Toạ độ các điểm không hợp lệ") from e
+        try:
+            quad = diem(body.get("corners"))
+            mids = diem(body.get("mids"))       # điểm giữa cạnh, có thể bỏ trống
+        except (TypeError, ValueError, IndexError) as e:
+            raise HTTPException(400, "Toạ độ các điểm không hợp lệ") from e
 
-    try:
-        workspace.perspective(ws, _sheet_ready(ws, ids[0]), quad, mids or None)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    ws.save()
-    return workspace.to_json(ws)
+        try:
+            workspace.perspective(ws, _sheet_ready(ws, ids[0]), quad, mids or None)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/adjust")
 def adjust_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Nghiêng tinh + độ sáng + độ tương phản. Áp cho mọi mặt đang chọn."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if not ids:
-        raise HTTPException(400, "Chưa chọn mặt sổ nào")
-    try:
-        fine = float(body.get("fine_deg", 0) or 0)
-        bright = float(body.get("brightness", 1) or 1)
-        contrast = float(body.get("contrast", 1) or 1)
-    except (TypeError, ValueError) as e:
-        raise HTTPException(400, "Giá trị chỉnh ảnh không hợp lệ") from e
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if not ids:
+            raise HTTPException(400, "Chưa chọn mặt sổ nào")
+        try:
+            fine = float(body.get("fine_deg", 0) or 0)
+            bright = float(body.get("brightness", 1) or 1)
+            contrast = float(body.get("contrast", 1) or 1)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "Giá trị chỉnh ảnh không hợp lệ") from e
 
-    if not (-20 <= fine <= 20):
-        raise HTTPException(400, "Nghiêng tinh chỉ trong khoảng ±20°")
-    if not (0.3 <= bright <= 2.5) or not (0.3 <= contrast <= 2.5):
-        raise HTTPException(400, "Độ sáng/tương phản chỉ trong khoảng 0.3–2.5")
+        if not (-20 <= fine <= 20):
+            raise HTTPException(400, "Nghiêng tinh chỉ trong khoảng ±20°")
+        if not (0.3 <= bright <= 2.5) or not (0.3 <= contrast <= 2.5):
+            raise HTTPException(400, "Độ sáng/tương phản chỉ trong khoảng 0.3–2.5")
 
-    for sid in ids:
-        workspace.adjust(
-            ws, _sheet_ready(ws, sid),
-            fine_deg=fine, brightness=bright, contrast=contrast,
-        )
-    ws.save()
-    return workspace.to_json(ws)
+        for sid in ids:
+            workspace.adjust(
+                ws, _sheet_ready(ws, sid),
+                fine_deg=fine, brightness=bright, contrast=contrast,
+            )
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/undo")
 def undo_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Hoàn tác MỘT bước chỉnh ảnh — cứu cú bấm nhầm「Về ảnh gốc」."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if len(ids) != 1:
-        raise HTTPException(400, "Hoàn tác áp dụng cho một mặt sổ đang xem")
-    try:
-        workspace.undo(ws, _sheet_ready(ws, ids[0]))
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if len(ids) != 1:
+            raise HTTPException(400, "Hoàn tác áp dụng cho một mặt sổ đang xem")
+        try:
+            workspace.undo(ws, _sheet_ready(ws, ids[0]))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/reset")
 def reset_sheets(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Trả ảnh về bản gốc — hoàn tác mọi lần xoay/cắt."""
     ws = _ws(ws_id, user)
-    for sid in body.get("sheet_ids") or []:
-        workspace.reset_sheet(ws, _sheet_ready(ws, sid))
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        for sid in body.get("sheet_ids") or []:
+            workspace.reset_sheet(ws, _sheet_ready(ws, sid))
+        ws.save()
+        return workspace.to_json(ws)
 
 
 
@@ -555,12 +587,13 @@ def save_result(
 def add_sample(ws_id: str, user: CurrentUser) -> dict:
     """Thêm sổ MẪU (dữ liệu giả lập) + kết quả dựng sẵn. Không gọi model."""
     ws = _ws(ws_id, user)
-    added = sample.add_to(ws)
-    return {
-        "added": added,
-        **workspace.to_json(ws),
-        "results": results.load_all(ws_id),
-    }
+    with workspace.locked(ws_id):
+        added = sample.add_to(ws)
+        return {
+            "added": added,
+            **workspace.to_json(ws),
+            "results": results.load_all(ws_id),
+        }
 
 
 # ── Cắt nhanh thông minh (thuật toán, KHÔNG gọi model nên $0) ────────
@@ -581,54 +614,56 @@ def autofix_plan(ws_id: str, sheet_id: str, user: CurrentUser) -> dict:
 def autofix_apply(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Áp dụng kế hoạch cắt nhanh cho MẶT SỔ đang xem."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if len(ids) != 1:
-        raise HTTPException(400, "Cắt nhanh áp dụng cho mặt sổ đang xem")
-    sheet = _sheet_ready(ws, ids[0])
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if len(ids) != 1:
+            raise HTTPException(400, "Cắt nhanh áp dụng cho mặt sổ đang xem")
+        sheet = _sheet_ready(ws, ids[0])
 
-    steps = body.get("steps") or []
-    if not steps:
-        raise HTTPException(400, "Không có bước nào để áp dụng")
+        steps = body.get("steps") or []
+        if not steps:
+            raise HTTPException(400, "Không có bước nào để áp dụng")
 
-    try:
-        for i, st in enumerate(steps):
-            kind = st.get("kind")
-            # Chỉ bước ĐẦU chụp ảnh hoàn tác (snapshot=i==0) — để một lần bấm
-            # "Hoàn tác" trả về đúng trạng thái TRƯỚC khi cắt nhanh, chứ không
-            # phải về giữa chừng chuỗi bước.
-            if kind == "rotate":
-                workspace.rotate(ws, sheet, int(st["degrees"]) % 360, snapshot=i == 0)
-            elif kind == "tilt":
-                workspace.adjust(ws, sheet, fine_deg=float(st["degrees"]), snapshot=i == 0)
-            elif kind == "crop":
-                b = st["box"]
-                workspace.crop(
-                    ws, sheet,
-                    (float(b["left"]), float(b["top"]), float(b["right"]), float(b["bottom"])),
-                    snapshot=i == 0,
-                )
-            else:
-                raise HTTPException(400, f"Bước không hiểu: {kind}")
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+        try:
+            for i, st in enumerate(steps):
+                kind = st.get("kind")
+                # Chỉ bước ĐẦU chụp ảnh hoàn tác (snapshot=i==0) — để một lần bấm
+                # "Hoàn tác" trả về đúng trạng thái TRƯỚC khi cắt nhanh, chứ không
+                # phải về giữa chừng chuỗi bước.
+                if kind == "rotate":
+                    workspace.rotate(ws, sheet, int(st["degrees"]) % 360, snapshot=i == 0)
+                elif kind == "tilt":
+                    workspace.adjust(ws, sheet, fine_deg=float(st["degrees"]), snapshot=i == 0)
+                elif kind == "crop":
+                    b = st["box"]
+                    workspace.crop(
+                        ws, sheet,
+                        (float(b["left"]), float(b["top"]), float(b["right"]), float(b["bottom"])),
+                        snapshot=i == 0,
+                    )
+                else:
+                    raise HTTPException(400, f"Bước không hiểu: {kind}")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
-    ws.save()
-    return workspace.to_json(ws)
+        ws.save()
+        return workspace.to_json(ws)
 
 
 @app.post("/api/ws/{ws_id}/split")
 def split_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Tách 1 ảnh chứa 2 sổ thành 2 mặt sổ riêng (trái / phải)."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if len(ids) != 1:
-        raise HTTPException(400, "Tách áp dụng cho mặt sổ đang xem")
-    try:
-        workspace.split_at(ws, _sheet_ready(ws, ids[0]), float(body.get("x", 0.5)))
-    except (ValueError, TypeError) as e:
-        raise HTTPException(400, str(e)) from e
-    ws.save()
-    return workspace.to_json(ws)
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if len(ids) != 1:
+            raise HTTPException(400, "Tách áp dụng cho mặt sổ đang xem")
+        try:
+            workspace.split_at(ws, _sheet_ready(ws, ids[0]), float(body.get("x", 0.5)))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from e
+        ws.save()
+        return workspace.to_json(ws)
 
 
 # ── Quét ─────────────────────────────────────────────────────────────
@@ -637,36 +672,37 @@ def split_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
 def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Quét đúng những mặt sổ người dùng chọn, theo thứ tự họ đang thấy."""
     ws = _ws(ws_id, user)
-    ids = body.get("sheet_ids") or []
-    if not ids:
-        raise HTTPException(400, "Chưa chọn mặt sổ nào để quét")
+    with workspace.locked(ws_id):
+        ids = body.get("sheet_ids") or []
+        if not ids:
+            raise HTTPException(400, "Chưa chọn mặt sổ nào để quét")
 
-    order = {s.id: i for i, s in enumerate(ws.sheets)}
-    ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
+        order = {s.id: i for i, s in enumerate(ws.sheets)}
+        ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
 
-    sheets = [_sheet(ws, sid) for sid in ids]
+        sheets = [_sheet(ws, sid) for sid in ids]
 
-    # Tài khoản dùng thử là tài khoản CÔNG KHAI — chặn một người quét hết hạn
-    # mức gọi mô hình của cả ngày. Sổ mẫu không đi qua đây nên không bị tính.
-    con = demo.con_lai(user)
-    if con is not None and len(sheets) > con:
-        raise HTTPException(
-            429,
-            {"kind": "demo_quota", "limit": demo.han_muc(), "left": con},
-        )
-    if any(s.status != "ready" for s in sheets):
-        raise HTTPException(409, {"kind": "not_ready"})
+        # Tài khoản dùng thử là tài khoản CÔNG KHAI — chặn một người quét hết hạn
+        # mức gọi mô hình của cả ngày. Sổ mẫu không đi qua đây nên không bị tính.
+        con = demo.con_lai(user)
+        if con is not None and len(sheets) > con:
+            raise HTTPException(
+                429,
+                {"kind": "demo_quota", "limit": demo.han_muc(), "left": con},
+            )
+        if any(s.status != "ready" for s in sheets):
+            raise HTTPException(409, {"kind": "not_ready"})
 
-    paths = [str(s.scan_path(ws.id)) for s in sheets]
+        paths = [str(s.scan_path(ws.id)) for s in sheets]
 
-    job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
-    jobs.start(job, use_cache=not bool(body.get("no_cache")))
-    if con is not None:
-        demo.ghi_nhan(user.id, len(sheets))
-    for s in sheets:
-        s.scanned = True
-    ws.save()
-    return jobs.to_json(job)
+        job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
+        jobs.start(job, use_cache=not bool(body.get("no_cache")))
+        if con is not None:
+            demo.ghi_nhan(user.id, len(sheets))
+        for s in sheets:
+            s.scanned = True
+        ws.save()
+        return jobs.to_json(job)
 
 
 def _job(job_id: str, user: auth.User):

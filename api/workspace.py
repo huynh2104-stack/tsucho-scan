@@ -16,6 +16,7 @@ import shutil
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -112,6 +113,11 @@ class Workspace:
     book_name: str = ""          # tên sổ người dùng đặt, dùng khi xuất file
     created_at: float = field(default_factory=time.time)
     owner: str = ""              # user.id — chỉ chủ sở hữu mới mở được
+    updated_at: float = field(default_factory=time.time)   # mỗi lần `save()` (task 2.1)
+    archived: bool = False       # hồ sơ đã cất đi: ẩn khỏi danh sách "đang làm", vẫn mở lại được
+    # Hồ sơ đã bị xoá: luồng nền còn giữ đối tượng này thì `save()` KHÔNG được ghi lại thư mục vừa xoá.
+    # Chỉ ở bộ nhớ, không lưu xuống meta.json.
+    gone: bool = field(default=False, repr=False, compare=False)
     # Các cặp mặt sổ người dùng đã bảo「Không phải trùng」(task 1.7). Mỗi cặp là [id, id] đã SẮP XẾP
     # nên (a,b) và (b,a) là một; xoá mặt sổ thì cặp chứa nó cũng bị xoá.
     dup_ok: list[list[str]] = field(default_factory=list)
@@ -126,45 +132,97 @@ class Workspace:
         """Ghi `meta.json` NGUYÊN TỬ (ghi file tạm rồi đổi tên) và tuần tự.
 
         Từ khi có luồng xử lý nền, yêu cầu của người dùng và luồng nền có thể cùng lưu một
-        workspace. Ghi thẳng vào file thì hai lần ghi chồng nhau có thể để lại file cụt.
+        workspace. Ghi thẳng vào file thì hai lần ghi chồng nhau có thể để lại file cụt; mất điện
+        hay lỗi đĩa giữa chừng thì `meta.json` CŨ còn nguyên (file tạm bị dọn), không bao giờ là
+        file nửa vời. Hồ sơ đã xoá thì không ghi gì (tránh "hồi sinh" thư mục vừa xoá).
         """
-        self.dir().mkdir(parents=True, exist_ok=True)
-        with _SAVE_LOCK:
-            text = json.dumps(
-                {
-                    "id": self.id,
-                    "book_name": self.book_name,
-                    "created_at": self.created_at,
-                    "owner": self.owner,
-                    "dup_ok": self.dup_ok,
-                    "sheets": [asdict(s) for s in self.sheets],
-                },
-                ensure_ascii=False,
-            )
-            target, tmp = self.dir() / "meta.json", self.dir() / "meta.json.tmp"
-            tmp.write_text(text, encoding="utf-8")
-            for attempt in range(6):
+        if self.gone:
+            return
+        with locked(self.id):
+            self.dir().mkdir(parents=True, exist_ok=True)
+            with _SAVE_LOCK:
+                self.updated_at = time.time()
+                text = json.dumps(
+                    {
+                        "id": self.id,
+                        "book_name": self.book_name,
+                        "created_at": self.created_at,
+                        "updated_at": self.updated_at,
+                        "archived": self.archived,
+                        "owner": self.owner,
+                        "dup_ok": self.dup_ok,
+                        "sheets": [asdict(s) for s in self.sheets],
+                    },
+                    ensure_ascii=False,
+                )
+                target, tmp = self.dir() / "meta.json", self.dir() / "meta.json.tmp"
                 try:
-                    os.replace(tmp, target)
-                    return
-                except PermissionError:
-                    # Windows: chương trình diệt vi-rút hay tiến trình khác đang mở file đích
-                    if attempt == 5:
-                        raise
-                    time.sleep(0.05 * (attempt + 1))
+                    tmp.write_text(text, encoding="utf-8")
+                    for attempt in range(6):
+                        try:
+                            os.replace(tmp, target)
+                            return
+                        except PermissionError:
+                            # Windows: chương trình diệt vi-rút hay tiến trình khác đang mở file đích
+                            if attempt == 5:
+                                raise
+                            time.sleep(0.05 * (attempt + 1))
+                except BaseException:
+                    tmp.unlink(missing_ok=True)
+                    raise
 
 
 _SAVE_LOCK = threading.Lock()
+
+# Khoá theo từng hồ sơ (task 2.1). Các route đồng bộ của FastAPI chạy song song trong threadpool: tải
+# file lên lúc đang xoay ảnh, xoá một mặt sổ lúc luồng nền đang thêm mặt sổ, hai tab cùng mở... đều
+# có thể ghi đè lẫn nhau. RLock (vào lại được) nên route đang giữ khoá mà gọi `ws.save()` — vốn cũng
+# lấy khoá này — thì không tự kẹt. Thứ tự lấy khoá luôn là khoá hồ sơ → `_SAVE_LOCK`, không đảo.
+_LOCKS: dict[str, threading.RLock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def locked(ws_id: str):
+    """`with workspace.locked(ws_id):` quanh mọi thao tác ĐỔI hồ sơ (đọc không cần)."""
+    with _LOCKS_GUARD:
+        lock = _LOCKS.setdefault(ws_id, threading.RLock())
+    with lock:
+        yield
 
 
 _cache: dict[str, Workspace] = {}
 
 
-def create(owner: str = "") -> Workspace:
-    ws = Workspace(id=uuid.uuid4().hex[:12], owner=owner)
+def create(owner: str = "", book_name: str = "") -> Workspace:
+    ws = Workspace(id=uuid.uuid4().hex[:12], owner=owner, book_name=book_name[:BOOK_NAME_MAX])
     ws.save()
     _cache[ws.id] = ws
     return ws
+
+
+BOOK_NAME_MAX = 80       # tên hồ sơ dài tối đa chừng này ký tự
+
+
+def delete(ws: Workspace) -> None:
+    """Xoá HẲN hồ sơ: ảnh, kết quả, mọi thứ. Không lấy lại được — chỗ gọi phải đã hỏi người dùng.
+
+    Đặt `gone` trước để luồng nền (xử lý ảnh, quét) còn giữ đối tượng này không ghi lại gì; `meta.json`
+    được xoá ngay cả khi Windows chưa cho xoá hết thư mục (file đang mở), để hồ sơ biến khỏi danh sách.
+    """
+    with locked(ws.id):
+        ws.gone = True
+        _cache.pop(ws.id, None)
+        for attempt in range(5):
+            shutil.rmtree(ws.dir(), ignore_errors=True)
+            if not ws.dir().exists():
+                break
+            time.sleep(0.05 * (attempt + 1))
+        else:
+            (ws.dir() / "meta.json").unlink(missing_ok=True)
+            log.warning("xoá hồ sơ %s chưa sạch thư mục (file đang mở?)", ws.id)
+    with _LOCKS_GUARD:
+        _LOCKS.pop(ws.id, None)
 
 
 def load(ws_id: str) -> Workspace | None:
@@ -179,6 +237,8 @@ def load(ws_id: str) -> Workspace | None:
         book_name=raw.get("book_name", ""),
         created_at=raw.get("created_at", time.time()),
         owner=raw.get("owner", ""),
+        updated_at=raw.get("updated_at", raw.get("created_at", time.time())),
+        archived=bool(raw.get("archived", False)),
         dup_ok=[list(p) for p in raw.get("dup_ok", []) if isinstance(p, list) and len(p) == 2],
         sheets=[Sheet(**s) for s in raw.get("sheets", [])],
     )
@@ -998,6 +1058,9 @@ def to_json(ws: Workspace) -> dict:
     return {
         "id": ws.id,
         "book_name": ws.book_name,
+        "created_at": ws.created_at,
+        "updated_at": ws.updated_at,
+        "archived": ws.archived,
         "dup_ok": ws.dup_ok,
         "sheets": [asdict(s) for s in ws.sheets],
     }

@@ -15,6 +15,8 @@ import threading
 import time
 from pathlib import Path
 
+import review
+
 from . import workspace
 
 # Mã định danh dòng (`rid`) dài tối đa chừng này khi client gửi lên
@@ -109,6 +111,8 @@ def save_job(ws_id: str, sheet_ids: list[str], payload: dict, job_id: str) -> No
     Một mặt sổ có thể chứa nhiều sổ khác nhau (ảnh 2 sổ) → giữ thành nhiều
     "khối", mỗi khối là metadata sổ + các dòng của nó, đúng thứ tự xuất hiện.
     """
+    if not (workspace.WS_DIR / ws_id / "meta.json").is_file():
+        return                    # hồ sơ đã bị xoá giữa lúc đang quét: đừng dựng lại thư mục của nó
     d = _dir(ws_id)
     d.mkdir(parents=True, exist_ok=True)
 
@@ -220,6 +224,27 @@ def _read_with_rids(path: Path) -> dict | None:
         if ensure_rids([b for b in data.get("blocks", []) if isinstance(b, dict)]):
             _write_atomic(path, data)
     return data
+
+
+def case_stats(ws: workspace.Workspace, saved: dict[str, dict]) -> dict:
+    """Số liệu một hồ sơ cho trang danh sách, tính từ kết quả ĐÃ LƯU bằng định nghĩa chung `review.py`
+    (cùng con số với bộ đếm trên bàn làm việc và với file Excel). Không tính dòng ghi chú.
+
+    `results_updated_at` = lần sửa/quét kết quả gần nhất, để «lần sửa cuối» của hồ sơ không chỉ là lần
+    ghi meta.json (sửa ô trong bảng không đụng meta.json).
+    """
+    rows = need = confirmed = 0
+    newest = 0.0
+    for sheet in ws.sheets:
+        data = saved.get(sheet.id)
+        if not data:
+            continue
+        st = review.sheet_stats(data.get("blocks", []))
+        rows += st["rows"]
+        need += st["need"]
+        confirmed += st["confirmed"]
+        newest = max(newest, data.get("edited_at") or 0, data.get("scanned_at") or 0)
+    return {"rows": rows, "need": need, "confirmed": confirmed, "results_updated_at": newest}
 
 
 def drop(ws_id: str, sheet_id: str) -> None:

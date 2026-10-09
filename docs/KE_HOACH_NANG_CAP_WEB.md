@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 1.7 = hết giai đoạn 1 (09/10) — pytest **367 passed** · `npm test` **137 pass** · build xanh · E2E `smoke.py` **16/16 bước** (~40 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.1 (09/10) — pytest **387 passed** · `npm test` **137 pass** · build xanh · E2E `smoke.py` **16/16 bước** (~40 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1044,7 +1044,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.5 Lý do dễ hiểu + gợi ý sửa (xong 08/10/2026)
 - [x] 1.6 Nối số dư giữa các mặt (xong 08/10/2026)
 - [x] 1.7 Ảnh chụp trùng trang (xong 09/10/2026) — **hết giai đoạn 1**
-- [ ] 2.1 Backend hồ sơ
+- [x] 2.1 Backend hồ sơ (xong 09/10/2026)
 - [ ] 2.2 Trang hồ sơ
 - [ ] 2.3 Sửa thông tin sổ
 - [ ] 2.4 Xuất theo tài khoản
@@ -1190,6 +1190,16 @@ Quan sát khi viết E2E (không sửa):
 - **Giới hạn cần biết**: dựa vào số dư nên chỉ thấy trùng ở mặt ĐÃ QUÉT (chưa quét thì chưa biết); ảnh trùng mà số dư bị đọc sai quá nửa thì lọt; hai trang khác nhau của sổ lặp số dư (hiếm) sẽ bị nghi — đã có nút「Không phải trùng」. «Không phải trùng» không hoàn tác bằng Ctrl+Z (nó lưu ở máy chủ, không nằm trong lịch sử sửa bảng) và giao diện chưa có chỗ bỏ xác nhận. Chưa thử với **hai ảnh chụp lại thật** trên giao diện (E2E dùng sổ mẫu thêm lần nữa: hai mặt giống hệt cả byte lẫn số dư — phần quy tắc chống nhiễu nằm ở test TS).
 - Test TS (8): ngưỡng đúng 4 và đúng 50%, 3 số dư, dưới 50%, số dư nhỏ, dòng ghi chú, số dư lặp trong một mặt, hai trang liền nhau của một sổ, loại cặp đã xác nhận (cả hai thứ tự), mặt chưa quét, huy hiệu theo mặt sớm nhất, đếm theo phạm vi. E2E bước 16: thêm sổ mẫu lần nữa → 2 huy hiệu, hộp có 2 ảnh đã tải + số dư trùng, cảnh báo ở hộp Xuất file (nút tải vẫn bật), Không phải trùng sống qua F5, Xoá mặt bên phải (có hỏi lại), dọn sạch `dup_ok`.
 - **Kiểm tra cuối giai đoạn 1 (mục 8)**: 4 lệnh xanh (367 · 137 · build · 16/16); WEB_PLAN §5a và bảng phím tắt đã đánh dấu; CHAY_WEB và memory cập nhật. Còn cho anh: các mục「Anh tự thử」của 1.1–1.7 trên sổ thật (chưa tự thử với 2 ảnh chụp lại thật vì tốn lượt Gemini nếu chưa có trong cache).
+
+
+**Task 2.1 — xong 09/10/2026** (pytest **387** (+20) · `npm test` 137 · build xanh · E2E 16/16 — web chưa đổi).
+- **Ghi nguyên tử**: `Workspace.save` đã ghi file tạm rồi `os.replace` từ đợt nhập file thông minh (kế hoạch ghi «hiện ghi thẳng» là cũ). Task này thêm phần còn thiếu: lỗi giữa chừng (mất điện lúc ghi dở, `os.replace` ném lỗi) thì `meta.json` CŨ còn nguyên VÀ file tạm bị dọn (trước đây để lại `meta.json.tmp`). Test giả lập đúng hai kiểu lỗi đó.
+- **Khoá theo hồ sơ**: `workspace.locked(ws_id)` = `threading.RLock` cho từng hồ sơ (từ điển có khoá bảo vệ). **17 route đổi hồ sơ** bọc trong `with workspace.locked(ws_id):` (sửa tên/lưu trữ, tải lên, tự căn, xoá/đổi tên/sắp xếp mặt sổ, dup-ok, xoay, cắt, nắn, chỉnh, hoàn tác, về gốc, sổ mẫu, autofix, tách, quét). `ws.save()` cũng tự lấy khoá này (RLock nên route đang giữ khoá gọi `save()` không tự kẹt; thứ tự khoá luôn là khoá hồ sơ → `_SAVE_LOCK`). Route tải lên là `async`: đọc hết file bằng `await` TRƯỚC, rồi mới giữ khoá cho phần đồng bộ (RLock là theo luồng, không giữ qua `await`). **Giới hạn có chủ ý**: luồng nền (xử lý ảnh) chỉ lấy khoá lúc `save()`, không giữ suốt việc nặng — giữ suốt thì PDF 24 trang (~12 s) làm mọi thao tác khác của hồ sơ đó đứng hình; luồng nền chỉ đổi trường của từng mặt sổ đã có nên không đụng danh sách mặt sổ.
+- **Trường mới** (đọc được meta cũ): `updated_at` (đặt lại mỗi `save`), `archived`; `book_name` dùng luôn làm tên hồ sơ (tối đa 80 ký tự). `to_json` trả thêm `created_at/updated_at/archived`.
+- **Route**: `POST /api/ws {book_name?}` (không thân bài vẫn chạy); `PATCH /api/ws/:id` nhận `book_name` và/hoặc `archived` — trường nào không gửi thì GIỮ NGUYÊN (bản cũ gán `book_name = ""` khi thiếu, gửi mỗi `archived` là xoá tên); `archived` không phải true/false → 400; `DELETE /api/ws/:id` xoá hẳn thư mục + bỏ khỏi `_cache`, hồ sơ người khác → 404; `GET /api/ws` trả thêm `rows/need/confirmed` (`results.case_stats` trên kết quả đã lưu, qua `review.sheet_stats`), `updated_at`, `archived`. «Lần sửa cuối» = max(`updated_at`, lần sửa/quét kết quả gần nhất) vì sửa ô trong bảng chỉ ghi file kết quả chứ không đụng meta.json.
+- **Hai lỗ hổng tôi tự thêm vào khi xoá hồ sơ** (kế hoạch không nhắc): luồng nền còn giữ đối tượng hồ sơ vừa xoá mà gọi `save()` sẽ **hồi sinh thư mục** vừa xoá — nên có cờ `gone` (chỉ ở bộ nhớ) khiến `save()` không ghi gì; lần quét đang chạy ghi kết quả vào hồ sơ đã xoá cũng bị chặn (`results.save_job` bỏ qua khi không còn `meta.json`). Trên Windows `rmtree` có thể không xoá hết (file đang mở): thử lại vài lần, vẫn không được thì xoá `meta.json` để hồ sơ biến khỏi danh sách và ghi cảnh báo.
+- **Bẫy ghi lại**: `list_for`/`GET /api/ws` nạp mọi `meta.json` VÀ mọi file kết quả của mọi hồ sơ của người đó (để thống kê) — quy mô hiện tại thì ổn (đo trên dữ liệu thật: vài chục mặt sổ/hồ sơ); khi một người có hàng trăm hồ sơ thì thêm chỉ mục (lưu sẵn `rows/need/confirmed` vào `meta.json` mỗi lần lưu kết quả). Test route khoá cửa tự quét đã bắt route DELETE mới.
+- Tests (`tests/test_api_workspaces.py`, 20): tạo (có/không tên, cắt 80, sai kiểu), đổi tên/lưu trữ không làm mất trường kia, `archived` sai kiểu → 400, meta cũ, xoá (thư mục + cache + 404), người khác → 404 (không sửa/xoá được, danh sách rỗng), không hồi sinh sau khi xoá, thống kê đúng (có dòng ghi chú, dòng lệch, dòng đã ✓), danh sách có hồ sơ lưu trữ và chỉ của mình, «lần sửa cuối» tính cả sửa ô, hồ sơ rỗng, **ghi nguyên tử** (2 kiểu lỗi), khoá loại trừ giữa các luồng nhưng không giữa các hồ sơ, vào lại được, và **mọi route đổi hồ sơ đều tự lấy khoá** (kiểm theo tên hàm gọi, để phân biệt khoá của route với khoá `save()` tự lấy). Bẻ thử 5 chỗ (cờ `gone`, dọn file tạm, giữ tên khi chỉ gửi `archived`, khoá của route sắp xếp, chặn `save_job` hồ sơ đã xoá) thì test đỏ cả 5 — riêng khoá của route lúc đầu KHÔNG bị bắt nên đã sửa test như trên.
 
 ---
 
