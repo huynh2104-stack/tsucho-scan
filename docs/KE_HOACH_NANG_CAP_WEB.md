@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.4 (10/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **26/26 bước** (~65 s; cả kịch bản ở `--font-scale 1.3` cũng 26/26).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.5 = hết giai đoạn 3 (10/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **27/27 bước** (~70 s; cả kịch bản ở `--font-scale 1.3` cũng 27/27).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1052,7 +1052,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 3.2 Chế độ soát nhanh — **mốc demo B** (xong 09/10/2026)
 - [x] 3.3 Từ điển sửa lỗi (xong 09/10/2026)
 - [x] 3.4 Cỡ chữ lớn (xong 10/10/2026)
-- [ ] 3.5 Bảng mượt
+- [x] 3.5 Bảng mượt (xong 10/10/2026) — **hết giai đoạn 3**
 - [ ] 4.1 Quét song song
 - [ ] 4.2 F5 theo dõi tiếp
 - [ ] 4.3 Báo trước lượt/chi phí
@@ -1268,6 +1268,21 @@ Quan sát khi viết E2E (không sửa):
 - **Kiểm bố cục** (Playwright, ảnh chụp 3 mức × 2 cỡ màn hình 1366×768 và 375×812): không tràn ngang ở mức nào (`scrollWidth = clientWidth`), kể cả khi mở hộp ⚙; chữ nút «Xuất file» đo được 13.5 / 15.525 / 17.55 px đúng bằng 13.5 × hệ số. Bảng vẫn cuộn ngang trong khung của nó.
 - **E2E bước 26**: chọn Lớn / Rất lớn trong ⚙ → máy chủ lưu, chữ đúng số, không tràn ngang; F5 → `--fs` đã có ngay từ `DOMContentLoaded` (script chống nháy); trình duyệt trắng chưa chọn gì ở trang đăng nhập đúng cỡ chuẩn (nhờ mặc định trong CSS); trình duyệt lạ đăng nhập cùng tài khoản thấy đúng cỡ đã lưu. Bẻ thử 3 chỗ (bỏ script đặt sớm, bỏ bước áp cỡ ở provider, bỏ mặc định CSS) → đỏ cả 3 (chỗ thứ ba lúc đầu sống sót vì provider che mất — đã thêm ca đo trang đăng nhập).
 - **Giới hạn thấy khi nhìn ảnh chụp**: (1) ở **1366×768 + Rất lớn** cột kết quả chật: các thanh công cụ cũng phình theo nên bảng chỉ còn thấy ~3 dòng, và thẻ Soát nhanh phải cuộn một chút để thấy hàng 出金/入金/残高 (nút «Đúng rồi» vẫn luôn thấy); màn hình cao hơn hoặc mức Lớn thì thoải mái hơn; (2) **chỉ chữ được phóng**: biểu tượng, độ cao dòng đặt cứng (thanh FixBar h-9, dải nối h-8), độ rộng cột bảng và ảnh sổ giữ nguyên; hai chỗ dùng cỡ có tên của Tailwind (`text-xl` ở tiêu đề trang Hồ sơ, `text-lg` ở lớp phủ kéo-thả) cũng chưa nhân; (3) khung chú thích của hướng dẫn (`Tour`) ước lượng chiều cao thẻ cố định nên ở mức lớn nhất có thể đặt hơi lệch chỗ.
+
+
+**Task 3.5 — xong 10/10/2026 — hết GIAI ĐOẠN 3** (pytest **495** · `npm test` **209** · build xanh · E2E **27/27 bước** (thêm bước 27; cũng 27/27 ở `--font-scale 1.3`)).
+- **Số đo trước/sau** (`tests/e2e/perf_table.py`: hồ sơ tạm 24 mặt sổ / **480 dòng** / ~12,200 phần tử DOM bằng sổ mẫu nhân đôi dòng, dạng «Gộp danh sách» — vẽ cả 24 mặt; 40 lần bấm rải khắp các mặt, đo từ lúc bấm tới khi KHUNG HÌNH KẾ TIẾP vẽ xong = hai lần `requestAnimationFrame`; máy này, Chromium của Playwright; `--cpu 4` giả lập máy yếu gấp 4):
+  | | trung vị | p95 |
+  |---|---|---|
+  | **trước**, CPU ×1 | 49 ms | 68 ms |
+  | sau, CPU ×1 | **33 ms** | **40 ms** |
+  | **trước**, CPU ×4 | 447 ms | 645 ms |
+  | chỉ `React.memo` + hàm cố định, CPU ×4 | 244 ms | 502 ms |
+  | **sau** (thêm `content-visibility`), CPU ×4 | **166–218 ms** | **315–356 ms** |
+  (CPU ×4 đo hai lần cho ra 166 và 218 ms — dao động ±25% giữa các lần chạy; mức giảm trung vị ≈ 50–60%, p95 ≈ 45–50%.) Còn lại ~166 ms ở ×4 là việc của React ở các phần KHÁC của trang (trang bàn làm việc vẽ lại, khung giữa, tính lại `flatRows`…) chứ không còn ở bảng — chưa đo sâu hơn.
+- **Làm gì**: (1) `React.memo` cho `Row` và `AccountCard`, đầu bảng tách thành `TableHead` (trước đây là JSX tạo mới ở `ReviewPane` truyền xuống nên phá memo); (2) **mọi hàm xử lý đưa xuống bảng có danh tính cố định** nhờ hook `useStable` (`lib/useStable.ts`: bản bọc không đổi, luôn gọi hàm mới nhất) — hàm mới sau mỗi lần vẽ là lý do memo vô dụng; (3) các prop dạng đối tượng/hàm đổi theo MỖI lần chọn dòng được thay bằng giá trị nguyên thuỷ hoặc chỉ truyền cho thẻ liên quan: `selected: TxRef` → `selectedRow: number | null` chỉ ở thẻ chứa dòng đó; `pick(row,col)` (hàm đổi mỗi khi đổi vùng bôi đen) → `pc0/pc1` theo từng dòng và `sel` chỉ truyền cho thẻ mà vùng chọn chạm tới; `sug` đối tượng → hai chuỗi; `refs` tạo một lần cho mỗi (mặt sổ, khối, số dòng); `info` của dòng giữ nguyên tham chiếu nếu kết quả y hệt (sửa một ô chỉ vẽ lại ~5 dòng thay vì cả khối ~12–16); (4) CSS `content-visibility: auto; contain-intrinsic-size: auto 900px` cho mỗi `section[data-sheet]` ở dạng danh sách: trình duyệt bỏ qua dàn trang + vẽ mặt sổ ngoài màn hình nhưng **DOM vẫn còn đủ** nên phím mũi tên, focus, bôi đen và chép vẫn chạy.
+- **E2E bước 27** (chặn «lùi» thầm lặng — memo hỏng không làm gì sai, chỉ chậm, và không để dấu vết trên DOM): bộ đếm `lib/renderProbe.ts` (chỉ chạy khi trang thử bật `window.__renders`, bình thường tốn một phép kiểm thuộc tính) cho biết chọn 3 dòng ở 3 mặt sổ chỉ vẽ lại 14 lần `Row` (không memo: 96 hoặc, khi hàm không cố định, 369 — trên bảng 60 dòng) và sửa một ô chỉ vẽ lại 5; mọi mặt sổ có `content-visibility: auto` mà số `<tr>` trong DOM vẫn đủ; **bôi đen vùng chữ nhật 4 dòng × 4 cột xuyên hai mặt sổ rồi chép: TSV khớp từng ô với dữ liệu máy chủ**. Bẻ thử 4 chỗ (bỏ memo, truyền thẳng `editCell`, bỏ `content-visibility`, `info` không giữ ổn định) → đỏ cả 4. Lúc viết bước này còn lộ ra: bấm một dòng làm mặt sổ đó thành «đang xem» và danh sách tự cuộn về đầu mặt sổ, nên vị trí ô cuối phải đo lại sau cú bấm (lỗi của bài thử, không phải của app).
+- **Giới hạn**: (1) số đo trên dữ liệu SỔ MẪU nhân đôi, không phải ảnh chụp thật; bảng thật có thêm cột phụ/ghi chú nên mỗi dòng nặng hơn một chút; (2) chưa kiểm cuộn tới mặt sổ ở xa bằng nút nhảy trên máy rất chậm: chiều cao tạm 900px của mặt sổ chưa từng vẽ có thể làm vị trí cuộn lệch nhẹ ở lần nhảy đầu (sau đó trình duyệt nhớ chiều cao thật; E2E nhảy tới dải «đứt chuỗi» ở bước 15/19 vẫn xanh); (3) `useStable` gán hàm mới trong `useLayoutEffect` — hàm bọc không được gọi LÚC VẼ (đã ghi trong comment).
 
 ---
 

@@ -15,7 +15,7 @@
  * Tên cột giữ tiếng Nhật + chú thích bản địa ngay cạnh (WEB_PLAN §8).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT, type Dict, type Lang } from "@/lib/i18n";
 import {
   FIELD_LABEL,
@@ -33,6 +33,7 @@ import {
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 import { followersOf, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import type { DictField } from "@/lib/corrections";
+import { renderProbe } from "@/lib/renderProbe";
 import BookInfoDialog from "@/components/BookInfoDialog";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
@@ -46,6 +47,29 @@ export type EditFn = (ref: TxRef, field: EditField, value: string | number | nul
 export type RowActionFn = (ref: TxRef) => void;
 /** Trả một ô về giá trị MÁY ĐỌC (nút ↺). */
 export type RestoreFn = (ref: TxRef, field: EditField) => void;
+
+/** Đầu bảng — một component riêng, `memo` theo (cột phụ, từ điển ngôn ngữ). */
+const TableHead = memo(function TableHead({ cols, t }: { cols: OptCols; t: Dict }) {
+  const g = t.colGloss;
+  return (
+    <thead>
+      <tr>
+        <Th jp="行" vn="" align="center" width="34px" />
+        <Th jp="年月日" vn={g.date} width="112px" />
+        {cols.kind && <Th jp="区分" vn={g.kind} width="72px" />}
+        <Th jp="摘要" vn={g.desc} />
+        <Th jp="お支払" vn={g.out} align="right" width="106px" />
+        <Th jp="お預り" vn={g.in} align="right" width="106px" />
+        <Th jp="差引残高" vn={g.bal} align="right" width="118px" />
+        {cols.store && <Th jp="取扱店" vn="" align="center" width="76px" />}
+        {cols.extra && <Th jp="備考" vn="" align="center" width="76px" />}
+        <Th jp="検算" vn="" align="center" width="38px" />
+        <Th jp="確認メモ" vn="" width="140px" />
+        <Th jp="" vn="" width="52px" pinRight />
+      </tr>
+    </thead>
+  );
+});
 
 function Th({
   jp,
@@ -309,7 +333,7 @@ function SugChip({ field, right, title, onAccept }: { field: DictField; right: s
   );
 }
 
-function Row({
+function RowImpl({
   tx,
   n,
   cols,
@@ -318,7 +342,8 @@ function Row({
   dim,
   sel,
   rowIdx,
-  pick,
+  pc0,
+  pc1,
   t,
   lang,
   onEdit,
@@ -326,7 +351,8 @@ function Row({
   onToggleReviewed,
   onRestore,
   onSelect,
-  sug,
+  sugDesc,
+  sugKind,
   onAcceptSug,
 }: {
   tx: Tx;
@@ -340,8 +366,10 @@ function Row({
   sel: boolean;
   /** Số thứ tự dòng trong TOÀN lưới — toạ độ hàng của vùng bôi đen. */
   rowIdx: number;
-  /** Cột thứ `c` của dòng này có nằm trong vùng bôi đen không. */
-  pick: (row: number, col: number) => boolean;
+  /** Các cột của dòng này nằm trong vùng bôi đen: từ `pc0` tới `pc1` (cả hai −1 = dòng không nằm trong vùng).
+   *  Là SỐ chứ không phải hàm: hàm mới sau mỗi lần đổi vùng chọn thì mọi dòng vẽ lại, số thì chỉ dòng nào đổi mới vẽ lại. */
+  pc0: number;
+  pc1: number;
   t: Dict;
   lang: Lang;
   onEdit: EditFn;
@@ -349,10 +377,13 @@ function Row({
   onToggleReviewed: RowActionFn;
   onRestore: RestoreFn;
   onSelect: RowActionFn;
-  /** Chữ từ điển sửa lỗi gợi ý cho từng ô (null = không có). Chỉ dòng thật, và chỉ khi ô chưa đúng. */
-  sug: Record<DictField, string | null>;
+  /** Chữ từ điển sửa lỗi gợi ý cho ô 摘要 / 区分 (null = không có). Chỉ dòng thật, và chỉ khi ô chưa đúng. */
+  sugDesc: string | null;
+  sugKind: string | null;
   onAcceptSug: (ref: TxRef, field: DictField, right: string) => void;
 }) {
+  renderProbe("Row");
+  const sug = { description: sugDesc, kind: sugKind };
   const { chk, state } = info;
   const flag = state === "review";
   const fixed = state === "fixed";
@@ -412,7 +443,7 @@ function Row({
   const cBal = k++;
   const cStore = cols.store ? k++ : -1;
   const cExtra = cols.extra ? k++ : -1;
-  const on = (c: number) => pick(rowIdx, c);
+  const on = (c: number) => pc0 >= 0 && c >= pc0 && c <= pc1;
 
   return (
     <tr
@@ -631,6 +662,10 @@ function Row({
   );
 }
 
+/* `memo` + các hàm xử lý có danh tính cố định (`useStable` ở trang) ⇒ chọn một dòng chỉ vẽ lại đúng hai dòng (dòng bỏ chọn
+   và dòng được chọn) thay vì cả bảng (task 3.5). */
+const Row = memo(RowImpl);
+
 /** Dải mảnh báo chỗ nối số dư với mặt sổ đứng ngay trước (task 1.6). CAO CỐ ĐỊNH (h-8): dải đổi từ
  *  «nối liền» sang «đứt» khi người dùng vừa sửa một số mà cao thấp khác nhau thì cả bảng bên dưới
  *  giật đúng lúc đang nhấn chuột. Trạng thái không kiểm được / khác sổ thì không hiện gì. */
@@ -696,16 +731,16 @@ function LinkStrip({
  * trong một component khác là kiểu MỚI sau mỗi lần render, khiến React tháo và
  * dựng lại toàn bộ cây con — mất vị trí cuộn và mất focus khi đang gõ.
  */
-function AccountCard({
+function AccountCardImpl({
   meta,
   rows,
-  refs,
+  sheetId,
+  blockIdx,
   index,
   ofTotal,
   fallbackTitle,
   sourceLabel,
   cols,
-  head,
   t,
   lang,
   filter,
@@ -719,14 +754,15 @@ function AccountCard({
   onEditMeta,
   suggest,
   onAcceptSug,
-  selected,
+  selectedRow,
   onSelectRow,
   rowBase,
-  pick,
+  sel,
 }: {
   meta: AccountMeta;
   rows: Tx[];
-  refs: TxRef[];
+  sheetId: string;
+  blockIdx: number;
   index: number;
   /** Tổng số sổ trong mặt này — chỉ >1 mới cần đánh số cho khỏi lẫn. */
   ofTotal: number;
@@ -734,7 +770,6 @@ function AccountCard({
   /** Tên file gốc + số trang, để biết dòng này đến từ đâu. */
   sourceLabel: string;
   cols: OptCols;
-  head: React.ReactNode;
   t: Dict;
   lang: Lang;
   filter: string;
@@ -751,26 +786,42 @@ function AccountCard({
   /** Gợi ý của từ điển sửa lỗi cho một ô (null = không có). */
   suggest: (field: DictField, text: string | null | undefined) => string | null;
   onAcceptSug: (ref: TxRef, field: DictField, right: string) => void;
-  selected: TxRef | null;
+  /** Chỉ số dòng đang chọn NẾU nó nằm trong khối này (null = không). Truyền cả `TxRef` thì mọi thẻ vẽ lại mỗi lần chọn dòng. */
+  selectedRow: number | null;
   onSelectRow: (ref: TxRef) => void;
   /** Số thứ tự dòng đầu tiên của khối này trong TOÀN lưới. */
   rowBase: number;
-  pick: (row: number, col: number) => boolean;
+  /** Vùng bôi đen, hoặc null nếu vùng đó KHÔNG chạm tới khối này (để các thẻ khác không vẽ lại khi kéo chuột). */
+  sel: Rect | null;
 }) {
+  renderProbe("AccountCard");
+  // Địa chỉ từng dòng: tạo MỘT lần cho mỗi (mặt sổ, khối, số dòng) để `Row` (memo) thấy cùng một tham chiếu
+  const refs = useMemo(
+    () => rows.map((_, ri) => ({ sheet: sheetId, block: blockIdx, row: ri })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sheetId, blockIdx, rows.length],
+  );
   // Một lượt tính cho cả khối: cột 検算, trạng thái từng dòng, số dòng cần soát
-  const infos = useMemo(() => analyzeRows(rows), [rows]);
+  // `analyzeRows` trả đối tượng MỚI cho mọi dòng mỗi khi `rows` đổi (dù chỉ sửa một ô) — giữ lại đối tượng cũ của những dòng
+  // kết quả y hệt để `Row` (memo) không vẽ lại cả khối chỉ vì một dòng đổi.
+  const prevInfos = useRef<RowInfo[]>([]);
+  const infos = useMemo(() => {
+    const before = prevInfos.current;
+    return analyzeRows(rows).map((x, i) => {
+      const p = before[i];
+      return p && p.chk === x.chk && p.state === x.state && p.need === x.need && p.field === x.field && p.diff === x.diff ? p : x;
+    });
+  }, [rows]);
+  useEffect(() => {
+    prevInfos.current = infos;
+  }, [infos]);
   const real = rows.filter((r) => !r.is_note);
   const needCheck = infos.filter((i) => i.need).length;
   // Mọi dòng thật đã ✓ rồi thì nút「Xác nhận cả mặt sổ」không còn việc gì để làm
   const allConfirmed = real.every((r) => r.reviewed);
   // 「+ Thêm dòng」chèn ngay dưới dòng đang chọn (nếu nó nằm trong thẻ này), không thì xuống cuối
   const insertAfter =
-    selected &&
-    selected.sheet === refs[0]?.sheet &&
-    selected.block === refs[0]?.block &&
-    selected.row < refs.length
-      ? selected
-      : refs[refs.length - 1];
+    selectedRow != null && selectedRow < refs.length ? refs[selectedRow] : refs[refs.length - 1];
 
   const q = filter.trim().toLowerCase();
   const matches = (tx: Tx) =>
@@ -829,7 +880,7 @@ function AccountCard({
 
       <div className="thin-scroll overflow-x-auto">
         <table className="w-full border-collapse text-[length:calc(13.5px*var(--fs))]">
-          {head}
+          <TableHead cols={cols} t={t} />
           <tbody>
             {rows.map((tx, i) => (
               <Row
@@ -840,14 +891,10 @@ function AccountCard({
                 info={infos[i]}
                 ref_={refs[i]}
                 dim={!!q && !matches(tx)}
-                sel={
-                  !!selected &&
-                  selected.sheet === refs[i].sheet &&
-                  selected.block === refs[i].block &&
-                  selected.row === refs[i].row
-                }
+                sel={selectedRow === i}
                 rowIdx={rowBase + i}
-                pick={pick}
+                pc0={sel && rowBase + i >= sel.r0 && rowBase + i <= sel.r1 ? sel.c0 : -1}
+                pc1={sel && rowBase + i >= sel.r0 && rowBase + i <= sel.r1 ? sel.c1 : -1}
                 t={t}
                 lang={lang}
                 onEdit={onEdit}
@@ -855,10 +902,8 @@ function AccountCard({
                 onToggleReviewed={onToggleReviewed}
                 onRestore={onRestore}
                 onSelect={onSelectRow}
-                sug={{
-                  description: tx.is_note ? null : suggest("description", tx.description),
-                  kind: tx.is_note ? null : suggest("kind", tx.kind),
-                }}
+                sugDesc={tx.is_note ? null : suggest("description", tx.description)}
+                sugKind={tx.is_note ? null : suggest("kind", tx.kind)}
                 onAcceptSug={onAcceptSug}
               />
             ))}
@@ -906,6 +951,8 @@ function AccountCard({
     </section>
   );
 }
+
+const AccountCard = memo(AccountCardImpl);
 
 export default function ReviewPane({
   store,
@@ -962,7 +1009,6 @@ export default function ReviewPane({
   onSelectRow: (ref: TxRef) => void;
 }) {
   const { t, lang } = useT();
-  const g = t.colGloss;
   const scroller = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState("");
   /** Khối đang mở hộp «Thông tin sổ» (null = đóng). */
@@ -974,12 +1020,6 @@ export default function ReviewPane({
   const [sel, setSel] = useState<Rect | null>(null);
   const anchor = useRef<{ r: number; c: number } | null>(null);
   const dragging = useRef(false);
-
-  const pick = useCallback(
-    (row: number, col: number) =>
-      !!sel && row >= sel.r0 && row <= sel.r1 && col >= sel.c0 && col <= sel.c1,
-    [sel],
-  );
 
   const onDown = (e: React.MouseEvent) => {
     const root = scroller.current;
@@ -1082,24 +1122,7 @@ export default function ReviewPane({
     box.scrollTop = box.scrollTop + delta;
   }, [activeSheet, mode, store]);
 
-  const head = (
-    <thead>
-      <tr>
-        <Th jp="行" vn="" align="center" width="34px" />
-        <Th jp="年月日" vn={g.date} width="112px" />
-        {cols.kind && <Th jp="区分" vn={g.kind} width="72px" />}
-        <Th jp="摘要" vn={g.desc} />
-        <Th jp="お支払" vn={g.out} align="right" width="106px" />
-        <Th jp="お預り" vn={g.in} align="right" width="106px" />
-        <Th jp="差引残高" vn={g.bal} align="right" width="118px" />
-        {cols.store && <Th jp="取扱店" vn="" align="center" width="76px" />}
-        {cols.extra && <Th jp="備考" vn="" align="center" width="76px" />}
-        <Th jp="検算" vn="" align="center" width="38px" />
-        <Th jp="確認メモ" vn="" width="140px" />
-        <Th jp="" vn="" width="52px" pinRight />
-      </tr>
-    </thead>
-  );
+  const openMeta = useCallback((sheet: string, block: number) => setMetaTarget({ sheet, block }), []);
 
   /** Dòng đầu tiên của mỗi khối đứng thứ mấy trong TOÀN lưới.
    *
@@ -1132,13 +1155,13 @@ export default function ReviewPane({
         key={`${sheetId}-${bi}`}
         meta={block.meta}
         rows={block.rows}
-        refs={block.rows.map((_, ri) => ({ sheet: sheetId, block: bi, row: ri }))}
+        sheetId={sheetId}
+        blockIdx={bi}
         index={startIndex + bi}
         ofTotal={data.blocks.length}
         sourceLabel={source}
         fallbackTitle={sheetName[sheetId] ?? sheetId}
         cols={cols}
-        head={head}
         t={t}
         lang={lang}
         filter={filter}
@@ -1149,13 +1172,19 @@ export default function ReviewPane({
         onConfirmAll={onConfirmAll}
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
-        onEditMeta={(sheet, block) => setMetaTarget({ sheet, block })}
+        onEditMeta={openMeta}
         suggest={suggest}
         onAcceptSug={onAcceptSug}
-        selected={selected}
+        selectedRow={selected && selected.sheet === sheetId && selected.block === bi ? selected.row : null}
         onSelectRow={onSelectRow}
         rowBase={rowBase[`${sheetId}:${bi}`] ?? 0}
-        pick={pick}
+        sel={
+          sel &&
+          (rowBase[`${sheetId}:${bi}`] ?? 0) <= sel.r1 &&
+          (rowBase[`${sheetId}:${bi}`] ?? 0) + block.rows.length - 1 >= sel.r0
+            ? sel
+            : null
+        }
       />
     ));
     return (
@@ -1270,7 +1299,10 @@ export default function ReviewPane({
         ) : (
           <>
             {scanned.map((s, si) => (
-              <section key={s.id} data-sheet={s.id}>
+              <section key={s.id} data-sheet={s.id} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 900px" }}>
+                {/* content-visibility:auto (task 3.5): trình duyệt bỏ qua dàn trang + vẽ các mặt sổ nằm NGOÀI màn hình, nhưng DOM
+                    vẫn còn nguyên nên phím mũi tên, focus, bôi đen và chép TSV vẫn chạy. `auto 900px` = cao tạm 900px cho tới
+                    khi mặt đó từng được vẽ (sau đó nhớ chiều cao thật). */}
                 <h3
                   className={`sticky top-0 z-20 flex items-center gap-2 border-y border-rule px-3 py-1.5 text-[length:calc(12px*var(--fs))] font-semibold ${
                     activeSheet === s.id ? "bg-accentpale text-ink" : "bg-card3 text-ink2"

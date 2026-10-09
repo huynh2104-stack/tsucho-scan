@@ -52,6 +52,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
+import { useStable } from "@/lib/useStable";
 import QuickReview from "@/components/QuickReview";
 import Toast, { type ToastData } from "@/components/Toast";
 import {
@@ -1276,6 +1277,25 @@ export default function Workbench() {
     }
   };
 
+  /* Các hàm xử lý đưa xuống bảng kết quả phải có DANH TÍNH CỐ ĐỊNH (task 3.5): hàm mới sau mỗi lần vẽ thì `React.memo`
+     của `Row`/`AccountCard` vô dụng và chọn một dòng là cả bảng (hàng trăm dòng) vẽ lại. Bản bọc luôn gọi hàm mới nhất. */
+  const sEdit = useStable(editCell);
+  const sDeleteRow = useStable(deleteRow);
+  const sToggleReviewed = useStable(toggleReviewed);
+  const sRestore = useStable(restoreCell);
+  const sConfirmAll = useStable(confirmAll);
+  const sAddRow = useStable(addRow);
+  const sAutoBalance = useStable(autoBalance);
+  const sSaveMeta = useStable(saveMeta);
+  const sAcceptSug = useStable(acceptSuggestion);
+  const sDismissLink = useStable(dismissLink);
+  const sUndismissLink = useStable(undismissLink);
+  const sToggleCol = useStable((k: keyof OptCols) => setCols((p) => ({ ...p, [k]: !p[k] })));
+  const sSelectRow = useStable((ref: TxRef) => {
+    setSelRow(ref);
+    setActive(ref.sheet);
+  });
+
   // Chưa biết ai đang đăng nhập thì chưa vẽ bàn làm việc — nếu vẽ, người dùng
   // thấy giao diện rỗng loé lên một nhịp rồi mới bị đá sang /login.
   // (Đặt SAU mọi hook: React cấm số lượng hook thay đổi giữa các lần render.)
@@ -1741,23 +1761,23 @@ export default function Workbench() {
               activeSheet={active}
               mode={mode}
               cols={cols}
-              onToggleCol={(k) => setCols((p) => ({ ...p, [k]: !p[k] }))}
+              onToggleCol={sToggleCol}
               onModeChange={setMode}
-              onEdit={editCell}
-              onDeleteRow={deleteRow}
-              onToggleReviewed={toggleReviewed}
-              onRestore={restoreCell}
-              onConfirmAll={confirmAll}
-              onAddRow={addRow}
-              onAutoBalance={autoBalance}
-              onSaveMeta={saveMeta}
+              onEdit={sEdit}
+              onDeleteRow={sDeleteRow}
+              onToggleReviewed={sToggleReviewed}
+              onRestore={sRestore}
+              onConfirmAll={sConfirmAll}
+              onAddRow={sAddRow}
+              onAutoBalance={sAutoBalance}
+              onSaveMeta={sSaveMeta}
               suggest={corr.suggest}
-              onAcceptSug={acceptSuggestion}
+              onAcceptSug={sAcceptSug}
               links={linkByTo}
-              onDismissLink={dismissLink}
-              onUndismissLink={undismissLink}
+              onDismissLink={sDismissLink}
+              onUndismissLink={sUndismissLink}
               selected={selRow}
-              onSelectRow={(ref) => { setSelRow(ref); setActive(ref.sheet); }}
+              onSelectRow={sSelectRow}
             />
             )}
           </div>

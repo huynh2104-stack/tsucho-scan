@@ -68,7 +68,10 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     (không học, không gợi ý), xoá hết
  26 ⚙ → cỡ chữ Lớn / Rất lớn: chữ nút phóng đúng 1.15× / 1.3×, lưu theo tài khoản, sống qua F5 (script chống nháy đặt
     --fs từ khung hình đầu), máy lạ đăng nhập thấy đúng cỡ, không tràn ngang ở 1366×768 và 375×812
+ 27 chọn / đổi dòng chỉ vẽ lại vài dòng (bộ đếm `window.__renders`), không phải cả bảng; bôi đen một vùng chữ nhật
+    xuyên hai mặt sổ rồi chép: TSV đúng từng ô (đối chiếu dữ liệu máy chủ) khi các mặt dùng content-visibility
 Chạy toàn bộ kịch bản ở cỡ chữ lớn:  python tests/e2e/smoke.py --font-scale 1.3
+Đo độ mượt của bảng ~480 dòng (không phải bước kiểm):  python tests/e2e/perf_table.py --cpu 4
 """
 from __future__ import annotations
 
@@ -1837,7 +1840,7 @@ def step_dictionary_modes(pg, base: str, ctx: dict) -> str:
 
         # ── Danh sách + xoá từng mục ──
         open_settings()
-        assert dialog.locator("[data-dict-entry]").count() == 2, dialog.inner_text()
+        wait_until(lambda: dialog.locator("[data-dict-entry]").count() == 2, "từ điển tải xong, hộp ⚙ liệt kê 2 mục")
         assert "Chỉ gợi ý" in dialog.inner_text() and "Mặc định, ai cũng nên để vậy" in dialog.locator("[data-testid=dict-mode-hint]").inner_text()
         victim = next(e for e in j("/api/dict")["entries"] if e["wrong"] == "振込1")
         dialog.locator(f'[data-dict-delete="{victim["id"]}"]').click()
@@ -1970,6 +1973,89 @@ def step_font_scale(pg, base: str, ctx: dict) -> str:
             "F5: --fs đã có từ DOMContentLoaded · máy lạ đăng nhập thấy đúng cỡ")
 
 
+def step_smooth_table(pg, base: str, ctx: dict) -> str:
+    """Task 3.5: bảng mượt. Hồ sơ tạm có 6 mặt sổ sổ mẫu; ở dạng «Gộp danh sách» (mọi mặt cùng hiện)."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    tmp = temp_sample_ws(pg, base)
+    ws_id, s1, s2 = tmp["ws"], tmp["s1"], tmp["s2"]
+    for _ in range(2):
+        assert pg.request.post(f"{base}/api/ws/{ws_id}/sample").ok            # thêm 4 mặt sổ nữa: 6 mặt, ~60 dòng
+    try:
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        pg.get_by_role("button", name=re.compile("Gộp danh sách")).click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+        total_rows = pg.locator("tr[data-row]").count()
+        assert total_rows >= 50, total_rows
+
+        # ── Chọn dòng: chỉ vẽ lại dòng bỏ chọn + dòng được chọn, KHÔNG phải cả bảng ──
+        pg.evaluate("window.__renders = {}")
+        rows = pg.locator("tr[data-row]")
+        for k in (3, 25, 41):                                                  # ba mặt sổ khác nhau
+            rows.nth(k).locator("td").nth(2).click()
+            time.sleep(0.25)
+        n_row = pg.evaluate("window.__renders.Row || 0")
+        # Không memo thì 3 lần chọn vẽ lại CẢ bảng 3 lần (3 × total_rows). Có memo chỉ vài dòng (dòng bỏ chọn + dòng được
+        # chọn + vài dòng nằm trong vùng bôi đen tí hon mà cú bấm giả lập tạo ra): ngưỡng = nửa MỘT lần vẽ cả bảng.
+        assert 0 < n_row <= total_rows // 2, f"3 lần chọn dòng mà {n_row} lần vẽ Row (cả bảng có {total_rows} dòng): memo hỏng"
+        # Sửa một ô: chỉ dòng đó (và thẻ chứa nó) vẽ lại
+        pg.evaluate("window.__renders = {}")
+        cell = rows.nth(25).locator('input[data-field="description"]')
+        cell.fill("sửa thử")
+        cell.press("Enter")
+        time.sleep(0.4)
+        n_row2 = pg.evaluate("window.__renders.Row || 0")
+        assert 0 < n_row2 <= 8, f"sửa một ô mà {n_row2} lần vẽ Row (cả bảng {total_rows} dòng, cả khối ~12): memo/info hỏng"
+        pg.keyboard.press("Control+z")
+
+        # ── Mặt sổ ngoài màn hình được bỏ qua khi vẽ nhưng DOM còn nguyên ──
+        cv = pg.evaluate("[...document.querySelectorAll('section[data-sheet]')].map(e => getComputedStyle(e).contentVisibility)")
+        assert cv and all(v == "auto" for v in cv), cv
+        assert pg.evaluate("document.querySelectorAll('section[data-sheet] tr[data-row]').length") == total_rows
+
+        # ── Bôi đen một vùng chữ nhật XUYÊN HAI MẶT SỔ rồi chép: TSV đúng từng ô ──
+        res = j(f"/api/ws/{ws_id}")["results"]
+        r1 = [r for b in res[s1]["blocks"] for r in b["rows"]]
+        r2 = [r for b in res[s2]["blocks"] for r in b["rows"]]
+        # (s1 và s2 là hai mặt đứng cạnh nhau ở đầu danh sách)
+        first = pg.locator(f'tr[data-row="{s1}:0:{len(r1) - 2}"] input[data-field="description"]')
+        first.evaluate("e => e.closest('tr').scrollIntoView({block: 'start'})")        # hai đầu vùng chọn cùng nằm trong màn hình
+        pg.evaluate("document.querySelector('[data-grid]').scrollTop -= 80")           # chừa chỗ cho dải tên mặt sổ dính trên đầu
+        last = pg.locator(f'tr[data-row="{s2}:0:1"] input[data-field="balance"]')
+        a = first.bounding_box()
+        assert a
+        # Bấm ô đầu (đặt ô neo). Bấm một dòng làm mặt sổ đó thành «đang xem» và danh sách tự cuộn về đầu mặt sổ đó, nên
+        # vị trí ô cuối phải ĐO LẠI sau cú bấm này, rồi Shift+bấm: vùng chữ nhật nối dài từ ô neo.
+        pg.mouse.click(a["x"] + 6, a["y"] + a["height"] / 2)
+        time.sleep(0.4)
+        last.scroll_into_view_if_needed()
+        time.sleep(0.2)
+        b = last.bounding_box()
+        assert b
+        pg.keyboard.down("Shift")
+        pg.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
+        pg.keyboard.up("Shift")
+        time.sleep(0.5)
+        m = re.search(r"Đã chọn (\d+) ô", pg.locator("body").inner_text())
+        assert m and m.group(1) == "16", f"vùng chọn phải là 4 dòng × 4 cột = 16 ô, đang là {m and m.group(1)}"
+        pg.evaluate("""() => { window.__copied = null;
+            document.addEventListener('copy', e => { window.__copied = e.clipboardData.getData('text/plain'); }); }""")
+        pg.evaluate("document.execCommand('copy')")
+        got = pg.evaluate("window.__copied")
+        money = lambda v: "" if v is None else str(v)
+        want_rows = r1[-2:] + r2[:2]
+        want = "\r\n".join("\t".join([(r.get("description") or ""), money(r.get("amount_out")), money(r.get("amount_in")), money(r.get("balance"))])
+                           for r in want_rows)
+        assert got == want, f"TSV chép được:\n{got!r}\nkỳ vọng:\n{want!r}"
+    finally:
+        pg.request.delete(f"{base}/api/dict")                        # lần sửa ở trên đã dạy từ điển một cặp: dọn đi
+        drop_temp_ws(pg, base, tmp)
+    return (f"chọn 3 dòng ở 3 mặt sổ chỉ vẽ lại {n_row} lần Row (không memo sẽ là {3 * total_rows}) · sửa một ô vẽ lại {n_row2} lần · "
+            "mọi mặt sổ dùng content-visibility mà DOM còn đủ · bôi đen 4 dòng × 4 cột xuyên hai mặt sổ chép đúng TSV")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1997,6 +2083,7 @@ STEPS = [
     ("24. Từ điển sửa lỗi: học, gợi ý, áp hàng loạt", step_dictionary),
     ("25. Từ điển: quản lý, tự áp, tắt", step_dictionary_modes),
     ("26. Cỡ chữ lớn", step_font_scale),
+    ("27. Bảng mượt: chọn dòng không vẽ lại cả bảng, chép TSV xuyên hai mặt sổ", step_smooth_table),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
