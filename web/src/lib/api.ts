@@ -3,6 +3,8 @@
  * là ống dẫn. KHÔNG bao giờ đặt GEMINI_API_KEY ở đây: key chỉ nằm ở backend.
  */
 
+import type { Prefs } from "./prefs-defaults.ts";
+
 /** Địa chỉ API.
  *
  * Để TRỐNG khi triển khai thật: lúc đó FastAPI phục vụ luôn trang web nên web
@@ -320,6 +322,21 @@ export const fetchMe = async () =>
 
 /** Một dòng trong danh sách hồ sơ. `rows/need/confirmed` tính trên kết quả ĐÃ LƯU bằng định nghĩa
  *  «cần soát» chung (cùng con số với bộ đếm trên bàn làm việc và với file Excel); không tính dòng ghi chú. */
+/** Cài đặt theo tài khoản (task 3.1) — kiểu và mặc định ở `prefs-defaults.ts`, bản sao máy chủ ở `api/prefs.py`. */
+export const getPrefs = async () =>
+  asJson<Prefs>(await fetch(`${API}/api/me/prefs`, CRED));
+
+/** Chỉ gửi các khoá cần đổi; máy chủ trả lại bản ĐẦY ĐỦ sau khi gộp. */
+export const putPrefs = async (patch: Partial<Prefs>) =>
+  asJson<Prefs>(
+    await fetch(`${API}/api/me/prefs`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+      ...CRED,
+    }),
+  );
+
 export type WorkspaceBrief = {
   id: string;
   book_name: string;

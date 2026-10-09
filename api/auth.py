@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS users (
     email         TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL DEFAULT 'user',
-    created_at    REAL NOT NULL
+    created_at    REAL NOT NULL,
+    prefs         TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS demo_usage (
     user_id TEXT NOT NULL,
@@ -134,6 +135,11 @@ def _db():
 def init_db() -> None:
     with _db() as conn:
         conn.executescript(SCHEMA)
+        # Di trú: `CREATE TABLE IF NOT EXISTS` KHÔNG thêm cột vào bảng đã tồn tại, nên CSDL đang chạy thật
+        # (máy anh, Render) sinh ra trước task 3.1 sẽ không có cột `prefs`. Thiếu thì thêm; người cũ nhận '{}'.
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if "prefs" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")
 
 
 def _row_to_user(row: sqlite3.Row) -> User:

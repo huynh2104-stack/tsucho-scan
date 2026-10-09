@@ -52,6 +52,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     chuỗi + thêm sổ mẫu lần nữa gây trùng) → ba mục khớp cột trái, nút đổi thành «Vẫn xuất», phạm vi «mặt đang xem»
     đếm lại; bấm từng mục nhảy tới đúng chỗ (con trỏ vào dòng vàng / dải đứt / hộp so sánh); «Gộp theo tài khoản» →
     Excel đúng số sheet (các mặt cùng tài khoản chung một tab), B1/B3 và số dòng khớp
+ 20 ⚙ Cài đặt: chọn ngôn ngữ / chủ đề trong hộp → máy chủ lưu theo tài khoản; máy lạ (trình duyệt trắng, ngôn ngữ en)
+    đăng nhập cùng tài khoản thì giao diện theo lựa chọn đã lưu (ja); Esc đóng hộp
 """
 from __future__ import annotations
 
@@ -1327,6 +1329,55 @@ def step_export_summary(pg, base: str, ctx: dict) -> str:
             f"phạm vi mặt đang xem đếm lại · mỗi mục nhảy tới đúng chỗ · Gộp theo tài khoản → {len(expect)} tab (cùng tài khoản chung tab, tài khoản khác tách tab), số dòng khớp")
 
 
+def step_settings(pg, base: str, ctx: dict) -> str:
+    """Task 3.1: ⚙ Cài đặt lưu THEO TÀI KHOẢN (ngôn ngữ, chủ đề) — đổi máy vẫn giữ. Cuối bước trả lại tiếng Việt."""
+    def prefs():
+        return pg.request.get(f"{base}/api/me/prefs").json()
+
+    pg.goto(f"{base}/")
+    pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+    assert prefs()["lang"] is None and prefs()["theme"] is None, "chưa chọn gì thì máy chủ không giữ ngôn ngữ/chủ đề"
+
+    # ── Mở hộp, chọn tiếng Nhật và chủ đề tối → máy chủ lưu ──
+    dialog = pg.locator("[data-testid=settings-dialog]")
+    pg.locator("[data-testid=settings-btn]").click()
+    dialog.wait_for(timeout=5000)
+    assert "Lưu theo tài khoản" in dialog.inner_text(), dialog.inner_text()
+    dialog.get_by_role("button", name="日本語").click()
+    wait_until(lambda: prefs()["lang"] == "ja", "máy chủ lưu ngôn ngữ ja", timeout=15)
+    assert "設定" in dialog.inner_text(), "giao diện phải đổi sang tiếng Nhật ngay"
+    dialog.get_by_role("button", name="ダーク").click()
+    wait_until(lambda: prefs()["theme"] == "dark", "máy chủ lưu chủ đề tối", timeout=15)
+    assert pg.evaluate("document.documentElement.dataset.theme") == "dark"
+
+    # ── Máy lạ: trình duyệt trắng (không có localStorage), ngôn ngữ en-US — đăng nhập cùng tài khoản ──
+    other = pg.context.browser.new_context(locale="en-US", viewport={"width": 1280, "height": 800})
+    try:
+        pg2 = other.new_page()
+        pg2.set_default_timeout(10000)
+        pg2.goto(f"{base}/login/")
+        pg2.fill("#email", EMAIL)
+        pg2.fill("#password", PASSWORD)
+        pg2.click("button[type=submit]")
+        pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
+        wait_until(lambda: pg2.evaluate("document.documentElement.lang") == "ja", "máy lạ nhận ngôn ngữ đã lưu (ja)")
+        wait_until(lambda: pg2.evaluate("document.documentElement.dataset.theme") == "dark", "máy lạ nhận chủ đề đã lưu (tối)")
+        assert pg2.locator("[data-testid=settings-btn]").get_attribute("aria-label") == "設定"
+    finally:
+        other.close()
+
+    # ── Esc đóng hộp; trả lại tiếng Việt + chủ đề theo hệ thống ──
+    dialog.get_by_role("button", name="システム").click()                  # đang là tiếng Nhật: bấm chủ đề TRƯỚC khi đổi về VI
+    dialog.get_by_role("button", name="VI").click()
+    wait_until(lambda: prefs()["lang"] == "vi" and prefs()["theme"] == "system", "trả lại vi + hệ thống", timeout=15)
+    pg.keyboard.press("Escape")
+    dialog.wait_for(state="detached", timeout=5000)
+    pg.reload()
+    pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+    assert pg.evaluate("document.documentElement.lang") == "vi"
+    return "⚙ mở/đóng bằng Esc · chọn ja + tối → máy chủ lưu theo tài khoản · máy lạ (en-US, không có localStorage) đăng nhập cùng tài khoản thì thấy tiếng Nhật + chủ đề tối · trả lại vi"
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1347,6 +1398,7 @@ STEPS = [
     ("17. Danh sách hồ sơ", step_cases),
     ("18. Sửa thông tin sổ", step_book_info),
     ("19. Tóm tắt trước khi xuất + xuất theo tài khoản", step_export_summary),
+    ("20. Cài đặt theo tài khoản", step_settings),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

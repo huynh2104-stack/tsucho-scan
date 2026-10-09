@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { useState } from "react";
+import SettingsDialog from "@/components/SettingsDialog";
 import { useCase } from "@/lib/case";
+import { usePrefs } from "@/lib/prefs";
 import { LANGS, LANG_LABEL, useT, type Lang } from "@/lib/i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { useTour } from "@/lib/tour";
@@ -33,8 +36,10 @@ function AutoIcon() {
 }
 
 export default function TopBar() {
-  const { lang, t, setLang } = useT();
-  const { mode, setMode } = useTheme();
+  const { lang, t } = useT();
+  const { mode } = useTheme();
+  const { chooseLang, chooseTheme } = usePrefs();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { user, logout } = useAuth();
   const { start: startTour } = useTour();
   const { current } = useCase();
@@ -115,7 +120,7 @@ export default function TopBar() {
         {themes.map((th) => (
           <button
             key={th.id}
-            onClick={() => setMode(th.id)}
+            onClick={() => chooseTheme(th.id)}
             aria-pressed={mode === th.id}
             title={th.label}
             className={`flex items-center gap-1.5 border-r border-rule px-2.5 py-1.5 text-[13px] last:border-r-0 ${
@@ -139,7 +144,7 @@ export default function TopBar() {
         {LANGS.map((l: Lang) => (
           <button
             key={l}
-            onClick={() => setLang(l)}
+            onClick={() => chooseLang(l)}
             aria-pressed={lang === l}
             className={`border-r border-rule px-3 py-1.5 text-[13px] last:border-r-0 ${
               lang === l
@@ -157,6 +162,15 @@ export default function TopBar() {
         <div className="flex items-center gap-2.5">
           {/* Xem lại hướng dẫn. Để cạnh tên tài khoản vì đây là chỗ mắt tìm
               đến khi bí, và bước cuối của hướng dẫn chỉ thẳng vào nút này. */}
+          <button
+            data-testid="settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            title={t.settingsBtn}
+            aria-label={t.settingsBtn}
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-rule text-[14px] text-ink2 hover:border-accent hover:bg-accentpale hover:text-accent"
+          >
+            ⚙
+          </button>
           <button
             data-tour="help"
             onClick={startTour}
@@ -177,6 +191,7 @@ export default function TopBar() {
           </button>
         </div>
       )}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

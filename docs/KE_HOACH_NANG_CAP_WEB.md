@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.4 = hết 2.1–2.4 (09/10) — pytest **417 passed** · `npm test` **168 pass** · build xanh · E2E `smoke.py` **19/19 bước** (~55 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.1 (09/10) — pytest **454 passed** · `npm test` **171 pass** · build xanh · E2E `smoke.py` **20/20 bước** (~55 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1048,7 +1048,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 2.2 Trang hồ sơ (xong 09/10/2026)
 - [x] 2.3 Sửa thông tin sổ (xong 09/10/2026)
 - [x] 2.4 Xuất theo tài khoản (xong 09/10/2026) — **hết giai đoạn 2**
-- [ ] 3.1 Cài đặt người dùng
+- [x] 3.1 Cài đặt người dùng (xong 09/10/2026)
 - [ ] 3.2 Chế độ soát nhanh — **mốc demo B**
 - [ ] 3.3 Từ điển sửa lỗi
 - [ ] 3.4 Cỡ chữ lớn
@@ -1234,6 +1234,16 @@ Quan sát khi viết E2E (không sửa):
 - **E2E bước 19**: hồ sơ sạch → «✓ Đã soát hết…» và nút «Xuất file tải về»; tạo đủ ba việc (xoá ✓ mặt ②, bỏ «Không phải lỗi», đổi thứ tự, thêm sổ mẫu lần nữa) → «Còn N dòng cần soát» (N bằng tổng `data-need` ở cột trái) · 1 chỗ đứt · 2 cặp trùng, nút «Vẫn xuất» bấm được; phạm vi «mặt đang xem» đếm lại thành sạch; ba liên kết nhảy đúng chỗ; chuyển bản sao thứ hai sang tài khoản khác → «Gộp theo tài khoản» ra **2 tab** (cùng tài khoản chung tab), số dòng mỗi tab khớp dữ liệu; cuối bước trả hồ sơ về đúng như cũ (so từng khối kết quả). Lúc viết bước này tôi mắc một lỗi kiểm thử: sửa kết quả bằng API rồi xuất ngay — nhưng file xuất do TRÌNH DUYỆT gửi lên (`buildAccounts`) nên ra bản cũ; phải nạp lại trang trước khi xuất.
 - **Đo trên dữ liệu thật của anh** (chỉ số đếm): 4 hồ sơ có kết quả, 47 mặt sổ → `per_sheet` 47 tab, `per_account` **46** tab; tổng số dòng hai cách bằng nhau. Tức là **hiện gần như chưa gom được gì**: chỉ 1 nhóm có số tài khoản, 45 mặt không có (sổ chụp lẻ không bìa) — đúng điều mục «Vì sao» của 2.3 dự báo. Muốn gom được thì phải điền thông tin sổ bằng nút ✎ (2.3, có «áp cho mặt sau») trước.
 - **Chưa làm / giới hạn**: chưa nối công thức 残高チェック xuyên mặt (xem trên); tóm tắt đếm theo bản trong TRÌNH DUYỆT (đúng thứ file xuất sẽ chứa), không theo bản đã lưu ở máy chủ; không có chỗ nào cảnh báo «tài khoản này chỉ có 1 mặt trong khi các mặt khác...»; chưa thử hộp Xuất file trên máy hẹp 390px.
+
+
+**Task 3.1 — xong 09/10/2026** (pytest **454** (+37) · `npm test` **171** (+3) · build xanh · E2E **20/20 bước**, thêm bước 20).
+- **Máy chủ** (`api/prefs.py`, route `GET/PUT /api/me/prefs`): cài đặt lưu thành một chuỗi JSON ở cột `users.prefs` (chỉ ghi khoá người dùng đã đổi, khoá chưa đổi lấy mặc định ở `prefs.DEFAULTS` — đổi mặc định sau này không cần di trú). **Danh sách trắng + kiểu chặt**: `fontScale` ∈ {1, 1.15, 1.3}; `dictMode` ∈ {suggest, auto, off}; `showCost`/`autoRotate`/`autoFixOnUpload`/`accountingMode` đúng/sai; `lang` ∈ {vi,en,ja,null}; `theme` ∈ {light,dark,system,null}. Khoá lạ, sai kiểu (kể cả `true` chỗ cần số 1 — trong Python `True == 1`), hoặc cả yêu cầu có một khoá xấu → **400 và không ghi gì**. PUT là **gộp từng khoá** (không gửi thì giữ), trả bản đầy đủ; đọc–sửa–ghi trong một giao dịch `BEGIN IMMEDIATE` nên hai tab cùng đổi hai khoá khác nhau không ghi đè mất khoá của nhau (test 8 luồng đồng thời). Người này không đọc/sửa được của người kia (route chỉ lấy `user.id` từ phiên). Cột hỏng hoặc có khoá thừa/sai kiểu do bản khác ghi thì **bỏ phần xấu, không nổ** (người dùng không được bị khoá ngoài app vì một cột).
+- **Di trú**: `init_db` kiểm `PRAGMA table_info(users)`, thiếu `prefs` thì `ALTER TABLE … ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'` (chạy lại không lỗi; test dựng CSDL kiểu cũ rồi nâng). Mặc định dùng chung một file `tests/fixtures/prefs_defaults.json` với phía web (cả pytest và `npm test` đọc nó).
+- **Web**: `lib/prefs-defaults.ts` (kiểu + `DEFAULT_PREFS` + `mergePrefs`, thuần để test được bằng node), `lib/prefs.tsx` (`PrefsProvider` đặt SAU `AuthProvider`, trước `TourProvider`), `components/SettingsDialog.tsx`, nút **⚙** trên thanh trên cạnh nút ?. Đổi cài đặt là «lạc quan» (giao diện đổi ngay rồi mới gửi); máy chủ trả bản đầy đủ nên chỉ nhận câu trả lời của lần gửi MỚI NHẤT (số thứ tự lần gửi), lỗi mạng thì bản trên máy này vẫn đổi và hộp hiện dòng «Chưa lưu được lên máy chủ».
+- **Ngôn ngữ / chủ đề đồng bộ thêm** vào cài đặt (nút VI/EN/日本語 và Sáng/Tối/Hệ thống ở thanh trên, cũng như trong hộp ⚙, đều đi qua `chooseLang/chooseTheme`): localStorage vẫn là nơi đọc ĐẦU TIÊN (khung hình đầu và script chống nháy ở `layout.tsx` không chờ mạng); sau khi đăng nhập, bản ở máy chủ thắng MỘT lần. Chỉ ghi khi người dùng TỰ bấm — ngôn ngữ do trình duyệt đoán thì không bị ghi thành «lựa chọn» (máy khác ngôn ngữ vẫn tự đoán đúng). E2E bước 20: chọn ja + tối → máy chủ lưu; một trình duyệt trắng (en-US, không localStorage) đăng nhập cùng tài khoản thì thấy tiếng Nhật + chủ đề tối.
+- **Hộp ⚙ hiện nay chỉ có Ngôn ngữ + Giao diện** — cố ý: hộp chỉ liệt kê tuỳ chọn ĐÃ chạy được, không có công tắc nào đứng không. 3.3 thêm «Từ điển sửa lỗi» và 3.4 thêm «Cỡ chữ» vào đây; các khoá `showCost` (4.3), `autoRotate` (5.3), `autoFixOnUpload` (5.4), `accountingMode` (6.x) đã được máy chủ nhận nhưng CHƯA có công tắc ở giao diện.
+- **Bẻ thử**: máy chủ 8 chỗ (bỏ `BEGIN IMMEDIATE`, nhận khoá lạ, cho null vào khoá không cho phép, bỏ lọc khoá sai kiểu đã lưu, PUT ghi đè thay vì gộp, bỏ di trú, bỏ chặn kiểu) → đỏ cả 8 (chỗ «bool lọt» ban đầu sống sót vì có hai lớp chặn trùng nhau — đã bỏ lớp thừa). E2E: không áp ngôn ngữ máy chủ lúc đăng nhập → đỏ; chọn ngôn ngữ mà không ghi lên máy chủ → đỏ.
+- **Chưa làm / giới hạn**: không có «xoá tài khoản» nên «xoá tài khoản là xoá hết cài đặt» chưa kiểm được; tài khoản dùng thử dùng CHUNG nên cài đặt cũng dùng chung giữa những người cùng vào tài khoản đó; chưa thử ⚙ trên máy hẹp.
 
 ---
 

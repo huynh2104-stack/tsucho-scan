@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from export import export_accounts
 
 from . import (
-    auth, autofix, demo, export_csv, imgjobs, jobs, results, rowmap, rowanchors, sample, workspace,
+    auth, autofix, demo, export_csv, imgjobs, jobs, prefs, results, rowmap, rowanchors, sample, workspace,
 )
 
 app = FastAPI(title="tsucho-scan API", version="0.3.0")
@@ -175,6 +175,23 @@ def logout(
 @app.get("/api/auth/me")
 def me(user: CurrentUser) -> dict:
     return user.to_json()
+
+
+# ── Cài đặt theo tài khoản (task 3.1) ─────────────────────────────────
+
+@app.get("/api/me/prefs")
+def get_prefs(user: CurrentUser) -> dict:
+    """Cài đặt đầy đủ của CHÍNH người đang đăng nhập (khoá chưa đổi lấy mặc định)."""
+    return prefs.get(user.id)
+
+
+@app.put("/api/me/prefs")
+def put_prefs(user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Đổi một vài khoá (các khoá không gửi giữ nguyên). Khoá lạ / sai kiểu → 400."""
+    try:
+        return prefs.update(user.id, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 # ── Không gian làm việc & mặt sổ ─────────────────────────────────────
