@@ -41,6 +41,10 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     ở cột trái, chip ⚠ ở thanh công cụ); 「Không phải lỗi」sống qua F5; trả thứ tự lại → «nối liền»
  16 thêm lần nữa sổ mẫu (hai mặt giống hệt) → huy hiệu «Có thể trùng với…» ở cột trái, hộp so sánh hai ảnh
     ("x/y số dư trùng"), cảnh báo ở hộp Xuất file; 「Không phải trùng」sống qua F5; 「Xoá mặt bên phải」
+ 17 danh sách hồ sơ: thanh trên hiện tên hồ sơ đang mở; trang /cases/ khớp số dòng cần soát với cột trái; tạo hồ sơ
+    mới (Enter) → mở đúng hồ sơ đó, hai hồ sơ không lẫn mặt sổ; mở lại hồ sơ cũ; đổi tên bằng bấm đúp (Esc bỏ);
+    lưu trữ ↔ bỏ lưu trữ; hồ sơ lưu trữ không tự mở lại ở trang chủ; xoá phải BẤM nút (Enter chỉ huỷ hộp, không xoá) và xoá thật;
+    hướng dẫn có bước chỉ vào liên kết «Hồ sơ»
 """
 from __future__ import annotations
 
@@ -212,7 +216,7 @@ def step_register(pg, base: str, ctx: dict) -> str:
 def step_skip_tour(pg, base: str, ctx: dict) -> str:
     pg.get_by_role("button", name=VI["skipTour"]).click(timeout=10000)
     pg.locator("[role=dialog][aria-labelledby=tour-title]").wait_for(state="detached", timeout=5000)
-    return "hướng dẫn 7 bước đã đóng"
+    return "hướng dẫn 8 bước đã đóng"
 
 
 def step_sample(pg, base: str, ctx: dict) -> str:
@@ -905,6 +909,155 @@ def step_duplicate_pages(pg, base: str, ctx: dict) -> str:
     return f"2 bản chụp lại → 2 huy hiệu ({victim.strip()[:30]}…) · hộp so sánh có 2 ảnh + số dư trùng · cảnh báo khi xuất · Không phải trùng sống qua F5 · Xoá mặt bên phải"
 
 
+def step_cases(pg, base: str, ctx: dict) -> str:
+    """Task 2.2: trang danh sách hồ sơ. Hồ sơ A là hồ sơ các bước trước đã dùng; tạo thêm hồ sơ B rồi dọn (còn lại
+    đúng một hồ sơ để các bước sau không lẫn)."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    a_id = j("/api/ws")["workspaces"][0]["id"]
+    user_id = j("/api/auth/me")["id"]
+    cards = pg.locator("[data-testid=case-card]")
+    chip = pg.locator("[data-testid=current-case]")
+    search = pg.get_by_placeholder("Tìm theo tên hồ sơ…")
+
+    def go_cases():
+        pg.locator('[data-tour="cases"]').click()
+        pg.wait_for_url("**/cases/", timeout=10000)
+
+    # ── Đặt tên hồ sơ A trên bàn làm việc → thanh trên hiện tên đó ──
+    pg.goto(f"{base}/")
+    pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+    name_box = pg.get_by_placeholder("Tên sổ")
+    name_box.fill("Khách A")
+    name_box.press("Tab")
+    wait_until(lambda: j(f"/api/ws/{a_id}")["book_name"] == "Khách A", "server lưu tên hồ sơ A")
+    wait_until(lambda: "Khách A" in chip.inner_text(), "thanh trên hiện tên hồ sơ đang mở")
+
+    # ── Trang danh sách: số «cần soát» khớp với cột trái ──
+    go_cases()
+    cards.first.wait_for(timeout=10000)
+    assert cards.count() == 1, f"mới có 1 hồ sơ mà thấy {cards.count()}"
+    brief = j("/api/ws")["workspaces"][0]
+    assert brief["id"] == a_id and brief["book_name"] == "Khách A" and not brief["archived"], brief
+    assert brief["rows"] > 0 and brief["sheets"] >= 2, brief
+    status = cards.first.locator("[data-testid=case-status]").inner_text().strip()
+    want = VI["allChecked"] if brief["need"] == 0 else f"Còn {brief['need']} dòng"
+    assert status == want, f"thẻ hồ sơ ghi «{status}», máy chủ tính «{want}»"
+    assert "Đang mở" in cards.first.inner_text(), "hồ sơ đang làm phải có nhãn «Đang mở»"
+    # Cùng một định nghĩa: tổng số trên các thẻ mặt sổ ở cột trái (đo ở bàn làm việc) phải bằng số ở đây
+    pg.goto(f"{base}/")
+    pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+    wait_until(lambda: pg.locator('[data-tour="rail"] li[data-need]').count() > 0, "cột trái có số cần soát")
+    rail_total = sum(int(e.get_attribute("data-need")) for e in pg.locator('[data-tour="rail"] li[data-need]').all())
+    assert rail_total == brief["need"], f"cột trái cộng được {rail_total}, trang hồ sơ ghi {brief['need']}"
+
+    # ── Tạo hồ sơ B bằng Enter → mở đúng hồ sơ đó, rỗng ──
+    go_cases()
+    pg.locator("[data-testid=case-new]").click()
+    pg.locator("[data-testid=case-new-name]").fill("Khách B")
+    pg.locator("[data-testid=case-new-name]").press("Enter")
+    pg.locator('[data-tour="drop"]').wait_for(timeout=15000)
+    wait_until(lambda: "Khách B" in chip.inner_text(), "thanh trên hiện tên hồ sơ mới")
+    b_id = re.search(r"[?&]ws=([\w-]+)", pg.url).group(1)
+    assert b_id != a_id and j(f"/api/ws/{b_id}")["sheets"] == [], "hồ sơ mới phải rỗng"
+    assert pg.locator('[data-tour="rail"] li').count() == 0, "bàn làm việc của hồ sơ mới phải chưa có mặt sổ"
+    pg.locator("button", has_text=VI["trySample"]).click()
+    pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+    b_sheets = [s["id"] for s in j(f"/api/ws/{b_id}")["sheets"]]
+    a_sheets = [s["id"] for s in j(f"/api/ws/{a_id}")["sheets"]]
+    assert len(b_sheets) == 2 and not set(b_sheets) & set(a_sheets), "hai hồ sơ không được chung mặt sổ"
+
+    # ── Danh sách có hai hồ sơ, B (sửa gần nhất) đứng đầu; mở lại A → thấy mặt sổ của A, không thấy của B ──
+    go_cases()
+    wait_until(lambda: cards.count() == 2, "danh sách có hai hồ sơ")
+    assert cards.first.get_attribute("data-case-id") == b_id, "hồ sơ vừa sửa phải đứng đầu"
+    assert "Đang mở" in cards.first.inner_text() and "Đang mở" not in cards.nth(1).inner_text()
+    cards.nth(1).locator("[data-testid=case-open]").click()
+    pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+    wait_until(lambda: "Khách A" in chip.inner_text(), "mở lại hồ sơ A")
+    rail_names = pg.locator('[data-tour="rail"] li').all_inner_texts()
+    assert len(rail_names) == len(a_sheets), f"hồ sơ A có {len(a_sheets)} mặt sổ, cột trái hiện {len(rail_names)}"
+    pg.reload()                                                     # ?ws=… còn trên địa chỉ → F5 vẫn là hồ sơ A
+    pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+    wait_until(lambda: "Khách A" in chip.inner_text(), "F5 vẫn là hồ sơ A")
+
+    # ── Hướng dẫn có bước chỉ vào liên kết «Hồ sơ» ──
+    pg.locator('[data-tour="help"]').click()
+    tour = pg.locator("[role=dialog][aria-labelledby=tour-title]")
+    tour.wait_for(timeout=5000)
+    assert "/ 8" in tour.inner_text(), tour.inner_text()
+    for _ in range(6):
+        pg.keyboard.press("ArrowRight")
+    wait_until(lambda: "Hồ sơ" in tour.locator("#tour-title").inner_text(), "bước thứ 7 của hướng dẫn nói về hồ sơ")
+    pg.keyboard.press("Escape")
+    tour.wait_for(state="detached", timeout=5000)
+
+    # ── Đổi tên bằng bấm đúp: Esc bỏ, Enter lưu, sống qua F5 ──
+    pg.goto(f"{base}/cases/")
+    cards.first.wait_for(timeout=10000)
+    card_b = pg.locator(f'[data-case-id="{b_id}"]')
+    card_b.locator("[data-testid=case-name]").dblclick()
+    box = card_b.locator("input")
+    box.fill("Tên bỏ đi")
+    box.press("Escape")
+    wait_until(lambda: card_b.locator("input").count() == 0, "Esc đóng ô đổi tên")
+    assert card_b.locator("[data-testid=case-name]").inner_text() == "Khách B", "Esc phải bỏ thay đổi"
+    assert j(f"/api/ws/{b_id}")["book_name"] == "Khách B"
+    card_b.locator("[data-testid=case-name]").dblclick()
+    box = card_b.locator("input")
+    box.fill("Khách B2")
+    box.press("Enter")
+    wait_until(lambda: j(f"/api/ws/{b_id}")["book_name"] == "Khách B2", "server lưu tên mới")
+    pg.reload()
+    wait_until(lambda: pg.locator(f'[data-case-id="{b_id}"] [data-testid=case-name]').inner_text() == "Khách B2", "tên mới sau F5")
+
+    # ── Lưu trữ B: sang tab «Đã lưu trữ», tìm kiếm không dấu, bỏ lưu trữ ──
+    card_b = pg.locator(f'[data-case-id="{b_id}"]')
+    card_b.locator("[data-testid=case-archive]").click()
+    wait_until(lambda: cards.count() == 1, "B biến khỏi tab «Đang làm»")
+    wait_until(lambda: j(f"/api/ws/{b_id}")["archived"] is True, "server lưu trạng thái lưu trữ")
+    pg.get_by_role("tab", name=re.compile("Đã lưu trữ")).click()
+    wait_until(lambda: cards.count() == 1 and cards.first.get_attribute("data-case-id") == b_id, "B nằm ở tab «Đã lưu trữ»")
+    search.fill("khach b2")                                         # gõ không dấu vẫn ra
+    assert cards.count() == 1
+    search.fill("không có tên này")
+    wait_until(lambda: cards.count() == 0, "từ khoá lạ thì không còn thẻ nào")
+    search.fill("")
+
+    # Hồ sơ đã cất đi thì trang chủ không tự mở lại nó (dù trình duyệt đang nhớ nó là «làm dở»)
+    pg.evaluate("([k, v]) => localStorage.setItem(k, v)", [f"tsucho.ws.{user_id}", b_id])
+    pg.goto(f"{base}/")
+    pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+    wait_until(lambda: "Khách A" in chip.inner_text(), "trang chủ bỏ qua hồ sơ lưu trữ, mở hồ sơ đang làm")
+
+    pg.goto(f"{base}/cases/")
+    pg.get_by_role("tab", name=re.compile("Đã lưu trữ")).click()
+    wait_until(lambda: cards.count() == 1, "tab lưu trữ còn B")
+    cards.first.locator("[data-testid=case-archive]").click()                   # «Bỏ lưu trữ»
+    wait_until(lambda: j(f"/api/ws/{b_id}")["archived"] is False, "bỏ lưu trữ")
+
+    # ── Xoá B: Enter không xoá, phải bấm nút ──
+    pg.get_by_role("tab", name=re.compile("Đang làm")).click()
+    wait_until(lambda: cards.count() == 2, "B trở lại tab «Đang làm»")
+    pg.locator(f'[data-case-id="{b_id}"] [data-testid=case-delete]').click()
+    dialog = pg.locator("[role=alertdialog]")
+    dialog.wait_for(timeout=5000)
+    assert "Mất cả ảnh lẫn kết quả quét" in dialog.inner_text(), dialog.inner_text()
+    pg.keyboard.press("Enter")                                      # Enter rơi vào nút Huỷ: đóng hộp, KHÔNG xoá
+    wait_until(lambda: dialog.count() == 0, "Enter chỉ huỷ hộp xác nhận")
+    assert j(f"/api/ws/{b_id}").get("id") == b_id, "Enter không được xoá hồ sơ"
+    pg.locator(f'[data-case-id="{b_id}"] [data-testid=case-delete]').click()
+    dialog.wait_for(timeout=5000)
+    dialog.get_by_role("button", name="Xoá hẳn hồ sơ").click()
+    wait_until(lambda: cards.count() == 1, "B biến khỏi danh sách")
+    assert pg.request.get(f"{base}/api/ws/{b_id}").status == 404, "máy chủ phải xoá thật"
+    assert [w["id"] for w in j("/api/ws")["workspaces"]] == [a_id], "chỉ còn hồ sơ A"
+    return ("tên hồ sơ trên thanh trên · số cần soát khớp cột trái · tạo (Enter) → mở đúng hồ sơ rỗng, không lẫn mặt sổ · "
+            "mở lại A, F5 giữ A · hướng dẫn 8 bước · đổi tên (Esc bỏ) · lưu trữ/bỏ lưu trữ + tìm không dấu · "
+            "lưu trữ không tự mở lại · xoá phải bấm nút và xoá thật")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -922,6 +1075,7 @@ STEPS = [
     ("14. Soát xong → xuất Excel không còn ô vàng", step_export_confirmed),
     ("15. Chỗ nối số dư giữa các mặt sổ", step_sheet_links),
     ("16. Hai ảnh chụp cùng một trang", step_duplicate_pages),
+    ("17. Danh sách hồ sơ", step_cases),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { useCase } from "@/lib/case";
 import { LANGS, LANG_LABEL, useT, type Lang } from "@/lib/i18n";
 import { useTheme, type ThemeMode } from "@/lib/theme";
 import { useTour } from "@/lib/tour";
@@ -35,6 +37,9 @@ export default function TopBar() {
   const { mode, setMode } = useTheme();
   const { user, logout } = useAuth();
   const { start: startTour } = useTour();
+  const { current } = useCase();
+  const pathname = usePathname() ?? "/";
+  const onCases = pathname.startsWith("/cases");
 
   const themes: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
     { id: "light", label: t.themeLight, icon: <SunIcon /> },
@@ -61,6 +66,43 @@ export default function TopBar() {
           <span className="text-[10.5px] text-ink3">{t.tagline}</span>
         </span>
       </Link>
+
+      {/* Hồ sơ: lối về danh sách + tên hồ sơ đang mở. Chỉ hiện khi đã đăng nhập (trang /login không cần). */}
+      {user && (
+        <nav className="flex min-w-0 items-center gap-2" aria-label={t.casesTitle}>
+          {!onCases && (
+            <Link
+              href="/cases/"
+              data-tour="cases"
+              title={t.casesLinkTitle}
+              className="flex flex-none items-center gap-1.5 rounded-lg border border-rule px-3 py-1.5 text-[13px] text-ink2 no-underline hover:border-accent hover:bg-accentpale hover:text-accent"
+            >
+              <span aria-hidden>←</span>
+              {t.casesLink}
+            </Link>
+          )}
+          {onCases && (
+            <span data-tour="cases" className="px-1 text-[13px] font-semibold text-ink">
+              {t.casesTitle}
+            </span>
+          )}
+          {!onCases && current && (
+            <span className="flex min-w-0 items-center gap-1.5" data-testid="current-case">
+              <span
+                className="max-w-[240px] truncate text-[13.5px] font-semibold"
+                title={current.name || t.casesUntitled}
+              >
+                {current.name || <span className="font-normal text-ink3">{t.casesUntitled}</span>}
+              </span>
+              {current.archived && (
+                <span className="flex-none rounded bg-card2 px-1.5 py-px text-[10.5px] font-semibold text-ink3">
+                  {t.casesArchivedTag}
+                </span>
+              )}
+            </span>
+          )}
+        </nav>
+      )}
 
       <div className="flex-1" />
 

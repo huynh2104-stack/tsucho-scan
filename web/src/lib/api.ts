@@ -91,7 +91,12 @@ export type ResultStore = Record<string, SheetResult>;
 
 export type Workspace = {
   id: string;
+  /** Tên hồ sơ (cũng là tên file xuất mặc định). */
   book_name: string;
+  created_at?: number;
+  updated_at?: number;
+  /** Hồ sơ đã lưu trữ: ẩn khỏi danh sách «đang làm», vẫn mở lại được. */
+  archived?: boolean;
   sheets: Sheet[];
   /** Có ở GET /api/ws/:id — mọi kết quả đã quét, sống qua F5. */
   results?: ResultStore;
@@ -311,12 +316,20 @@ export const fetchDemoAccounts = async () =>
 export const fetchMe = async () =>
   asJson<Me>(await fetch(`${API}/api/auth/me`, CRED));
 
+/** Một dòng trong danh sách hồ sơ. `rows/need/confirmed` tính trên kết quả ĐÃ LƯU bằng định nghĩa
+ *  «cần soát» chung (cùng con số với bộ đếm trên bàn làm việc và với file Excel); không tính dòng ghi chú. */
 export type WorkspaceBrief = {
   id: string;
   book_name: string;
   created_at: number;
+  /** Lần sửa cuối: meta của hồ sơ HOẶC lần sửa/quét kết quả gần nhất, cái nào muộn hơn. */
+  updated_at: number;
+  archived: boolean;
   sheets: number;
   scanned: number;
+  rows: number;
+  need: number;
+  confirmed: number;
 };
 
 export const listWorkspaces = async () =>
@@ -324,18 +337,26 @@ export const listWorkspaces = async () =>
 
 // ── Không gian làm việc ────────────────────────────────────────────
 
-export const createWorkspace = () => jsonPost<Workspace>("/api/ws", {});
+/** Tạo hồ sơ mới; `name` để trống thì đặt tên sau cũng được. */
+export const createWorkspace = (name = "") => jsonPost<Workspace>("/api/ws", name ? { book_name: name } : {});
 
 export const getWorkspace = async (id: string) =>
   asJson<Workspace>(await fetch(`${API}/api/ws/${id}`, CRED));
 
-export const renameBook = (id: string, book_name: string) =>
+/** Đổi tên và/hoặc lưu trữ hồ sơ. Trường nào không gửi thì máy chủ giữ nguyên. */
+export const patchWorkspace = (id: string, patch: { book_name?: string; archived?: boolean }) =>
   fetch(`${API}/api/ws/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ book_name }),
+    body: JSON.stringify(patch),
     ...CRED,
   }).then(asJson<Workspace>);
+
+export const renameBook = (id: string, book_name: string) => patchWorkspace(id, { book_name });
+
+/** Xoá HẲN hồ sơ (ảnh lẫn kết quả) — chỗ gọi phải đã hỏi người dùng. */
+export const deleteWorkspace = async (id: string) =>
+  asJson<{ deleted: string }>(await fetch(`${API}/api/ws/${id}`, { method: "DELETE", ...CRED }));
 
 export async function addSheets(wsId: string, files: File[]) {
   const fd = new FormData();

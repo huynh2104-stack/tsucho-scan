@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.1 (09/10) — pytest **387 passed** · `npm test` **137 pass** · build xanh · E2E `smoke.py` **16/16 bước** (~40 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 2.2 (09/10) — pytest **387 passed** · `npm test` **144 pass** · build xanh · E2E `smoke.py` **17/17 bước** (~45 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1045,7 +1045,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 1.6 Nối số dư giữa các mặt (xong 08/10/2026)
 - [x] 1.7 Ảnh chụp trùng trang (xong 09/10/2026) — **hết giai đoạn 1**
 - [x] 2.1 Backend hồ sơ (xong 09/10/2026)
-- [ ] 2.2 Trang hồ sơ
+- [x] 2.2 Trang hồ sơ (xong 09/10/2026)
 - [ ] 2.3 Sửa thông tin sổ
 - [ ] 2.4 Xuất theo tài khoản
 - [ ] 3.1 Cài đặt người dùng
@@ -1200,6 +1200,18 @@ Quan sát khi viết E2E (không sửa):
 - **Hai lỗ hổng tôi tự thêm vào khi xoá hồ sơ** (kế hoạch không nhắc): luồng nền còn giữ đối tượng hồ sơ vừa xoá mà gọi `save()` sẽ **hồi sinh thư mục** vừa xoá — nên có cờ `gone` (chỉ ở bộ nhớ) khiến `save()` không ghi gì; lần quét đang chạy ghi kết quả vào hồ sơ đã xoá cũng bị chặn (`results.save_job` bỏ qua khi không còn `meta.json`). Trên Windows `rmtree` có thể không xoá hết (file đang mở): thử lại vài lần, vẫn không được thì xoá `meta.json` để hồ sơ biến khỏi danh sách và ghi cảnh báo.
 - **Bẫy ghi lại**: `list_for`/`GET /api/ws` nạp mọi `meta.json` VÀ mọi file kết quả của mọi hồ sơ của người đó (để thống kê) — quy mô hiện tại thì ổn (đo trên dữ liệu thật: vài chục mặt sổ/hồ sơ); khi một người có hàng trăm hồ sơ thì thêm chỉ mục (lưu sẵn `rows/need/confirmed` vào `meta.json` mỗi lần lưu kết quả). Test route khoá cửa tự quét đã bắt route DELETE mới.
 - Tests (`tests/test_api_workspaces.py`, 20): tạo (có/không tên, cắt 80, sai kiểu), đổi tên/lưu trữ không làm mất trường kia, `archived` sai kiểu → 400, meta cũ, xoá (thư mục + cache + 404), người khác → 404 (không sửa/xoá được, danh sách rỗng), không hồi sinh sau khi xoá, thống kê đúng (có dòng ghi chú, dòng lệch, dòng đã ✓), danh sách có hồ sơ lưu trữ và chỉ của mình, «lần sửa cuối» tính cả sửa ô, hồ sơ rỗng, **ghi nguyên tử** (2 kiểu lỗi), khoá loại trừ giữa các luồng nhưng không giữa các hồ sơ, vào lại được, và **mọi route đổi hồ sơ đều tự lấy khoá** (kiểm theo tên hàm gọi, để phân biệt khoá của route với khoá `save()` tự lấy). Bẻ thử 5 chỗ (cờ `gone`, dọn file tạm, giữ tên khi chỉ gửi `archived`, khoá của route sắp xếp, chặn `save_job` hồ sơ đã xoá) thì test đỏ cả 5 — riêng khoá của route lúc đầu KHÔNG bị bắt nên đã sửa test như trên.
+
+
+**Task 2.2 — xong 09/10/2026** (pytest **387** (không đổi, task chỉ đụng web) · `npm test` **144** (+7) · build xanh, sinh `out/cases/index.html` · E2E **17/17 bước**, thêm bước 17).
+- **Trang `/cases/`** (`web/src/app/cases/page.tsx`): thẻ hồ sơ có tên, ngày tạo, «sửa lần cuối», số mặt sổ, số dòng, huy hiệu **Đã soát hết** (xanh) / **Còn N dòng** (vàng) / «Chưa có kết quả quét»; nhãn «Đang mở» cho hồ sơ trình duyệt này đang làm dở; ô tìm theo tên (gõ không dấu vẫn ra: «khach» tìm được «Khách»); hai tab **Đang làm / Đã lưu trữ** có số đếm (không bị ô tìm làm lệch); 「+ Hồ sơ mới」hỏi tên (Enter tạo, để trống cũng được) rồi mở thẳng hồ sơ đó; đổi tên bằng bấm đúp (hoặc nút ✎; Enter lưu, Esc bỏ, máy chủ từ chối thì trả tên cũ); Lưu trữ ↔ Bỏ lưu trữ (lạc quan, lỗi thì trả lại); Xoá qua `ConfirmDialog` có cảnh báo đậm «mất cả ảnh lẫn kết quả». Số «còn N dòng» do **máy chủ** tính trên kết quả đã lưu bằng cùng định nghĩa `review.py` (task 2.1) — E2E đối chiếu: tổng `data-need` các thẻ mặt sổ ở cột trái = số trên thẻ hồ sơ.
+- **Hộp xoá hồ sơ không để Enter xác nhận**: `ConfirmDialog` thêm `enterConfirms` (mặc định `true` — mọi hộp cũ giữ nguyên). Với xoá hồ sơ đặt `false`: focus rơi vào nút Huỷ nên gõ Enter chỉ đóng hộp; phải BẤM «Xoá hẳn hồ sơ». Lý do: xoá cả hồ sơ nặng hơn hẳn xoá một dòng, mà Enter là phím dễ lỡ nhất.
+- **Bàn làm việc mở hồ sơ theo thứ tự**: `?ws=<id>` → hồ sơ làm dở lần trước (localStorage `tsucho.ws.<user>`) → hồ sơ **đang làm** sửa gần nhất → tạo mới. Hai điểm khác kế hoạch/luồng cũ, có chủ ý: (1) hồ sơ làm dở mà đã **lưu trữ** thì trang chủ KHÔNG tự mở lại (người dùng đã cất nó đi), nhưng `?ws=` chỉ đích danh thì vẫn mở được; (2) trước đây lấy `workspaces[0]` của server (thứ tự không xác định), nay chọn theo `updated_at` mới nhất. `?ws=` sai/đã xoá/của người khác thì lặng lẽ rơi xuống bước sau (máy chủ trả 404). **Lệch kế hoạch**: kế hoạch ghi dùng `useSearchParams` bọc `<Suspense>`; tôi đọc thẳng `window.location.search` trong effect khởi động — bàn làm việc chỉ cần giá trị này MỘT lần lúc nạp (đổi hồ sơ luôn đi qua `/cases/` nên bàn làm việc được dựng lại từ đầu), và cách này khỏi bọc Suspense cho cả trang bàn làm việc 1,700 dòng. Hậu quả đã nghĩ tới: nếu sau này có chỗ đổi `?ws=` ngay trên trang bàn làm việc mà không dựng lại, hook này sẽ không thấy — lúc đó mới cần đổi sang `useSearchParams`.
+- **Thanh trên**: liên kết 「← Hồ sơ」(`data-tour="cases"`) + tên hồ sơ đang mở (`CaseProvider` trong `layout.tsx`, bàn làm việc đẩy tên vào khi đổi và xoá khi rời đi; gõ tên ở ô «Tên sổ» cạnh nút Xuất file là thanh trên đổi theo ngay — **tên hồ sơ = tên sổ = tên file xuất mặc định**, cùng một trường `book_name`). Hồ sơ lưu trữ mở bằng `?ws=` có thẻ «Đã lưu trữ» cạnh tên. Ở trang `/cases/` liên kết đổi thành chữ «Hồ sơ» đậm (đang ở đó).
+- **Hướng dẫn thành 8 bước** (bước 7 chỉ vào liên kết «Hồ sơ», dịch vi/en/ja) và `VERSION` 2 → 3: **mọi người dùng, kể cả anh, sẽ thấy hướng dẫn mở lại một lần** khi vào bàn làm việc.
+- **Logic thuần `web/src/lib/cases.ts`** (bỏ dấu `foldText`, `matchesQuery`, `sortCases`, `visibleCases`, `countByTab`, `caseStatus`) + 7 test. Bẻ thử: bỏ bước bỏ dấu → test đỏ.
+- **Bẻ thử E2E** (build lại từng lần): (a) trang chủ mở lại hồ sơ đã lưu trữ → bước 17 đỏ ở «trang chủ bỏ qua hồ sơ lưu trữ»; (b) hộp xoá cho Enter xác nhận → đỏ ở «Enter không được xoá hồ sơ». Cả hai bị bắt. Lần đầu viết bước 17 tôi cũng đoán sai hành vi Enter (tưởng hộp còn mở, thực ra Enter rơi vào nút Huỷ nên hộp đóng) — test đã sửa theo đúng thiết kế.
+- **Kiểm bằng mắt** (Playwright, dữ liệu tạm): trang danh sách tiếng Việt và tiếng Nhật, hộp xoá, màn hình hẹp 390px (thẻ xuống dòng gọn), thanh trên ở bàn làm việc có tên + «← Hồ sơ». **Chưa thử**: dữ liệu thật của anh (danh sách hồ sơ thật), trang `/cases/` trên bản triển khai Render.
+- **Giới hạn cần biết**: chưa có sắp xếp tuỳ chọn hay phân trang (sửa gần nhất lên đầu; vài chục hồ sơ thì ổn); nhãn «Đang mở» chỉ đúng với TRÌNH DUYỆT này (đổi máy thì không có); mở hồ sơ lưu trữ không tự bỏ lưu trữ — chỉ hiện thẻ; `GET /api/ws` vẫn nạp kết quả của mọi hồ sơ (xem ghi chú 2.1 về chỉ mục).
 
 ---
 

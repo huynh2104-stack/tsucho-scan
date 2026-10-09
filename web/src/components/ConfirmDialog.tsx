@@ -17,6 +17,7 @@ export default function ConfirmDialog({
   warning,
   confirmLabel,
   danger,
+  enterConfirms = true,
   onCancel,
   onConfirm,
 }: {
@@ -27,23 +28,27 @@ export default function ConfirmDialog({
   warning?: string;
   confirmLabel: string;
   danger?: boolean;
+  /** Mặc định Enter = đồng ý. Thao tác huỷ diệt (xoá cả hồ sơ) đặt false: Enter chỉ huỷ, phải BẤM nút mới xoá. */
+  enterConfirms?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const { t } = useT();
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     // Enter = đồng ý, Esc = huỷ. Nút đồng ý nhận focus để bấm Enter được ngay.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
-      if (e.key === "Enter") onConfirm();
+      if (enterConfirms && e.key === "Enter") onConfirm();
     };
     window.addEventListener("keydown", onKey);
-    confirmRef.current?.focus();
+    // Không cho Enter xác nhận thì focus rơi vào nút Huỷ, để lỡ tay gõ Enter cũng chỉ là huỷ.
+    (enterConfirms ? confirmRef : cancelRef).current?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel, onConfirm]);
+  }, [open, enterConfirms, onCancel, onConfirm]);
 
   if (!open) return null;
 
@@ -73,6 +78,7 @@ export default function ConfirmDialog({
         </div>
         <div className="flex justify-end gap-2 border-t border-rule bg-card2 px-5 py-3">
           <button
+            ref={cancelRef}
             onClick={onCancel}
             className="rounded-lg border border-rule px-3.5 py-1.5 text-[13.5px] text-ink2 hover:border-accentmid hover:text-ink"
           >

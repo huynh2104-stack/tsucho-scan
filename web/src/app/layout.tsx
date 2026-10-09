@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { CaseProvider } from "@/lib/case";
 import { LangProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_KEY } from "@/lib/theme";
 import { TourProvider } from "@/lib/tour";
@@ -46,8 +47,11 @@ export default function RootLayout({
               {/* TourProvider nằm TRONG AuthProvider: "đã xem hướng dẫn chưa"
                   ghi theo từng người dùng nên phải biết ai đang đăng nhập. */}
               <TourProvider>
-                <TopBar />
-                <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+                {/* CaseProvider: thanh trên cần biết hồ sơ nào đang mở ở bàn làm việc */}
+                <CaseProvider>
+                  <TopBar />
+                  <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+                </CaseProvider>
               </TourProvider>
             </AuthProvider>
           </LangProvider>

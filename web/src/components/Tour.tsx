@@ -57,6 +57,7 @@ export default function Tour({ onPane }: { onPane: (p: PaneId) => void }) {
     { at: "viewer", pane: "image", title: t.tour.s4Title, body: t.tour.s4Body },
     { at: "review", pane: "result", title: t.tour.s5Title, body: t.tour.s5Body },
     { at: "export", pane: "result", title: t.tour.s6Title, body: t.tour.s6Body },
+    { at: "cases", title: t.tour.sCasesTitle, body: t.tour.sCasesBody },
     { at: "help", title: t.tour.s7Title, body: t.tour.s7Body },
   ];
   const last = i >= steps.length - 1;

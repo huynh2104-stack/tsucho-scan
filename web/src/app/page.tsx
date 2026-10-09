@@ -50,6 +50,7 @@ import {
   type Workspace,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { caseKey, useCase } from "@/lib/case";
 import {
   analyzeRows,
   applyEdit,
@@ -93,8 +94,6 @@ import SheetBusy from "@/components/SheetBusy";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import FixBar from "@/components/FixBar";
 import DupCompare from "@/components/DupCompare";
-
-const WS_KEY = "tsucho.ws";
 
 /** Lỗi đang hiện trên thanh đỏ — giữ MÃ chứ không giữ câu đã dịch. */
 type ErrInfo = {
@@ -154,6 +153,7 @@ export default function Workbench() {
   }, [t]);
   const { user, ready } = useAuth();
   const { startIfFirstTime } = useTour();
+  const { setCurrent: setCurrentCase } = useCase();
   const router = useRouter();
 
   const [ws, setWs] = useState<Workspace | null>(null);
@@ -263,7 +263,10 @@ export default function Workbench() {
     if (ready && user) startIfFirstTime();
   }, [ready, user, startIfFirstTime]);
 
-  // Mở lại không gian làm việc cũ — F5 không mất ảnh đã tải lên
+  // Mở hồ sơ: theo ?ws=… (trang danh sách hồ sơ), không có thì hồ sơ làm dở lần trước — F5 không mất
+  // ảnh đã tải lên. Chỉ đọc ?ws= một lần lúc khởi động (đọc thẳng từ địa chỉ, không qua
+  // `useSearchParams`, để trang vẫn xuất tĩnh được mà không cần bọc Suspense): đổi hồ sơ luôn đi qua
+  // trang /cases nên bàn làm việc được dựng lại từ đầu, không bao giờ phải đổi hồ sơ tại chỗ.
   useEffect(() => {
     if (!user) return;
     // Effect này chạy hai lần ở chế độ phát triển (React StrictMode). Không
@@ -272,15 +275,36 @@ export default function Workbench() {
     booted.current = user.id;
 
     // Khoá theo user.id: hai tài khoản dùng chung một máy không giành nhau
-    const key = `${WS_KEY}.${user.id}`;
+    const key = caseKey(user.id);
+    const mo = (w: Workspace) => {
+      try {
+        localStorage.setItem(key, w.id);
+      } catch { /* trình duyệt chặn localStorage: chỉ mất việc nhớ hồ sơ, không sao */ }
+      setWs(w);
+      syncStore(w.results ?? {});         // kết quả đã quét sống qua F5
+    };
     (async () => {
-      const saved = localStorage.getItem(key);
-      if (saved) {
+      const wanted = new URLSearchParams(window.location.search).get("ws");
+      if (wanted && /^[\w-]{1,64}$/.test(wanted)) {
+        try {
+          mo(await getWorkspace(wanted));     // mở hẳn cả hồ sơ đã lưu trữ nếu người dùng chọn đúng nó
+          return;
+        } catch {
+          /* hồ sơ không còn (hoặc không phải của mình): mở hồ sơ làm dở như thường */
+        }
+      }
+      let saved: string | null = null;
+      try {
+        saved = localStorage.getItem(key);
+      } catch { /* như trên */ }
+      if (saved && saved !== wanted) {
         try {
           const w = await getWorkspace(saved);
-          setWs(w);
-          syncStore(w.results ?? {});     // kết quả đã quét sống qua F5
-          return;
+          // Hồ sơ đã lưu trữ thì không tự mở lại lúc vào trang chủ — người dùng đã cất nó đi
+          if (!w.archived) {
+            mo(w);
+            return;
+          }
         } catch {
           localStorage.removeItem(key);
         }
@@ -289,12 +313,10 @@ export default function Workbench() {
         // Hỏi server trước khi tạo mới: xoá bộ nhớ trình duyệt hay đổi máy vẫn
         // mở lại đúng việc đang làm dở, không đẻ ra một loạt workspace rỗng.
         const { workspaces } = await listWorkspaces();
-        const w = workspaces.length
-          ? await getWorkspace(workspaces[0].id)
-          : await createWorkspace();
-        localStorage.setItem(key, w.id);
-        setWs(w);
-        syncStore(w.results ?? {});
+        const dangLam = workspaces
+          .filter((w) => !w.archived)
+          .sort((a, b) => b.updated_at - a.updated_at);
+        mo(dangLam.length ? await getWorkspace(dangLam[0].id) : await createWorkspace());
       } catch (e) {
         setErr({ text: e instanceof Error ? e.message : String(e) });
       }
@@ -302,6 +324,15 @@ export default function Workbench() {
     return () => stopSse.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // Báo cho thanh trên biết đang mở hồ sơ nào (và xoá khi rời bàn làm việc)
+  const caseId = ws?.id;
+  const caseName = ws?.book_name ?? "";
+  const caseArchived = !!ws?.archived;
+  useEffect(() => {
+    if (caseId) setCurrentCase({ id: caseId, name: caseName, archived: caseArchived });
+  }, [caseId, caseName, caseArchived, setCurrentCase]);
+  useEffect(() => () => setCurrentCase(null), [setCurrentCase]);
 
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
