@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.2 (09/10) — pytest **454 passed** · `npm test` **195 pass** · build xanh · E2E `smoke.py` **23/23 bước** (~60 s).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.3 (09/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **25/25 bước** (~65 s).
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1050,7 +1050,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 2.4 Xuất theo tài khoản (xong 09/10/2026) — **hết giai đoạn 2**
 - [x] 3.1 Cài đặt người dùng (xong 09/10/2026)
 - [x] 3.2 Chế độ soát nhanh — **mốc demo B** (xong 09/10/2026)
-- [ ] 3.3 Từ điển sửa lỗi
+- [x] 3.3 Từ điển sửa lỗi (xong 09/10/2026)
 - [ ] 3.4 Cỡ chữ lớn
 - [ ] 3.5 Bảng mượt
 - [ ] 4.1 Quét song song
@@ -1253,6 +1253,13 @@ Quan sát khi viết E2E (không sửa):
 - **Dữ liệu thử**: kế hoạch cảnh báo «đừng thử tạo lệch số dư vì engine tự sửa». Ở đây KHÔNG qua engine: bước E2E ghi thẳng một số dư sai vào kết quả đã lưu (API `PUT results`) rồi nạp lại trang — engine chỉ chạy lúc quét nên không đụng tới. Các bước 21–23 chạy trên **hồ sơ tạm có sổ mẫu nguyên vẹn** (dữ liệu biết trước, không dính các dòng đã bị bước 4–19 sửa/chèn) rồi xoá hồ sơ tạm và đưa trình duyệt về hồ sơ chính.
 - **Bẻ thử**: `quickreview.ts`/`review.ts` 18 chỗ → đỏ cả 18 (3 chỗ ban đầu sống sót vì test thiếu ca «có dòng cần soát NẰM TRƯỚC dòng vừa xong», «dòng đã bị xoá», «hàng xóm cao thấp khác nhau» — đã thêm ca rồi bẻ lại); E2E 7 chỗ (không đổi mặt sổ đang xem, thoát không về đúng dòng, phím n/p của bảng vẫn chạy trong chế độ này, Ctrl+Enter không ghi chữ gõ dở, thẻ xong luôn khoe «chuỗi khớp», bỏ Enter đơn, Xuất file không mở hộp) → đỏ cả 7.
 - **Giới hạn thấy khi nhìn ảnh chụp, CHƯA sửa**: (1) khi dải chỉ là **ước lượng** (máy dev này RapidOCR không chạy nên luôn thế), vệt đỏ có thể lệch khoảng MỘT dòng — trên sổ mẫu dòng ヨキンキ bị khoanh vào dòng 手数料 liền trên; vì thẻ nới ±1 dòng nên dòng đúng vẫn nằm trong ảnh, và chữ «Vị trí ước lượng» ghi rõ điều này; đây là độ chính xác sẵn có của `api/rowmap.py` (khung giữa cũng vậy), không phải của thẻ; (2) màn hình 800px cao: thẻ có 3 đoạn ảnh + 6 ô nên phải cuộn một chút để thấy hàng 出金/入金/残高 (nút «Đúng rồi» thì luôn thấy); (3) «Đọc lại dòng này» (4.4) và gợi ý từ điển (3.3) chưa có chỗ trong thẻ — thêm khi hai task đó xong.
+
+
+**Task 3.3 — xong 09/10/2026** (pytest **495** (+41) · `npm test` **209** (+14) · build xanh · E2E **25/25 bước**, thêm bước 24, 25).
+- **Máy chủ** (`api/corrections.py`, bảng `dict_entries` trong `auth.SCHEMA` — bảng MỚI nên `CREATE IF NOT EXISTS` đủ cho CSDL cũ): `GET /api/dict`, `POST /api/dict/learn`, `DELETE /api/dict/:id`, `DELETE /api/dict`. Theo TỪNG người dùng (tên đối tác là dữ liệu tài chính): người này không thấy/xoá được của người kia. Học: chỉ ô `description`/`kind`; từ chối khi chuỗi trống (xoá trắng ô / máy không đọc ra gì), hai chuỗi y hệt, quá 200 ký tự, hoặc từ điển đầy (5000); cùng `wrong_key` thì cập nhật đáp án và `hits + 1`. `wrong_key` = NFKC + bỏ khoảng trắng — danh sách khoảng trắng liệt kê TƯỜNG MINH theo mã ký tự ở cả Python (`_WS_CODES`) và TS (`WS_CODES`) vì `isspace` của Python và `\s` của JS khác nhau (U+FEFF, U+0085…); hai bên cùng đọc `tests/fixtures/dict_keys.json`. Bẻ thử 11 chỗ máy chủ → đỏ cả 11.
+- **Web**: `lib/corrections.ts` (thuần: `wrongKey`, `suggestFor`, `similarRows`, `learnableEdit`, `applyToRows`, `autoApplyAll`; 14 test, bẻ thử 12 chỗ → đỏ cả 12), `lib/corrections-provider.tsx` (tải từ điển MỘT lần, so khớp ở trình duyệt nên học xong là dòng giống sáng ngay), `components/Toast.tsx`. **Gợi ý** (`dictMode` = «chỉ gợi ý», mặc định): nút 💡 đáp án ở ô 摘要/区分 (lúc thường chỉ lộ biểu tượng cho khỏi che chữ máy đọc, rê chuột/đứng trong ô thì bung đủ chữ), bấm hoặc **Tab** để nhận; trong thẻ Soát nhanh cũng có. Sau khi học hiện toast «Đã nhớ: A → B · Áp dụng cho N dòng giống vậy?» [Áp dụng] [Không]; áp hàng loạt là MỘT bước Ctrl+Z. **Không học** khi xoá trắng ô, máy không đọc ra gì, dòng người thêm, sửa về đúng chữ máy. **Tự áp** (tuỳ chọn, tắt sẵn): chạy MỘT lượt mỗi khi kết quả mới nạp về (mở hồ sơ, quét xong) — không chạy sau mỗi lần người sửa ô — luôn có thông báo «Đã tự sửa N ô» + nút Hoàn tác. **Tắt**: không học, không gợi ý. ⚙ có mục «Từ điển sửa lỗi»: chọn chế độ (mỗi chế độ ghi ai nên dùng), bảng sai → đúng + số lần, xoá từng mục, xoá hết (có hỏi lại).
+- **Đánh dấu**: ô nhận theo từ điển (bấm 💡/Tab/Áp dụng/tự áp) là một lần sửa như mọi lần (nhớ chữ máy đọc vào `orig`, Ctrl+Z được) và lưu thêm `dict_fixed: [ô]`; người gõ lại ô đó thì dấu mất. Excel/CSV cột 確認メモ ghi riêng «辞書で補正: 摘要 A→B» (không lẫn «手修正»); bảng ghi «Sửa theo từ điển».
+- **Chưa làm / giới hạn**: (1) bấm ↺ khôi phục chữ máy đọc của một ô đã được tự áp thì lần nạp kết quả sau (chế độ tự áp) sẽ áp lại — muốn dừng thì chuyển sang «Chỉ gợi ý»; (2) cột 区分 có chip nhưng ô hẹp nên chỉ thấy 💡 cho tới khi rê chuột; (3) hits chỉ tăng khi HỌC (không tăng khi nhận gợi ý); (4) chữ katakana chưa ✓ vẫn tô vàng ở Excel kể cả khi do từ điển sửa (luật 1.4 giữ nguyên, có chủ ý); (5) tài khoản dùng thử dùng chung nên từ điển cũng chung giữa những người cùng vào; (6) chưa bẻ thử bằng E2E (chỉ bẻ phần logic).
 
 ---
 

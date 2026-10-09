@@ -92,6 +92,19 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    REAL NOT NULL,
     prefs         TEXT NOT NULL DEFAULT '{}'
 );
+-- Từ điển sửa lỗi theo từng người dùng (task 3.3); `wrong_key` chỉ để so khớp. Bảng MỚI nên CREATE IF NOT EXISTS
+-- là đủ cho cả CSDL cũ (không cần ALTER).
+CREATE TABLE IF NOT EXISTS dict_entries (
+    user_id    TEXT NOT NULL,
+    field      TEXT NOT NULL,
+    wrong_key  TEXT NOT NULL,
+    wrong      TEXT NOT NULL,
+    "right"    TEXT NOT NULL,
+    hits       INTEGER NOT NULL DEFAULT 1,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (user_id, field, wrong_key)
+);
 CREATE TABLE IF NOT EXISTS demo_usage (
     user_id TEXT NOT NULL,
     day     TEXT NOT NULL,

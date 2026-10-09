@@ -274,6 +274,27 @@ def test_nguoi_sua_dung_thi_het_vang_va_memo_ghi_may_doc_den_hien_tai(tmp_path):
     assert c["確認メモ"].value == "手修正: 差引残高 1,340→900"
 
 
+def test_o_sua_theo_tu_dien_ghi_rieng_la_jisho_de_hosei_khong_lan_voi_sua_tay(tmp_path):
+    txs = [
+        _tx(bal=1000),
+        _tx(out=100, bal=900, description="カ）リタリコ", orig={"description": "ｶ)ﾘﾀﾘｺ"}, dict_fixed=["description"]),
+        _tx(out=100, bal=800, description="株式会社", kind="K", orig={"description": "ﾘﾀﾘｺ", "kind": "R"},
+            dict_fixed=["description"]),
+        _tx(out=100, bal=700, description="カ）リタリコ", orig={"description": "ｶ)ﾘﾀﾘｺ"}, dict_fixed=["description"],
+            reviewed=True),
+    ]
+    ws = _sheet(tmp_path, txs)
+    assert _row_cells(ws, 1)["確認メモ"].value == "辞書で補正: 摘要 ｶ)ﾘﾀﾘｺ→カ）リタリコ"
+    # ô 摘要 theo từ điển, ô 区分 do người gõ: hai nhãn riêng, không lẫn
+    assert _row_cells(ws, 2)["確認メモ"].value == "手修正: 区分 R→K／辞書で補正: 摘要 ﾘﾀﾘｺ→株式会社"
+    assert _row_cells(ws, 3)["確認メモ"].value == "確認済（辞書で補正: 摘要 ｶ)ﾘﾀﾘｺ→カ）リタリコ）"
+
+
+def test_dict_fixed_thua_hoac_khong_co_orig_khong_lam_hong_memo(tmp_path):
+    ws = _sheet(tmp_path, [_tx(bal=1000), _tx(out=100, bal=900, dict_fixed=["description"])])
+    assert _row_cells(ws, 1)["確認メモ"].value in (None, "")
+
+
 def test_nguoi_sua_sai_chuoi_lech_thi_vang_du_may_khong_ghi_ly_do(tmp_path):
     ws = _sheet(tmp_path, [_tx(bal=1000), _tx(out=100, bal=999, orig={"balance": 900})])
     c = _row_cells(ws, 1)

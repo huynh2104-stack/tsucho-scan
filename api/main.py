@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from export import export_accounts
 
 from . import (
-    auth, autofix, demo, export_csv, imgjobs, jobs, prefs, results, rowmap, rowanchors, sample, workspace,
+    auth, autofix, corrections, demo, export_csv, imgjobs, jobs, prefs, results, rowmap, rowanchors, sample, workspace,
 )
 
 app = FastAPI(title="tsucho-scan API", version="0.3.0")
@@ -192,6 +192,36 @@ def put_prefs(user: CurrentUser, body: dict = Body(...)) -> dict:
         return prefs.update(user.id, body)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+# ── Từ điển sửa lỗi theo người dùng (task 3.3) ─────────────────────────
+
+@app.get("/api/dict")
+def get_dict(user: CurrentUser) -> dict:
+    """Từ điển của CHÍNH người đang đăng nhập (tên đối tác là dữ liệu tài chính: không bao giờ chung)."""
+    return {"entries": corrections.list_entries(user.id)}
+
+
+@app.post("/api/dict/learn")
+def dict_learn(user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Học «sai → đúng» từ một lần người dùng sửa ô. Cùng khoá thì cập nhật và tăng `hits`."""
+    try:
+        return corrections.learn(user.id, body.get("field"), body.get("wrong"), body.get("right"))
+    except corrections.DictError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/api/dict/{entry_id}")
+def dict_delete(entry_id: int, user: CurrentUser) -> dict:
+    if not corrections.delete(user.id, entry_id):
+        raise HTTPException(404, "Không có mục này")
+    return {"deleted": entry_id}
+
+
+@app.delete("/api/dict")
+def dict_clear(user: CurrentUser) -> dict:
+    """Xoá HẾT từ điển của người này."""
+    return {"deleted": corrections.clear(user.id)}
 
 
 # ── Không gian làm việc & mặt sổ ─────────────────────────────────────

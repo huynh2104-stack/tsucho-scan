@@ -192,6 +192,12 @@ function noteEdit(before: Tx, after: Tx, f: EditField): Tx {
     if (rest.length) out.inferred = rest;
     else delete out.inferred;
   }
+  // Người gõ/khôi phục lại ô này thì không còn là «sửa theo từ điển» (`applyDictEdit` đánh dấu lại SAU bước này)
+  if (out.dict_fixed?.includes(f)) {
+    const rest = out.dict_fixed.filter((x) => x !== f);
+    if (rest.length) out.dict_fixed = rest;
+    else delete out.dict_fixed;
+  }
   return out;
 }
 
@@ -212,6 +218,20 @@ export function applyEdit(
   const after = noteEdit(before, edited, field);
   if (JSON.stringify(after) === JSON.stringify(before)) return rows;
   return rows.map((t, i) => (i === index ? after : t));
+}
+
+/**
+ * Sửa ô `field` theo TỪ ĐIỂN (task 3.3): là một lần sửa như mọi lần khác (nhớ giá trị máy đọc vào `orig`, Ctrl+Z được)
+ * nhưng đánh dấu `dict_fixed` để Excel ghi 辞書で補正 và người dùng biết chữ này không do mình gõ. Không đánh dấu nếu
+ * sửa xong ô lại trùng đúng giá trị máy đọc (`orig` đã bị xoá). Trả CHÍNH `rows` nếu không có gì đổi.
+ */
+export function applyDictEdit(rows: Tx[], index: number, field: EditField, value: string): Tx[] {
+  const next = applyEdit(rows, index, field, value);
+  if (next === rows) return rows;
+  const tx = next[index];
+  if (!tx.orig || !(field in tx.orig)) return next;
+  const marked: Tx = { ...tx, dict_fixed: [...new Set([...(tx.dict_fixed ?? []), field])] };
+  return next.map((t, i) => (i === index ? marked : t));
 }
 
 // ── Số tiền ──────────────────────────────────────────────────────────

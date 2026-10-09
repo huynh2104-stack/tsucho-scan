@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CaseProvider } from "@/lib/case";
+import { CorrectionsProvider } from "@/lib/corrections-provider";
 import { PrefsProvider } from "@/lib/prefs";
 import { LangProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_KEY } from "@/lib/theme";
@@ -49,13 +50,16 @@ export default function RootLayout({
                   ghi theo từng người dùng nên phải biết ai đang đăng nhập. */}
               {/* PrefsProvider: cài đặt theo tài khoản — phải biết ai đang đăng nhập, và đổi được ngôn ngữ/chủ đề */}
               <PrefsProvider>
-                <TourProvider>
-                  {/* CaseProvider: thanh trên cần biết hồ sơ nào đang mở ở bàn làm việc */}
-                  <CaseProvider>
-                    <TopBar />
-                    <main className="flex min-h-0 flex-1 flex-col">{children}</main>
-                  </CaseProvider>
-                </TourProvider>
+                {/* CorrectionsProvider: từ điển sửa lỗi của người dùng (cần biết `dictMode` trong cài đặt) */}
+                <CorrectionsProvider>
+                  <TourProvider>
+                    {/* CaseProvider: thanh trên cần biết hồ sơ nào đang mở ở bàn làm việc */}
+                    <CaseProvider>
+                      <TopBar />
+                      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+                    </CaseProvider>
+                  </TourProvider>
+                </CorrectionsProvider>
               </PrefsProvider>
             </AuthProvider>
           </LangProvider>

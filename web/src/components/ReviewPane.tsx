@@ -32,6 +32,7 @@ import {
 } from "@/lib/review";
 import type { AccountMeta, EditField, ResultStore, Sheet, Tx } from "@/lib/api";
 import { followersOf, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
+import type { DictField } from "@/lib/corrections";
 import BookInfoDialog from "@/components/BookInfoDialog";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
@@ -194,6 +195,7 @@ function Cell({
   picked,
   readOnly,
   invalidHint,
+  onTab,
   onCommit,
 }: {
   value: string;
@@ -209,6 +211,8 @@ function Cell({
   picked?: boolean;
   /** Câu báo khi giá trị gõ vào bị từ chối (onCommit trả false). */
   invalidHint?: string;
+  /** Nhấn Tab (không Shift) trong ô: trả `true` = đã xử lý (vd nhận gợi ý của từ điển) nên KHÔNG chuyển ô. */
+  onTab?: () => boolean;
   /** Trả `false` = từ chối giá trị: ô quay về giá trị cũ và nháy đỏ một lúc. */
   onCommit: (v: string) => void | boolean;
 }) {
@@ -244,6 +248,10 @@ function Cell({
       }}
       onKeyDown={(e) => {
         const el = e.currentTarget;
+        if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && onTab?.()) {
+          e.preventDefault();
+          return;
+        }
         if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
           el.blur();
           return;
@@ -280,6 +288,27 @@ function Cell({
   );
 }
 
+/** Nút «💡 chữ đáp án» của từ điển, nằm đè lên mép phải ô (không chiếm chỗ ⇒ không đẩy dòng, không làm lệch cú bấm).
+ *  Lúc thường chỉ lộ biểu tượng 💡 cho khỏi che chữ máy đọc; rê chuột / đứng trong ô thì bung ra đủ chữ đáp án. */
+function SugChip({ field, right, title, onAccept }: { field: DictField; right: string; title: string; onAccept: () => void }) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      data-sug={field}
+      title={title}
+      aria-label={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        onAccept();
+      }}
+      className="absolute right-1 top-1/2 z-[2] max-w-[1.9rem] -translate-y-1/2 overflow-hidden whitespace-nowrap rounded border border-accent/50 bg-accentpale px-1.5 py-0.5 text-[11px] font-semibold text-accent shadow-sm transition-[max-width] hover:max-w-[70%] hover:bg-accent hover:text-accentink focus:max-w-[70%] group-focus-within/c:max-w-[70%] group-hover/c:max-w-[70%]"
+    >
+      💡 {right}
+    </button>
+  );
+}
+
 function Row({
   tx,
   n,
@@ -297,6 +326,8 @@ function Row({
   onToggleReviewed,
   onRestore,
   onSelect,
+  sug,
+  onAcceptSug,
 }: {
   tx: Tx;
   n: number;
@@ -318,6 +349,9 @@ function Row({
   onToggleReviewed: RowActionFn;
   onRestore: RestoreFn;
   onSelect: RowActionFn;
+  /** Chữ từ điển sửa lỗi gợi ý cho từng ô (null = không có). Chỉ dòng thật, và chỉ khi ô chưa đúng. */
+  sug: Record<DictField, string | null>;
+  onAcceptSug: (ref: TxRef, field: DictField, right: string) => void;
 }) {
   const { chk, state } = info;
   const flag = state === "review";
@@ -422,8 +456,17 @@ function Row({
             value={tx.kind ?? ""}
             field="kind"
             picked={on(cKind)}
+            onTab={sug.kind ? () => (onAcceptSug(ref_, "kind", sug.kind as string), true) : undefined}
             onCommit={(v) => onEdit(ref_, "kind", v || null)}
           />
+          {sug.kind && (
+            <SugChip
+              field="kind"
+              right={sug.kind}
+              title={t.dictSuggestTitle(sug.kind)}
+              onAccept={() => onAcceptSug(ref_, "kind", sug.kind as string)}
+            />
+          )}
           {restore("kind")}
         </td>
       )}
@@ -433,8 +476,17 @@ function Row({
           field="description"
           tone={flag ? "text-warnink" : ""}
           picked={on(cDesc)}
+          onTab={sug.description ? () => (onAcceptSug(ref_, "description", sug.description as string), true) : undefined}
           onCommit={(v) => onEdit(ref_, "description", v || null)}
         />
+        {sug.description && (
+          <SugChip
+            field="description"
+            right={sug.description}
+            title={t.dictSuggestTitle(sug.description)}
+            onAccept={() => onAcceptSug(ref_, "description", sug.description as string)}
+          />
+        )}
         {restore("description")}
       </td>
       {/* Rút = đỏ, Gửi = xanh ngọc. Ô trống hiện gạch ngang cho dễ dò */}
@@ -535,7 +587,9 @@ function Row({
           </span>
         )}
         {state === "edited" && (
-          <span className="text-ink2">✎ {hasOrig ? t.rowEdited : t.rowInferred}</span>
+          <span className="text-ink2">
+            ✎ {tx.dict_fixed?.length ? t.rowDictFixed : hasOrig ? t.rowEdited : t.rowInferred}
+          </span>
         )}
       </td>
       {/* Ghim sát mép phải: bảng rộng hơn khung thì phải cuộn ngang mới tới cột này, mà ✓ là nút
@@ -663,6 +717,8 @@ function AccountCard({
   onAddRow,
   onAutoBalance,
   onEditMeta,
+  suggest,
+  onAcceptSug,
   selected,
   onSelectRow,
   rowBase,
@@ -692,6 +748,9 @@ function AccountCard({
   onAutoBalance: (sheet: string, block: number) => void;
   /** Mở hộp sửa thông tin sổ (銀行名/店番号/口座番号/名義) của khối này. */
   onEditMeta: (sheet: string, block: number) => void;
+  /** Gợi ý của từ điển sửa lỗi cho một ô (null = không có). */
+  suggest: (field: DictField, text: string | null | undefined) => string | null;
+  onAcceptSug: (ref: TxRef, field: DictField, right: string) => void;
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
   /** Số thứ tự dòng đầu tiên của khối này trong TOÀN lưới. */
@@ -796,6 +855,11 @@ function AccountCard({
                 onToggleReviewed={onToggleReviewed}
                 onRestore={onRestore}
                 onSelect={onSelectRow}
+                sug={{
+                  description: tx.is_note ? null : suggest("description", tx.description),
+                  kind: tx.is_note ? null : suggest("kind", tx.kind),
+                }}
+                onAcceptSug={onAcceptSug}
               />
             ))}
           </tbody>
@@ -859,6 +923,8 @@ export default function ReviewPane({
   onAddRow,
   onAutoBalance,
   onSaveMeta,
+  suggest,
+  onAcceptSug,
   links,
   onDismissLink,
   onUndismissLink,
@@ -884,6 +950,9 @@ export default function ReviewPane({
   onAutoBalance: (sheet: string, block: number) => void;
   /** Lưu thông tin sổ người dùng vừa sửa; `propagate` = điền luôn cho các mặt sau chưa có thông tin (xem `applyMetaEdit`). */
   onSaveMeta: (ref: BlockRef, draft: MetaDraft, propagate: boolean) => void;
+  /** Từ điển sửa lỗi (task 3.3): chữ nên thay cho một ô, và nhận gợi ý đó (bấm 💡 hoặc Tab). */
+  suggest: (field: DictField, text: string | null | undefined) => string | null;
+  onAcceptSug: (ref: TxRef, field: DictField, right: string) => void;
   /** Kết quả kiểm chỗ nối với mặt sổ đứng trước, khoá theo id mặt sổ ĐƯỢC kiểm (xem `sheetLinks`). */
   links: Record<string, SheetLink>;
   onDismissLink: (link: SheetLink) => void;
@@ -1081,6 +1150,8 @@ export default function ReviewPane({
         onAddRow={onAddRow}
         onAutoBalance={onAutoBalance}
         onEditMeta={(sheet, block) => setMetaTarget({ sheet, block })}
+        suggest={suggest}
+        onAcceptSug={onAcceptSug}
         selected={selected}
         onSelectRow={onSelectRow}
         rowBase={rowBase[`${sheetId}:${bi}`] ?? 0}

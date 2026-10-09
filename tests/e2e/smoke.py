@@ -61,6 +61,11 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
  23 «✓ Đúng rồi — tiếp»: Ctrl+Enter / nút / Enter đều ✓ rồi sang dòng kế, lưu lên máy chủ; ✓ hết thì thẻ hoàn thành —
     còn dòng chuỗi số dư lệch thì nói thẳng, sửa hết thì «残高チェーン検証済 … không phát hiện được dòng sót»; Ctrl+Z đưa
     thẻ trở lại; nút Xuất file mở hộp xuất
+ 24 sửa 摘要 một dòng sổ mẫu → máy chủ học, dòng khác cùng chữ hiện chip 💡 (khớp cả khác kiểu chữ/khoảng trắng), toast
+    «Áp dụng cho N dòng giống vậy?»; nhận bằng Tab / bấm 💡 / nút Áp dụng (một Ctrl+Z hoàn tác cả lượt); ô nhận theo từ
+    điển lưu dict_fixed và Excel ghi 辞書で補正; không học khi xoá trắng ô
+ 25 ⚙ → từ điển: danh sách, xoá từng mục, «Tự áp dụng» (áp một lượt khi nạp kết quả, có thông báo + Hoàn tác), «Tắt»
+    (không học, không gợi ý), xoá hết
 """
 from __future__ import annotations
 
@@ -1515,6 +1520,8 @@ def step_quick_card(pg, base: str, ctx: dict) -> str:
         return j(f"/api/ws/{ws_id}")["results"][s1]["blocks"][0]["rows"][EDIT_ROW]["balance"]
 
     orig = break_sheet_state(pg, base, ws_id, s1, s2)
+    # Từ điển đã học «ヨキンキ → 預金»: thẻ phải hiện gợi ý ngay dưới ô 摘要 (task 3.3)
+    assert pg.request.post(f"{base}/api/dict/learn", data={"field": "description", "wrong": "ヨキンキ", "right": "預金"}).ok
     rows1 = orig[s1][0][0]["rows"]
     before = rows1[EDIT_ROW - 1]["balance"]
     out_, in_ = rows1[EDIT_ROW].get("amount_out") or 0, rows1[EDIT_ROW].get("amount_in") or 0
@@ -1550,6 +1557,11 @@ def step_quick_card(pg, base: str, ctx: dict) -> str:
         assert pg.locator('[data-qf="description"]').get_attribute("data-flagged") is None
         fix = pg.locator('[data-fix="balance"]')
         assert f"残高 → {expected:,}" in fix.inner_text(), fix.inner_text()
+        sug = card.locator('[data-sug="description"]')
+        assert sug.count() == 1 and "預金" in sug.inner_text(), "gợi ý của từ điển dưới ô 摘要"
+        sug.click()
+        wait_until(lambda: pg.locator('[data-qf="description"]').input_value() == "預金", "bấm 💡 nhận gợi ý của từ điển trong thẻ")
+        assert card.locator('[data-sug="description"]').count() == 0
 
         # ── Gõ lại số dư ĐÚNG: ô nhận chữ, lưu, dòng hết vàng và thẻ tự sang dòng kế (mặt ②) ──
         box = pg.locator('[data-qf="balance"]')
@@ -1578,6 +1590,7 @@ def step_quick_card(pg, base: str, ctx: dict) -> str:
         pg.keyboard.press("Escape")
         quick.wait_for(state="detached", timeout=5000)
     finally:
+        pg.request.delete(f"{base}/api/dict")
         drop_temp_ws(pg, base, tmp)
     return (f"dải ảnh {n_seg} đoạn, ảnh đã tải, {'nét liền' if exact else 'nét đứt + «vị trí ước lượng»'} · "
             "phép tính đúng từng số · ô gây lệch tô vàng · gõ số dư đúng → lưu, tự sang dòng kế (mặt ②, ảnh giữa đổi) · Ctrl+Z · chip một chạm")
@@ -1666,6 +1679,213 @@ def step_quick_finish(pg, base: str, ctx: dict) -> str:
             "Ctrl+Z đưa thẻ trở lại · sửa bằng chip + ✓ cuối → «残高チェーン検証済 … không phát hiện được dòng sót» · Xuất file mở hộp xuất")
 
 
+def _desc_key(text: str) -> str:
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKC", text) if not ch.isspace())
+
+
+def step_dictionary(pg, base: str, ctx: dict) -> str:
+    """Task 3.3: từ điển sửa lỗi học từ chỗ người sửa. Chạy trên hồ sơ TẠM có sổ mẫu nguyên vẹn; dọn sạch từ điển khi xong."""
+    from openpyxl import load_workbook
+
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    pg.request.delete(f"{base}/api/dict")
+    assert pg.request.put(f"{base}/api/me/prefs", data={"dictMode": "suggest"}).ok
+    tmp = temp_sample_ws(pg, base)
+    ws_id, s1 = tmp["ws"], tmp["s1"]
+
+    def all_rows():
+        res = j(f"/api/ws/{ws_id}")["results"]
+        return {sid: [r for b in res[sid]["blocks"] for r in b["rows"]] for sid in res}
+
+    def count_text(text):                                   # số dòng (mọi mặt sổ) có chữ khớp khoá của `text`
+        return sum(1 for rows in all_rows().values() for r in rows
+                   if not r.get("is_note") and _desc_key(r.get("description") or "") == _desc_key(text))
+
+    rows1 = all_rows()[s1]
+    idx_a = [i for i, r in enumerate(rows1) if r["description"] == "ヨキンキ"]
+    idx_b = [i for i, r in enumerate(rows1) if r["description"] == "振込1"]
+    assert len(idx_a) >= 2 and len(idx_b) >= 3, (idx_a, idx_b)
+    A_RIGHT, B_RIGHT = "預金", "振込"
+    n_a, n_b = count_text("ヨキンキ"), count_text("振込1")
+
+    def cell(i):
+        return pg.locator(f'tr[data-row="{s1}:0:{i}"] input[data-field="description"]')
+
+    def chip(i):
+        return pg.locator(f'tr[data-row="{s1}:0:{i}"] [data-sug="description"]')
+
+    def server_row(i):
+        return j(f"/api/ws/{ws_id}")["results"][s1]["blocks"][0]["rows"][i]
+
+    toast = pg.locator("[data-testid=toast]")
+    try:
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        pg.get_by_text(SAMPLE_SHEET_NAME).first.click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+        assert chip(idx_a[1]).count() == 0, "từ điển rỗng thì không có gợi ý"
+
+        # ── Sửa một dòng ヨキンキ → máy chủ học, dòng giống hiện chip, toast hỏi áp dụng ──
+        cell(idx_a[0]).fill(A_RIGHT)
+        cell(idx_a[0]).press("Enter")
+        wait_until(lambda: any(e["wrong"] == "ヨキンキ" and e["right"] == A_RIGHT for e in j("/api/dict")["entries"]), "máy chủ học cặp ヨキンキ → 預金")
+        assert chip(idx_a[0]).count() == 0, "dòng vừa tự gõ không có gợi ý"
+        wait_until(lambda: chip(idx_a[1]).count() == 1, "dòng ヨキンキ khác hiện chip ngay (không chờ mạng)")
+        assert A_RIGHT in chip(idx_a[1]).inner_text() and A_RIGHT in chip(idx_a[1]).get_attribute("title")
+        toast.wait_for(timeout=5000)
+        assert f"Đã nhớ: ヨキンキ → {A_RIGHT} · Áp dụng cho {n_a - 1} dòng giống vậy?" in toast.inner_text(), toast.inner_text()
+        pg.locator('[data-toast-action="Không"]').click()
+        toast.wait_for(state="detached", timeout=5000)
+        assert chip(idx_a[1]).count() == 1, "bấm Không thì chỉ tắt thông báo, gợi ý vẫn còn"
+        assert server_row(idx_a[1])["description"] == "ヨキンキ", "chưa bấm nhận thì không có gì đổi"
+
+        # ── Tab nhận gợi ý (không nhảy sang ô khác); lưu dấu dict_fixed + chữ máy đọc gốc ──
+        cell(idx_a[1]).click()
+        pg.keyboard.press("Tab")
+        wait_until(lambda: cell(idx_a[1]).input_value() == A_RIGHT, "Tab nhận gợi ý")
+        wait_until(lambda: server_row(idx_a[1]).get("dict_fixed") == ["description"], "máy chủ lưu dict_fixed", timeout=15)
+        r = server_row(idx_a[1])
+        assert r["description"] == A_RIGHT and r["orig"]["description"] == "ヨキンキ", r
+        assert chip(idx_a[1]).count() == 0
+        assert "dict_fixed" not in server_row(idx_a[0]), "dòng người tự gõ không phải «sửa theo từ điển»"
+
+        # ── Dòng 振込1 ×N: toast «Áp dụng cho N-1 dòng» → một nút áp hết; một Ctrl+Z hoàn tác cả lượt ──
+        cell(idx_b[0]).fill(B_RIGHT)
+        cell(idx_b[0]).press("Enter")
+        toast.wait_for(timeout=5000)
+        assert f"Áp dụng cho {n_b - 1} dòng giống vậy?" in toast.inner_text(), toast.inner_text()
+        pg.locator('[data-toast-action="Áp dụng"]').click()
+        wait_until(lambda: sum(1 for r in all_rows()[s1] if r.get("dict_fixed")) == len(idx_a[1:2]) + sum(1 for i in idx_b[1:]), "áp hết các dòng 振込1 giống vậy", timeout=15)
+        assert count_text("振込1") == 0
+        pg.evaluate("document.activeElement && document.activeElement.blur()")
+        pg.keyboard.press("Control+z")
+        wait_until(lambda: count_text("振込1") == n_b - 1, "một Ctrl+Z hoàn tác cả lượt áp hàng loạt", timeout=15)
+        chip(idx_b[1]).first.wait_for(timeout=5000)
+        chip(idx_b[1]).click()                                                # bấm 💡: nhận từng dòng
+        wait_until(lambda: server_row(idx_b[1])["description"] == B_RIGHT and server_row(idx_b[1]).get("dict_fixed") == ["description"],
+                   "bấm 💡 nhận gợi ý", timeout=15)
+
+        # ── Xoá trắng ô KHÔNG học ──
+        entries = j("/api/dict")["entries"]
+        cell(idx_b[2]).fill("")
+        cell(idx_b[2]).press("Enter")
+        time.sleep(0.8)
+        assert j("/api/dict")["entries"] == entries, "xoá trắng ô không được làm từ điển thay đổi"
+
+        # ── Excel ghi 辞書で補正 cho đúng các ô nhận theo từ điển ──
+        path = export_xlsx(pg, ctx, "tu-dien.xlsx")
+        pg.keyboard.press("Escape")
+        ws_x = load_workbook(path, data_only=True).worksheets[0]
+        memo_col = next(c for c in range(1, ws_x.max_column + 1) if ws_x.cell(row=8, column=c).value == "確認メモ")
+        memos = [str(ws_x.cell(row=r, column=memo_col).value or "") for r in range(9, 9 + len(all_rows()[s1]))]
+        dict_memos = [m for m in memos if "辞書で補正" in m]
+        want = sum(1 for r in all_rows()[s1] if r.get("dict_fixed"))
+        assert want >= 2 and len(dict_memos) == want, f"memo 辞書で補正: {len(dict_memos)}, dòng có dict_fixed: {want}"
+        assert any("摘要 ヨキンキ→預金" in m for m in dict_memos), dict_memos
+        assert any(m.startswith("手修正") for m in memos), "ô người tự gõ vẫn ghi 手修正"
+    finally:
+        pg.request.delete(f"{base}/api/dict")
+        drop_temp_ws(pg, base, tmp)
+    return (f"sửa 1 dòng → học (ヨキンキ→預金) · dòng giống hiện 💡 ngay · toast «Áp dụng cho N dòng» (Không giữ nguyên) · Tab nhận (lưu dict_fixed + chữ máy đọc gốc) · "
+            f"áp hàng loạt {n_b - 1} dòng + một Ctrl+Z hoàn tác cả lượt · bấm 💡 · xoá trắng không học · Excel ghi 辞書で補正 cho {want} ô")
+
+
+def step_dictionary_modes(pg, base: str, ctx: dict) -> str:
+    """Task 3.3: ⚙ → từ điển: danh sách, xoá, «Tự áp dụng» (một lượt khi nạp kết quả, báo + hoàn tác), «Tắt», xoá hết."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    def learn(wrong, right):
+        r = pg.request.post(f"{base}/api/dict/learn", data={"field": "description", "wrong": wrong, "right": right})
+        assert r.ok, r.text()
+
+    pg.request.delete(f"{base}/api/dict")
+    tmp = temp_sample_ws(pg, base)
+    ws_id = tmp["ws"]
+    dialog = pg.locator("[data-testid=settings-dialog]")
+    toast = pg.locator("[data-testid=toast]")
+
+    def all_rows():
+        res = j(f"/api/ws/{ws_id}")["results"]
+        return [r for sid in res for b in res[sid]["blocks"] for r in b["rows"]]
+
+    def n_with(text):
+        return sum(1 for r in all_rows() if not r.get("is_note") and _desc_key(r.get("description") or "") == _desc_key(text))
+
+    def open_settings():
+        pg.locator("[data-testid=settings-btn]").click()
+        dialog.wait_for(timeout=5000)
+
+    try:
+        learn("ヨキンキ", "預金")
+        learn("振込1", "振込")
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+
+        # ── Danh sách + xoá từng mục ──
+        open_settings()
+        assert dialog.locator("[data-dict-entry]").count() == 2, dialog.inner_text()
+        assert "Chỉ gợi ý" in dialog.inner_text() and "Mặc định, ai cũng nên để vậy" in dialog.locator("[data-testid=dict-mode-hint]").inner_text()
+        victim = next(e for e in j("/api/dict")["entries"] if e["wrong"] == "振込1")
+        dialog.locator(f'[data-dict-delete="{victim["id"]}"]').click()
+        wait_until(lambda: [e["wrong"] for e in j("/api/dict")["entries"]] == ["ヨキンキ"], "xoá một mục thì máy chủ cũng xoá")
+        assert dialog.locator("[data-dict-entry]").count() == 1
+
+        # ── Tự áp dụng: lưu theo tài khoản; áp MỘT lượt khi nạp kết quả; báo + Hoàn tác ──
+        dialog.get_by_role("button", name="Tự áp dụng").click()
+        wait_until(lambda: j("/api/me/prefs")["dictMode"] == "auto", "máy chủ lưu dictMode = auto", timeout=15)
+        assert "Dành cho người quét sổ của cùng một công ty hằng tháng" in dialog.locator("[data-testid=dict-mode-hint]").inner_text()
+        pg.keyboard.press("Escape")
+        dialog.wait_for(state="detached", timeout=5000)
+        n = n_with("ヨキンキ")
+        assert n >= 2
+        pg.reload()                                                           # nạp kết quả ⇒ tự áp
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        toast.wait_for(timeout=10000)
+        assert f"Đã tự sửa {n} ô theo từ điển" in toast.inner_text(), toast.inner_text()
+        wait_until(lambda: n_with("ヨキンキ") == 0 and sum(1 for r in all_rows() if r.get("dict_fixed")) == n, "máy chủ lưu các ô đã tự áp", timeout=15)
+        pg.locator('[data-toast-action="Hoàn tác"]').click()
+        wait_until(lambda: n_with("ヨキンキ") == n and sum(1 for r in all_rows() if r.get("dict_fixed")) == 0, "Hoàn tác trả lại hết", timeout=15)
+        time.sleep(1.0)
+        assert n_with("ヨキンキ") == n, "sau khi hoàn tác không được tự áp lại (chỉ áp MỘT lượt khi nạp kết quả)"
+
+        # ── Tắt: không học, không gợi ý ──
+        open_settings()
+        dialog.get_by_role("button", name="Tắt").click()
+        wait_until(lambda: j("/api/me/prefs")["dictMode"] == "off", "máy chủ lưu dictMode = off", timeout=15)
+        pg.keyboard.press("Escape")
+        dialog.wait_for(state="detached", timeout=5000)
+        pg.get_by_text(SAMPLE_SHEET_NAME).first.click()
+        pg.locator("tr[data-row]").first.wait_for(timeout=10000)
+        assert pg.locator("[data-sug]").count() == 0, "chế độ Tắt thì không hiện gợi ý dù từ điển còn mục"
+        before = j("/api/dict")["entries"]
+        first_row = pg.locator("tr[data-row]").nth(2).locator('input[data-field="description"]')
+        first_row.fill("SS手数料 sửa thử")
+        first_row.press("Enter")
+        time.sleep(0.8)
+        assert j("/api/dict")["entries"] == before, "chế độ Tắt thì không học"
+
+        # ── Xoá hết (hỏi lại) ──
+        open_settings()
+        dialog.get_by_role("button", name="Chỉ gợi ý").click()
+        wait_until(lambda: j("/api/me/prefs")["dictMode"] == "suggest", "trả về chế độ gợi ý", timeout=15)
+        dialog.locator("[data-testid=dict-clear]").click()
+        assert j("/api/dict")["entries"] != [], "bấm Xoá hết chưa xoá — còn bước hỏi lại"
+        dialog.locator("[data-testid=dict-clear-yes]").click()
+        wait_until(lambda: j("/api/dict")["entries"] == [], "xoá hết từ điển")
+        dialog.locator("[data-testid=dict-empty]").wait_for(timeout=5000)
+        pg.keyboard.press("Escape")
+    finally:
+        assert pg.request.put(f"{base}/api/me/prefs", data={"dictMode": "suggest"}).ok
+        pg.request.delete(f"{base}/api/dict")
+        drop_temp_ws(pg, base, tmp)
+    return (f"⚙ liệt kê + xoá từng mục · «Tự áp dụng» lưu theo tài khoản, áp {n} ô MỘT lượt khi nạp kết quả, báo + Hoàn tác trả lại hết, không áp lại · "
+            "«Tắt»: không gợi ý, không học · xoá hết có hỏi lại")
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -1690,6 +1910,8 @@ STEPS = [
     ("21. Soát nhanh", step_quick_review),
     ("22. Soát nhanh: nội dung thẻ", step_quick_card),
     ("23. Soát nhanh: xác nhận và hoàn thành", step_quick_finish),
+    ("24. Từ điển sửa lỗi: học, gợi ý, áp hàng loạt", step_dictionary),
+    ("25. Từ điển: quản lý, tự áp, tắt", step_dictionary_modes),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

@@ -12,11 +12,13 @@
  * nhảy sang dòng khác. Dòng vừa hết cần soát (✓ hoặc sửa đúng) thì tự sang dòng kế.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import FixChips from "@/components/FixChips";
 import RowStrip from "@/components/RowStrip";
 import type { EditField, ResultStore, RowBands, Sheet, Tx } from "@/lib/api";
+import type { DictField } from "@/lib/corrections";
+import { useCorrections } from "@/lib/corrections-provider";
 import { useT, type Dict } from "@/lib/i18n";
 import {
   calcOf,
@@ -64,6 +66,7 @@ function QField({
   flagged = false,
   span,
   invalidHint,
+  extra,
   onCommit,
 }: {
   label: string;
@@ -75,6 +78,8 @@ function QField({
   flagged?: boolean;
   span: string;
   invalidHint?: string;
+  /** Nội dung phụ dưới ô (vd nút gợi ý của từ điển). */
+  extra?: ReactNode;
   /** Trả `false` = từ chối giá trị (ô quay về giá trị cũ). */
   onCommit: (v: string) => void | boolean;
 }) {
@@ -119,6 +124,7 @@ function QField({
           flagged ? "border-warnedge bg-warnbg" : "border-rule"
         } ${money ? "tnum text-right" : ""}`}
       />
+      {extra}
     </label>
   );
 }
@@ -133,6 +139,7 @@ export default function QuickReview({
   onActivate,
   onEdit,
   onFix,
+  onAcceptSug,
   onConfirm,
   onExport,
   onClose,
@@ -149,6 +156,8 @@ export default function QuickReview({
   onActivate: (sheetId: string) => void;
   onEdit: (ref: RowRef, field: EditField, value: string | number | null) => void;
   onFix: (ref: RowRef, fix: Fix) => void;
+  /** Nhận gợi ý của từ điển sửa lỗi cho một ô của dòng hiện tại (task 3.3). */
+  onAcceptSug: (ref: RowRef, field: DictField, right: string) => void;
   /** Bấm ✓ «Đúng rồi»: người đã nhìn dòng này và chấp nhận (cùng việc với nút ✓ ở bảng). */
   onConfirm: (ref: RowRef) => void;
   /** Soát xong: sang hộp Xuất file. */
@@ -157,6 +166,7 @@ export default function QuickReview({
   onClose: (ref: RowRef | null, field: FocusField | null) => void;
 }) {
   const { t, lang } = useT();
+  const { suggest } = useCorrections();
   const order = useMemo(() => sheets.map((s) => s.id), [sheets]);
   const rows = useMemo(() => flattenRows(order, store), [order, store]);
   const pending = useMemo(() => pendingOf(rows), [rows]);
@@ -271,6 +281,22 @@ export default function QuickReview({
   const text = (field: EditField) => (v: string) => {
     if (ref) onEdit(ref, field, v || null);
   };
+  /** Nút «💡 đáp án» của từ điển dưới ô chữ. */
+  const sugChip = (field: DictField, current: string | null) => {
+    const right = ref && !tx?.is_note ? suggest(field, current) : null;
+    if (!right || !ref) return null;
+    return (
+      <button
+        type="button"
+        data-sug={field}
+        title={t.dictSuggestTitle(right)}
+        onClick={() => onAcceptSug(ref, field, right)}
+        className="self-start rounded-lg border border-accent/50 bg-accentpale px-2.5 py-1 text-[14px] font-semibold text-accent hover:bg-accent hover:text-accentink"
+      >
+        💡 {right}
+      </button>
+    );
+  };
 
   return (
     <div data-testid="quick-review" className="flex h-full min-h-0 flex-col bg-page">
@@ -312,9 +338,10 @@ export default function QuickReview({
             <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-6">
               <QField label="年月日" gloss={g.date} value={tx.date ?? tx.date_raw ?? ""} field="date" span="sm:col-span-2"
                 flagged={flaggedField === "date"} onCommit={text("date")} />
-              <QField label="区分" gloss={g.kind} value={tx.kind ?? ""} field="kind" span="sm:col-span-1" onCommit={text("kind")} />
+              <QField label="区分" gloss={g.kind} value={tx.kind ?? ""} field="kind" span="sm:col-span-1" onCommit={text("kind")}
+                extra={sugChip("kind", tx.kind)} />
               <QField label="摘要" gloss={g.desc} value={tx.description ?? ""} field="description" span="col-span-2 sm:col-span-3"
-                flagged={flaggedField === "description"} onCommit={text("description")} />
+                flagged={flaggedField === "description"} onCommit={text("description")} extra={sugChip("description", tx.description)} />
               <QField label="出金" gloss={g.out} value={yen(tx.amount_out)} field="amount_out" money span="sm:col-span-2"
                 invalidHint={t.cellNumberOnly} onCommit={num("amount_out")} />
               <QField label="入金" gloss={g.in} value={yen(tx.amount_in)} field="amount_in" money span="sm:col-span-2"

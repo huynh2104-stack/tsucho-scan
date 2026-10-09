@@ -53,6 +53,17 @@ import { useAuth } from "@/lib/auth";
 import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
 import QuickReview from "@/components/QuickReview";
+import Toast, { type ToastData } from "@/components/Toast";
+import {
+  applyToRows,
+  autoApplyAll,
+  isDictField,
+  learnableEdit,
+  similarRows,
+  wrongKey,
+  type DictField,
+} from "@/lib/corrections";
+import { useCorrections } from "@/lib/corrections-provider";
 import type { RowRef } from "@/lib/quickreview";
 import { exportSummary, scopeIds, type ExportSummary } from "@/lib/exportsummary";
 import {
@@ -194,6 +205,11 @@ export default function Workbench() {
   const [goNeed, setGoNeed] = useState<string | null>(null);
   /** Đang ở chế độ «Soát nhanh» (task 3.2): cột kết quả thành thẻ một dòng. */
   const [quickOpen, setQuickOpen] = useState(false);
+  /** Thông báo nhỏ có nút (từ điển sửa lỗi, task 3.3). */
+  const [toast, setToast] = useState<ToastData | null>(null);
+  /** >0 = vừa có kết quả mới nạp về, chế độ «tự áp» của từ điển cần chạy MỘT lượt (không chạy sau mỗi lần người sửa ô). */
+  const [autoTick, setAutoTick] = useState(0);
+  const corr = useCorrections();
   const [confirm, setConfirm] = useState<{
     title: string;
     message: string;
@@ -596,6 +612,9 @@ export default function Workbench() {
 
   // Cùng số với huy hiệu ở cột trái (cùng `perSheet`)
   const badCount = active ? (perSheet[active]?.need_check ?? 0) : 0;
+  /** Kho mới nhất — cho các hàm bất đồng bộ (học từ điển xong mới đếm «dòng giống») khỏi đọc bản đã cũ. */
+  const storeRef = useRef(store);
+  storeRef.current = store;
   /** Số dòng cần soát của TOÀN hồ sơ — «Soát nhanh» đi qua mọi mặt sổ. */
   const totalNeed = Object.values(perSheet).reduce((n, s) => n + s.need_check, 0);
 
@@ -873,8 +892,9 @@ export default function Workbench() {
    * mỗi khi quét thêm file, xoá file hay đổi thứ tự. Chỉ những mặt vừa được
    * quét lại (`replace`) mới lấy bản mới từ server.
    */
-  const syncStore = (fromServer: ResultStore, replace: string[] = []) =>
-    setHist((h) => {
+  const syncStore = (fromServer: ResultStore, replace: string[] = []) => {
+    setAutoTick((n) => n + 1);
+    return setHist((h) => {
       const merged: ResultStore = { ...fromServer };
       for (const [sid, local] of Object.entries(h.present)) {
         if (!replace.includes(sid) && fromServer[sid]) merged[sid] = local;
@@ -899,6 +919,7 @@ export default function Workbench() {
 
       return { ...h, present: merged };
     });
+  };
 
   /** Đẩy các mặt sổ đã sửa lên server. Gọi qua bộ đếm giờ ở effect bên dưới. */
   const flushSave = useCallback(async (wsId: string, snapshot: ResultStore) => {
@@ -948,10 +969,55 @@ export default function Workbench() {
   }, [store]);
 
   /** Sửa một ô. Autosave ở trên sẽ đẩy lên server ngay sau đó. */
-  const editCell: EditFn = (ref, field, value) =>
+  const editCell: EditFn = (ref, field, value) => {
+    const before = store[ref.sheet]?.blocks[ref.block]?.rows[ref.row];
     // Toàn bộ luật nằm ở lib/review.ts (có test): ngày gõ tay đổi sang ISO, nhớ giá trị MÁY ĐỌC
     // vào `orig`, và trả lại đúng mảng cũ nếu không có gì đổi (gõ lại giá trị đang có).
     patchRows(ref.sheet, ref.block, (rows) => applyEdit(rows, ref.row, field, value));
+    // Từ điển sửa lỗi (3.3): học từ MỘT lần ghi nhận ô (không phải từng phím), chỉ ô chữ do máy đọc
+    if (before && isDictField(field)) {                // chế độ «Tắt»: corr.learn tự bỏ qua
+      const pair = learnableEdit(before, field, typeof value === "string" ? value : null);
+      if (pair) void learnFromEdit(field, pair.wrong, pair.right);
+    }
+  };
+
+  /** Học một cặp sai→đúng, rồi hỏi «áp cho N dòng giống vậy?» (chế độ gợi ý) hoặc tự áp (chế độ tự áp, vẫn báo). */
+  const learnFromEdit = async (field: DictField, wrong: string, right: string) => {
+    const entry = await corr.learn(field, wrong, right);
+    if (!entry) return;
+    const order = sheets.map((s) => s.id);
+    const key = wrongKey(wrong);
+    const n = similarRows(storeRef.current, order, field, key, right).length;
+    const applyAll = () =>
+      commitStore((prev) => applyToRows(prev, similarRows(prev, order, field, key, right), field, right));
+    const id = Date.now();
+    if (n === 0) {
+      setToast({ id, text: t.dictLearned(wrong, right), ms: 5000 });
+    } else if (corr.mode === "auto") {
+      applyAll();
+      setToast({ id, text: t.dictAutoDone(n), actions: [{ label: t.undoEdit, onClick: undoEdit }] });
+    } else {
+      setToast({ id, text: t.dictLearnedAsk(wrong, right, n), actions: [{ label: t.dictApply, onClick: applyAll }, { label: t.dictNo, onClick: () => {} }], ms: 12000 });
+    }
+  };
+
+  /** Nhận gợi ý của từ điển cho MỘT ô (bấm 💡 hoặc Tab): một lần sửa như mọi lần, đánh dấu «sửa theo từ điển». */
+  const acceptSuggestion = (ref: RowRef, field: DictField, right: string) =>
+    commitStore((prev) => applyToRows(prev, [ref], field, right));
+
+  /* Chế độ «tự áp»: chạy MỘT lượt sau khi kết quả mới nạp về (mở hồ sơ, quét xong) — không chạy sau mỗi lần người sửa
+     ô, nếu không người dùng gõ lại chữ trùng khoá từ điển là bị sửa ngược ngay. Luôn báo + hoàn tác được. */
+  useEffect(() => {
+    if (autoTick === 0 || corr.mode !== "auto" || !corr.loaded) return;
+    const order = sheets.map((s) => s.id);
+    const r = autoApplyAll(store, order, corr.index);
+    setAutoTick(0);
+    if (r.changed > 0) {
+      commitStore(() => r.store);
+      setToast({ id: Date.now(), text: t.dictAutoDone(r.changed), actions: [{ label: t.undoEdit, onClick: undoEdit }] });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTick, corr.mode, corr.loaded, corr.index]);
 
   /** Lưu thông tin sổ (銀行名…) của một khối, và điền luôn cho các mặt sau chưa có thông tin nếu `propagate`.
    *  Đi qua commitStore nên Ctrl+Z hoàn tác CẢ lượt (kể cả các mặt được điền theo) và autosave tự lưu. */
@@ -1658,6 +1724,7 @@ export default function Workbench() {
                 onActivate={setActive}
                 onEdit={editCell}
                 onFix={(ref, fix) => patchRows(ref.sheet, ref.block, (rows) => applyFix(rows, ref.row, fix))}
+                onAcceptSug={acceptSuggestion}
                 onConfirm={(ref) =>
                   patchRows(ref.sheet, ref.block, (rows) => setReviewed(rows, ref.row, true, Math.floor(Date.now() / 1000)))
                 }
@@ -1684,6 +1751,8 @@ export default function Workbench() {
               onAddRow={addRow}
               onAutoBalance={autoBalance}
               onSaveMeta={saveMeta}
+              suggest={corr.suggest}
+              onAcceptSug={acceptSuggestion}
               links={linkByTo}
               onDismissLink={dismissLink}
               onUndismissLink={undismissLink}
@@ -1788,6 +1857,8 @@ export default function Workbench() {
           chuyển khung (mặt sổ / chỉnh ảnh / kết quả) mới chỉ được vào đúng chỗ,
           mà `pane` là state của trang này. */}
       <Tour onPane={setPane} />
+
+      <Toast toast={toast} onClose={() => setToast(null)} />
 
       <ExportDialog
         open={showExport}

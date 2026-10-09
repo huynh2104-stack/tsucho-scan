@@ -148,6 +148,8 @@ export type Tx = {
   added?: boolean;
   /** Ô do máy SUY RA (vd「Tự tính số dư」), không phải số in trên sổ. */
   inferred?: EditField[];
+  /** Ô được sửa theo TỪ ĐIỂN SỬA LỖI (task 3.3) — Excel ghi 辞書で補正. Người gõ lại ô đó thì dấu này mất. */
+  dict_fixed?: EditField[];
   /** Chỉ có trong dữ liệu GỬI ĐI XUẤT FILE: dòng đầu của một khối (xem `buildAccounts`). */
   block_start?: boolean;
 };
@@ -336,6 +338,30 @@ export const putPrefs = async (patch: Partial<Prefs>) =>
       ...CRED,
     }),
   );
+
+/** Một mục trong từ điển sửa lỗi của người dùng (task 3.3). `key` = khoá so khớp (NFKC + bỏ khoảng trắng). */
+export type DictEntry = {
+  id: number;
+  field: "description" | "kind";
+  key: string;
+  wrong: string;
+  right: string;
+  hits: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export const getDict = async () =>
+  asJson<{ entries: DictEntry[] }>(await fetch(`${API}/api/dict`, CRED));
+
+export const learnDict = (field: DictEntry["field"], wrong: string, right: string) =>
+  jsonPost<DictEntry>("/api/dict/learn", { field, wrong, right });
+
+export const deleteDictEntry = async (id: number) =>
+  asJson<{ deleted: number }>(await fetch(`${API}/api/dict/${id}`, { method: "DELETE", ...CRED }));
+
+export const clearDict = async () =>
+  asJson<{ deleted: number }>(await fetch(`${API}/api/dict`, { method: "DELETE", ...CRED }));
 
 export type WorkspaceBrief = {
   id: string;
