@@ -284,6 +284,12 @@ export function chainChecks(rows: Tx[]): Chain[] {
   return chainWalk(rows).map((s) => s.chk);
 }
 
+/** Số dư KỲ VỌNG ngay trước từng dòng của một khối (null = chưa có mốc) — cùng phép cộng dồn với cột 検算.
+ *  Chế độ «Soát nhanh» dùng để viết ra phép tính của dòng («Số dư trước ¥P − rút ¥O + gửi ¥I = ¥E»). */
+export function balanceBefore(rows: Tx[]): (number | null)[] {
+  return chainWalk(rows).map((s) => s.before);
+}
+
 /** Kết quả cột 検算 kèm số dư KỲ VỌNG ngay trước dòng (`before`, null nếu chưa có mốc). */
 function chainWalk(rows: Tx[]): { chk: Chain; before: number | null }[] {
   let running: number | null = null;

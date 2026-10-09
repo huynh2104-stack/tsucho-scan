@@ -1647,8 +1647,19 @@ export default function Workbench() {
             </>
           )}
           <div className="min-h-0 flex-1">
-            {quickOpen ? (
-              <QuickReview sheets={sheets} store={store} onActivate={setActive} onClose={closeQuick} />
+            {quickOpen && ws ? (
+              <QuickReview
+                wsId={ws.id}
+                sheets={sheets}
+                store={store}
+                bands={bands}
+                bandsSheet={active}
+                bandsState={bands ? "ready" : mappedRows?.key === rowMapKey ? "unavailable" : "loading"}
+                onActivate={setActive}
+                onEdit={editCell}
+                onFix={(ref, fix) => patchRows(ref.sheet, ref.block, (rows) => applyFix(rows, ref.row, fix))}
+                onClose={closeQuick}
+              />
             ) : (
             <ReviewPane
               store={store}

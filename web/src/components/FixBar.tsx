@@ -11,10 +11,24 @@
  * Lúc rảnh nó nhắc các phím tắt — giao diện chưa có chỗ nào ghi chúng.
  */
 
-import { useT } from "@/lib/i18n";
+import { useT, type Dict } from "@/lib/i18n";
 import type { Fix } from "@/lib/review";
 
 const yen = (v: number) => v.toLocaleString("en-US");
+
+/** Nhãn của một nút gợi ý sửa — dùng chung với thẻ «Soát nhanh». */
+export function fixLabel(t: Dict, f: Fix): string {
+  switch (f.kind) {
+    case "swap":
+      return t.fixSwap;
+    case "balance":
+      return `残高 → ${yen(f.value)}`;
+    case "amount":
+      return `${f.field === "amount_out" ? "出金" : "入金"} → ${yen(f.value)}`;
+    case "addrow":
+      return f.side === "out" ? t.fixAddOut(yen(f.amount)) : t.fixAddIn(yen(f.amount));
+  }
+}
 
 export default function FixBar({
   explain,
@@ -27,19 +41,6 @@ export default function FixBar({
   onApply: (fix: Fix) => void;
 }) {
   const { t } = useT();
-
-  const label = (f: Fix) => {
-    switch (f.kind) {
-      case "swap":
-        return t.fixSwap;
-      case "balance":
-        return `残高 → ${yen(f.value)}`;
-      case "amount":
-        return `${f.field === "amount_out" ? "出金" : "入金"} → ${yen(f.value)}`;
-      case "addrow":
-        return f.side === "out" ? t.fixAddOut(yen(f.amount)) : t.fixAddIn(yen(f.amount));
-    }
-  };
 
   return (
     <div
@@ -64,7 +65,7 @@ export default function FixBar({
                   title={t.fixesHint}
                   className="flex-none rounded-md border border-accent/50 bg-accentpale px-2 py-1 text-[11.5px] font-semibold text-accent hover:bg-accent hover:text-accentink"
                 >
-                  {label(f)}
+                  {fixLabel(t, f)}
                 </button>
               ))}
             </>

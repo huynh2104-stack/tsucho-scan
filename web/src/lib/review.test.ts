@@ -8,6 +8,7 @@ import {
   applyDateEdit,
   applyEdit,
   applyFix,
+  balanceBefore,
   blankRow,
   chainChecks,
   dupBadges,
@@ -862,3 +863,15 @@ test("dupBadges: mỗi mặt nghi là bản chụp lại chỉ gắn với mặt
   assert.equal(sau.c.a, "b");
 });
 
+
+test("balanceBefore: số dư kỳ vọng ngay trước từng dòng — null ở dòng đầu, cộng dồn qua dòng không in số dư, lấy mốc từ dòng ghi chú", () => {
+  const rows = [
+    full({ is_note: true, status: "note", balance: 1000 }),
+    full({ amount_out: 100, balance: 900 }),
+    full({ amount_out: 50 }),                       // không in số dư
+    full({ amount_in: 10, balance: 860 }),
+  ];
+  assert.deepEqual(balanceBefore(rows), [null, 1000, 900, 850]);
+  assert.deepEqual(balanceBefore([full({ balance: 5 })]), [null]);
+  assert.deepEqual(balanceBefore([]), []);
+});

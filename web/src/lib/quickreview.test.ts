@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ResultStore, Tx } from "./api.ts";
-import { flattenRows, pendingOf, progress, resolveCurrent, rowKey, stepFrom, type QRow } from "./quickreview.ts";
+import type { ResultStore, RowBands, Tx } from "./api.ts";
+import { calcOf, flattenRows, pendingOf, progress, resolveCurrent, rowKey, sheetRowIndex, stepFrom, stripRect, stripSegments, STRIP_COL_PX, type QRow } from "./quickreview.ts";
 
 const row = (over: Partial<Tx> = {}): Tx => ({
   date: "2025-04-25", date_raw: null, kind: null, description: "x", extra_text: null, store_code: null,
@@ -118,4 +118,88 @@ test("progress: dòng mới phát sinh giữa phiên (sửa lệch số dư dòn
   const them = flatOf({ s1: [2, 2] });                                    // xuất hiện thêm s1-bad1
   for (const r of pendingOf(them)) seen.add(r.key);
   assert.deepEqual(progress(seen, pendingOf(them), "s1-bad0"), { k: 1, n: 2 });
+});
+
+// ── Dải ảnh của dòng & phép tính ──────────────────────────────────────
+
+const bandsOf = (n: number, over: Partial<RowBands> = {}): RowBands => ({
+  bands: Array.from({ length: n }, (_, i) => ({ y0: 0.1 + i * 0.1, y1: 0.2 + i * 0.1, method: "estimated" as const })),
+  exact: false, skew_deg: 0, x0: 0.1, x1: 0.9, ...over,
+});
+
+test("sheetRowIndex: thứ tự dòng qua mọi khối của mặt sổ; mặt/khối không có → -1", () => {
+  const store: ResultStore = { s: { ...sheet("s", 2), blocks: [
+    { meta: { bank_name: null, store_no: null, account_no: null, holder: null }, rows: [row(), row(), row()] },
+    { meta: { bank_name: null, store_no: null, account_no: null, holder: null }, rows: [row(), row()] },
+  ] } };
+  assert.equal(sheetRowIndex(store, { sheet: "s", block: 0, row: 2 }), 2);
+  assert.equal(sheetRowIndex(store, { sheet: "s", block: 1, row: 1 }), 4);
+  assert.equal(sheetRowIndex(store, { sheet: "khong-co", block: 0, row: 0 }), -1);
+  assert.equal(sheetRowIndex(store, { sheet: "s", block: 5, row: 0 }), -1);
+});
+
+test("stripRect: nới một dòng mỗi phía bằng dải hàng xóm; bề ngang theo tờ giấy; giữ nguyên dải của chính dòng", () => {
+  const r = stripRect(bandsOf(5), 2)!;
+  const r2 = (v: number) => Math.round(v * 1000) / 1000;
+  assert.deepEqual([r.cy0, r.cy1, r.y0, r.y1, r.cx0, r.cx1].map(r2), [0.2, 0.5, 0.3, 0.4, 0.1, 0.9], "dòng 2: hàng xóm 0.2–0.3 và 0.4–0.5");
+  assert.equal(r.exact, false);
+});
+
+test("stripRect: hàng xóm cao thấp khác nhau thì lấy ĐÚNG mép của hàng xóm (không chỉ nới bằng chiều cao dòng)", () => {
+  const b = bandsOf(3, { bands: [{ y0: 0.05, y1: 0.2 }, { y0: 0.2, y1: 0.3 }, { y0: 0.3, y1: 0.5 }] });
+  const r = stripRect(b, 1)!;
+  assert.deepEqual([r.cy0, r.cy1], [0.05, 0.5]);
+});
+
+test("stripRect: dòng đầu/cuối không có hàng xóm thì nới bằng đúng chiều cao dòng và không tràn ra ngoài ảnh", () => {
+  const dau = stripRect(bandsOf(3, { bands: [{ y0: 0.02, y1: 0.12 }, { y0: 0.12, y1: 0.22 }, { y0: 0.9, y1: 0.99 }] }), 0)!;
+  assert.equal(dau.cy0, 0, "0.02 − 0.10 < 0 → kẹp về 0");
+  const cuoi = stripRect(bandsOf(3, { bands: [{ y0: 0.02, y1: 0.12 }, { y0: 0.12, y1: 0.22 }, { y0: 0.9, y1: 0.99 }] }), 2)!;
+  assert.equal(cuoi.cy1, 1, "0.99 + 0.09 > 1 → kẹp về 1");
+});
+
+test("stripRect: nét liền khi dải khớp theo nội dung, mang theo độ nghiêng; dải hỏng / ngoài phạm vi → null", () => {
+  const b = bandsOf(3, { skew_deg: 1.5, bands: [{ y0: 0.1, y1: 0.2, method: "content" }, { y0: 0.2, y1: 0.3, method: "content" }, { y0: 0.3, y1: 0.4 }] });
+  const r = stripRect(b, 1)!;
+  assert.deepEqual([r.exact, r.skew], [true, 1.5]);
+  assert.equal(stripRect(b, 9), null);
+  assert.equal(stripRect(b, -1), null);
+  assert.equal(stripRect(null, 0), null);
+  assert.equal(stripRect(bandsOf(2, { bands: [{ y0: 0.3, y1: 0.3 }, { y0: 0.4, y1: 0.5 }] }), 0), null, "dải rỗng");
+  assert.equal(stripRect(bandsOf(2, { x0: 0.6, x1: 0.5 }), 0), null, "bề ngang không hợp lệ");
+});
+
+test("calcOf: số dư trước − rút + gửi = kỳ vọng, chênh = in − kỳ vọng; ghi chú / chưa có mốc → null", () => {
+  const c = calcOf(row({ amount_out: 100, amount_in: 30, balance: 905 }), 1000)!;
+  assert.deepEqual(c, { before: 1000, out: 100, inn: 30, expected: 930, printed: 905, diff: -25 });
+  assert.equal(calcOf(row({ amount_out: 100, balance: 900 }), 1000)!.diff, 0);
+  assert.equal(calcOf(row({ amount_out: 100 }), 1000)!.printed, null, "sổ không in số dư");
+  assert.equal(calcOf(row({ amount_out: 100 }), 1000)!.diff, null);
+  assert.equal(calcOf(row({ is_note: true, balance: 5 }), 1000), null);
+  assert.equal(calcOf(row({ balance: 5 }), null), null);
+});
+
+test("stripSegments: dòng đã đủ lớn / tờ sổ hẹp thì MỘT đoạn; tờ rộng với chữ nhỏ thì cắt thành nhiều đoạn (tối đa 3)", () => {
+  const rect = stripRect(bandsOf(5, { x0: 0, x1: 1 }), 2)!;                 // dòng cao 0.1 ảnh
+  assert.equal(stripSegments(rect, 400, 1000).length, 1, "ảnh 400px rộng: dòng cao 100px, đã to sẵn");
+  assert.equal(stripSegments(rect, 4000, 1000).length, 3, "ảnh 4000px rộng: phóng lên vẫn rộng ≥ 3 cột → chặn ở 3");
+  const nho = stripRect(bandsOf(5, { x0: 0, x1: 1, bands: Array.from({ length: 5 }, (_, i) => ({ y0: 0.1 + i * 0.02, y1: 0.12 + i * 0.02 })) }), 2)!;
+  assert.equal(stripSegments(nho, 1400, 1000).length, 3, "dòng cao 20px → phóng 2.2 lần: bề ngang 3000px+");
+});
+
+test("stripSegments: các đoạn phủ kín bề ngang tờ giấy, đoạn kề nhau lấn nhau một chút, không vượt ra ngoài", () => {
+  const rect = stripRect(bandsOf(5, { x0: 0.1, x1: 0.9 }), 2)!;
+  const segs = stripSegments(rect, 8000, 1000);
+  assert.equal(segs.length, 3);
+  assert.equal(segs[0].x0, rect.cx0);
+  assert.equal(segs[segs.length - 1].x1, rect.cx1);
+  for (let i = 1; i < segs.length; i++) assert.ok(segs[i].x0 < segs[i - 1].x1, `đoạn ${i} phải lấn sang đoạn ${i - 1}`);
+  for (const sg of segs) assert.ok(sg.x0 >= rect.cx0 && sg.x1 <= rect.cx1 && sg.x1 > sg.x0);
+});
+
+test("stripSegments: dải cao 0 hoặc ảnh không rõ kích thước không làm hỏng (không NaN, ít nhất một đoạn)", () => {
+  const rect = { cx0: 0, cx1: 1, cy0: 0, cy1: 1, y0: 0.5, y1: 0.5, exact: false, skew: 0 };
+  const segs = stripSegments(rect, 1000, 1000);
+  assert.ok(segs.length >= 1 && segs.every((x) => Number.isFinite(x.x0) && Number.isFinite(x.x1)));
+  assert.equal(STRIP_COL_PX > 0, true);
 });

@@ -56,6 +56,8 @@ Kịch bản (chữ giao diện cố định tiếng Việt qua localStorage["ts
     đăng nhập cùng tài khoản thì giao diện theo lựa chọn đã lưu (ja); Esc đóng hộp
  21 «▶ Soát nhanh (N)»: chỉ hiện khi còn dòng cần soát; vào chế độ → thẻ một dòng «Dòng k/N · Mặt「…」», đi qua mọi mặt sổ
     theo thứ tự cột trái (ảnh giữa đổi theo mặt sổ), n/p đi tới/lui, Esc thoát và bảng nhảy về đúng dòng đó
+ 22 thẻ có dải ảnh phóng to (1–3 đoạn, ảnh tải xong, nét liền/đứt đúng, ghi «vị trí ước lượng»), phép tính số dư đúng số,
+    lý do + chip gợi ý; gõ lại số dư đúng → dòng hết vàng và tự sang dòng kế (mặt sổ ②), Ctrl+Z hoàn tác, chip một chạm
 """
 from __future__ import annotations
 
@@ -1388,6 +1390,25 @@ def viewer_sheet(pg) -> str | None:
     }""")
 
 
+def temp_sample_ws(pg, base: str) -> dict:
+    """Hồ sơ TẠM chứa sổ mẫu nguyên vẹn: các bước 21+ cần dữ liệu biết trước, không dính những dòng đã bị các bước
+    trước sửa/chèn/xoá. Trả {home, ws, s1, s2}; xong việc gọi `drop_temp_ws`."""
+    home = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+    ws_id = pg.request.post(f"{base}/api/ws", data={"book_name": "E2E tạm"}).json()["id"]
+    added = pg.request.post(f"{base}/api/ws/{ws_id}/sample").json()["added"]
+    names = {x["id"]: x["name"] for x in pg.request.get(f"{base}/api/ws/{ws_id}").json()["sheets"]}
+    s1 = next(i for i in added if names[i] == SAMPLE_SHEET_NAME)
+    s2 = next(i for i in added if names[i] == SHEET2_NAME)
+    return {"home": home, "ws": ws_id, "s1": s1, "s2": s2}
+
+
+def drop_temp_ws(pg, base: str, tmp: dict) -> None:
+    """Xoá hồ sơ tạm và đưa trình duyệt về hồ sơ chính (các bước sau dùng hồ sơ đó)."""
+    assert pg.request.delete(f"{base}/api/ws/{tmp['ws']}").ok
+    pg.goto(f"{base}/?ws={tmp['home']}")
+    pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+
+
 def break_sheet_state(pg, base: str, ws_id: str, sid1: str, sid2: str):
     """Dựng hai mặt sổ CÓ dòng cần soát: mặt ① một dòng in sai số dư, mặt ② bỏ ✓ (còn 1 dòng vàng thật).
     Trả về bản gốc để trả lại sau khi thử."""
@@ -1414,10 +1435,6 @@ def step_quick_review(pg, base: str, ctx: dict) -> str:
     def j(path):
         return pg.request.get(f"{base}{path}").json()
 
-    ws_id = j("/api/ws")["workspaces"][0]["id"]
-    sheets = j(f"/api/ws/{ws_id}")["sheets"]
-    by_name = {x["name"]: x["id"] for x in sheets}
-    s1, s2 = by_name[SAMPLE_SHEET_NAME], by_name[SHEET2_NAME]
     start = pg.locator("[data-testid=quick-start]")
     quick = pg.locator("[data-testid=quick-review]")
     progress = pg.locator("[data-testid=quick-progress]")
@@ -1427,13 +1444,17 @@ def step_quick_review(pg, base: str, ctx: dict) -> str:
         pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
         wait_until(lambda: pg.locator('[data-tour="rail"] li[data-need]').count() > 0, "cột trái có số cần soát")
 
-    # ── Hồ sơ sạch: không có nút ──
+    # ── Hồ sơ sạch (hồ sơ chính, đã ✓ hết ở bước 14): không có nút ──
     reload_to_workbench()
     assert start.count() == 0, "không còn dòng cần soát thì không có nút «Soát nhanh»"
 
+    tmp = temp_sample_ws(pg, base)
+    ws_id, s1, s2 = tmp["ws"], tmp["s1"], tmp["s2"]
     orig = break_sheet_state(pg, base, ws_id, s1, s2)
     try:
-        reload_to_workbench()
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        wait_until(lambda: pg.locator('[data-tour="rail"] li[data-need]').count() > 0, "cột trái có số cần soát")
         need = {sid: int(pg.locator('[data-tour="rail"] li', has_text=name).first.get_attribute("data-need") or 0)
                 for sid, name in ((s1, SAMPLE_SHEET_NAME), (s2, SHEET2_NAME))}
         total = need[s1] + need[s2]
@@ -1470,11 +1491,93 @@ def step_quick_review(pg, base: str, ctx: dict) -> str:
         assert start.count() == 1, "thoát rồi thì nút bắt đầu hiện lại"
         assert viewer_sheet(pg) == (SAMPLE_SHEET_NAME if total - 2 < need[s1] else SHEET2_NAME), viewer_sheet(pg)
     finally:
-        restore_sheet_state(pg, base, ws_id, orig)
-    reload_to_workbench()
+        drop_temp_ws(pg, base, tmp)
     assert start.count() == 0
     return (f"hồ sơ sạch không có nút · còn {total} dòng ({need[s1]} ở mặt ①, {need[s2]} ở mặt ②) → «▶ Soát nhanh ({total})» · "
             "thẻ «Dòng k/N · Mặt…» · n/p/nút đi qua hai mặt sổ (ảnh giữa đổi theo, quay vòng) · Esc về đúng dòng trong bảng")
+
+
+def step_quick_card(pg, base: str, ctx: dict) -> str:
+    """Task 3.2 (bước 2: nội dung thẻ): dải ảnh phóng to, các ô sửa được, phép tính, lý do + gợi ý sửa."""
+    def j(path):
+        return pg.request.get(f"{base}{path}").json()
+
+    tmp = temp_sample_ws(pg, base)
+    ws_id, s1, s2 = tmp["ws"], tmp["s1"], tmp["s2"]
+    quick = pg.locator("[data-testid=quick-review]")
+    card = pg.locator("[data-testid=quick-card]")
+    progress = pg.locator("[data-testid=quick-progress]")
+
+    def server_balance_s1():
+        return j(f"/api/ws/{ws_id}")["results"][s1]["blocks"][0]["rows"][EDIT_ROW]["balance"]
+
+    orig = break_sheet_state(pg, base, ws_id, s1, s2)
+    rows1 = orig[s1][0][0]["rows"]
+    before = rows1[EDIT_ROW - 1]["balance"]
+    out_, in_ = rows1[EDIT_ROW].get("amount_out") or 0, rows1[EDIT_ROW].get("amount_in") or 0
+    expected = before - out_ + in_
+    try:
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator('[data-tour="rail"] li').first.wait_for(timeout=15000)
+        pg.locator("[data-testid=quick-start]").click()
+        card.wait_for(timeout=5000)
+        wait_until(lambda: f"Dòng 1/3 · Mặt「{SAMPLE_SHEET_NAME}」" in progress.inner_text(), "dòng 1/3 của mặt ①")
+
+        # ── Dải ảnh phóng to: tải xong, nét liền/đứt đúng, ghi «vị trí ước lượng» khi đứt ──
+        strip = pg.locator("[data-testid=quick-strip]")
+        strip.wait_for(timeout=15000)
+        n_seg = int(strip.get_attribute("data-segments"))
+        assert 1 <= n_seg <= 3, n_seg
+        wait_until(lambda: all(im.evaluate("e => e.complete && e.naturalWidth > 0") for im in strip.locator("img").all()),
+                   "ảnh của các đoạn đã tải", timeout=15)
+        est = pg.locator("[data-testid=quick-strip-estimated]")
+        exact = strip.get_attribute("data-exact") == "1"
+        if exact:
+            assert est.count() == 0, "dải khớp theo nội dung thì không ghi «ước lượng»"
+        else:
+            assert est.count() == 1 and "Vị trí ước lượng" in est.inner_text(), est.count()
+
+        # ── Phép tính, lý do, ô gây lệch, gợi ý ──
+        calc = pg.locator("[data-testid=quick-calc]")
+        want = (f"Số dư trước ¥{before:,} − rút ¥{out_:,} + gửi ¥{in_:,} = ¥{expected:,} · sổ in ¥999, chênh −¥{expected - 999:,}")
+        assert calc.inner_text().strip() == want, f"{calc.inner_text()!r} ≠ {want!r}"
+        assert "Số dư lệch" in pg.locator("[data-testid=quick-explain]").inner_text()
+        assert pg.locator('[data-qf="balance"]').get_attribute("data-flagged") == "1", "ô 残高 là ô gây lệch"
+        assert pg.locator('[data-qf="balance"]').input_value() == "999"
+        assert pg.locator('[data-qf="description"]').get_attribute("data-flagged") is None
+        fix = pg.locator('[data-fix="balance"]')
+        assert f"残高 → {expected:,}" in fix.inner_text(), fix.inner_text()
+
+        # ── Gõ lại số dư ĐÚNG: ô nhận chữ, lưu, dòng hết vàng và thẻ tự sang dòng kế (mặt ②) ──
+        box = pg.locator('[data-qf="balance"]')
+        box.click()
+        box.fill(str(expected))
+        box.press("Enter")
+        wait_until(lambda: server_balance_s1() == expected, "máy chủ lưu số dư vừa gõ", timeout=15)
+        # Sửa đúng 残高 của dòng này làm cả dòng kế (chuỗi dựa trên số in sai) cũng hết lệch: còn lại đúng 1 dòng, ở mặt ②
+        wait_until(lambda: f"Dòng 3/3 · Mặt「{SHEET2_NAME}」" in progress.inner_text(), "tự sang dòng kế ở mặt ②")
+        wait_until(lambda: viewer_sheet(pg) == SHEET2_NAME, "ảnh giữa đổi sang mặt ②")
+        pg.locator("[data-testid=quick-strip], [data-testid=quick-strip-empty]").first.wait_for(timeout=15000)
+        assert pg.locator("[data-testid=quick-fixes]").count() == 0, "dòng 行抜け không có gợi ý sửa số"
+        assert pg.locator("[data-testid=quick-explain]").inner_text().strip() != ""
+
+        # ── Ctrl+Z hoàn tác ngay trong chế độ này; rồi sửa bằng chip một chạm ──
+        pg.keyboard.press("Control+z")
+        wait_until(lambda: server_balance_s1() == 999, "Ctrl+Z trả số dư sai (máy chủ cũng lưu lại)", timeout=15)
+        pg.keyboard.press("p")
+        wait_until(lambda: f"Mặt「{SAMPLE_SHEET_NAME}」" in progress.inner_text(), "p lùi về mặt ①")
+        pg.keyboard.press("p")
+        wait_until(lambda: f"Dòng 1/3 · Mặt「{SAMPLE_SHEET_NAME}」" in progress.inner_text(), "p lùi nữa về dòng đầu (dòng đã gõ lại)")
+        pg.locator('[data-fix="balance"]').click()
+        wait_until(lambda: server_balance_s1() == expected, "chip một chạm lưu số dư đúng", timeout=15)
+        wait_until(lambda: f"Mặt「{SHEET2_NAME}」" in progress.inner_text(), "sau chip tự sang dòng kế")
+
+        pg.keyboard.press("Escape")
+        quick.wait_for(state="detached", timeout=5000)
+    finally:
+        drop_temp_ws(pg, base, tmp)
+    return (f"dải ảnh {n_seg} đoạn, ảnh đã tải, {'nét liền' if exact else 'nét đứt + «vị trí ước lượng»'} · "
+            "phép tính đúng từng số · ô gây lệch tô vàng · gõ số dư đúng → lưu, tự sang dòng kế (mặt ②, ảnh giữa đổi) · Ctrl+Z · chip một chạm")
 
 
 STEPS = [
@@ -1499,6 +1602,7 @@ STEPS = [
     ("19. Tóm tắt trước khi xuất + xuất theo tài khoản", step_export_summary),
     ("20. Cài đặt theo tài khoản", step_settings),
     ("21. Soát nhanh", step_quick_review),
+    ("22. Soát nhanh: nội dung thẻ", step_quick_card),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3
@@ -1534,6 +1638,9 @@ def run(base: str, tmp: Path, headed: bool) -> int:
             except Exception as e:  # noqa: BLE001
                 msg = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
                 print(f"[FAIL] {title} ({time.time() - t0:.1f}s) — {msg}", flush=True)
+                if os.environ.get("E2E_TRACE"):                      # E2E_TRACE=1: in cả traceback để biết dòng nào hỏng
+                    import traceback
+                    traceback.print_exc()
                 shot = Path(tempfile.gettempdir()) / f"tsucho-e2e-fail-{i + 1}.png"
                 try:
                     pg.screenshot(path=str(shot))
