@@ -43,18 +43,18 @@
   color-scheme: light;
 
   /* Giấy sổ 普通預金 — xanh xám nhạt, lấy từ ảnh sổ thật */
-  --paper: #f4f7f8;
-  --paper-2: #eaf0f3;
-  --paper-3: #ffffff;
+  --paper: #eff0ea;
+  --paper-2: #e6e8e0; /* dải nền xen kẽ, giống vệt kẻ ô của sổ */
+  --paper-3: #f7f8f4; /* mặt giấy sáng nhất — ô nhập liệu, bảng */
 
   /* Lưới 罫線 in sẵn */
-  --rule: #c7d3db;
-  --rule-soft: #e0e7ec;
+  --rule: #c3cabb;
+  --rule-soft: #d8ded1;
 
   /* Mực sumi — đen ngả xanh vì in trên giấy xanh xám */
-  --sumi: #203647;
-  --sumi-2: #526675;
-  --sumi-3: #647986;
+  --sumi: #18201a;
+  --sumi-2: #4d574f;
+  --sumi-3: #77817a;
 
   /* 朱 — mực dấu kiểm. Dùng ĐÚNG ba chỗ, không hơn. */
   --shu: #bd392c;
@@ -71,8 +71,8 @@
      đen — đen kịt cộng một màu chói là lối mòn. Đây là xanh rêu sẫm, màu
      mặt bàn gỗ sơn mài, và thứ sáng nhất trên đó là TỜ GIẤY chứ không
      phải một điểm nhấn neon. */
-  --desk: #203b50;
-  --desk-2: #2c4b61;
+  --desk: #212a23;
+  --desk-2: #2b352d;
 
   /* Mực HỒNG của biểu mẫu in sẵn (ゆうちょ in khung bằng màu này). Chính
      là tín hiệu mà thuật toán dò dòng dùng để tách biểu mẫu khỏi dữ liệu:
@@ -80,21 +80,6 @@
      điều đó ngay trên trang. */
   --beni: #b8596b;
   --beni-soft: #e8cdd2;
-
-  /* HỆ CHUYỂN ĐỘNG — mọi thời lượng và đường cong trên trang lấy từ đây.
-     `lib/motion.tsx` giữ đúng các số này cho phần chạy bằng Motion. */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in-out: cubic-bezier(0.65, 0.05, 0.36, 1);
-  --t-instant: 120ms;
-  --t-fast: 200ms;
-  /* Chủ sản phẩm: bản 320/520ms hiện "quá nhanh, không đắt" — tăng lên. */
-  --t-base: 480ms;
-  --t-slow: 720ms;
-
-  /* Chiều cao header. Giá trị này chỉ là mặc định lúc chưa chạy JS;
-     site-header.tsx ĐO header thật bằng ResizeObserver rồi ghi đè, vì
-     điện thoại và máy tính khác nhau. Neo menu tính từ con số này. */
-  --header-h: 57px;
 }
 
 @layer base {
@@ -108,10 +93,6 @@
     html {
       scroll-behavior: auto;
     }
-  }
-
-  section[id] {
-    scroll-margin-top: calc(var(--header-h) + 12px);
   }
 
   body {
@@ -159,56 +140,12 @@
 
   :focus-visible {
     outline: 2px solid var(--shu);
-    outline-offset: 2px;
+    outline-offset: 3px;
     border-radius: 2px;
   }
 }
 
 @layer components {
-  /* NÚT SON. Lúc nghỉ KHÔNG có transform (có transform là chữ mất nét);
-     chỉ khi rê chuột mới nhích lên 1px, ấn xuống thì lún lại. */
-  .btn-shu {
-    background: var(--shu);
-    color: var(--paper-3);
-    box-shadow: 0 1px 0 rgba(24, 32, 26, 0.18);
-    transition:
-      transform var(--t-fast) var(--ease-out),
-      box-shadow var(--t-fast) var(--ease-out),
-      filter var(--t-fast) var(--ease-out);
-  }
-  .btn-shu:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.06);
-    box-shadow:
-      0 1px 0 rgba(24, 32, 26, 0.22),
-      0 6px 14px -8px rgba(24, 32, 26, 0.5);
-  }
-  .btn-shu:active {
-    transform: translateY(0) scale(0.98);
-    box-shadow: 0 0 0 rgba(24, 32, 26, 0);
-    transition-duration: var(--t-instant);
-  }
-
-  /* KHUNG GIẤY cho ảnh chụp màn hình thật: một tờ giấy lót dưới ảnh,
-     viền kẻ 1px, bóng mực rất nhạt. Dùng chung cho #how và #screen. */
-  .khung-anh {
-    background: var(--paper-3);
-    border: 1px solid var(--rule);
-    border-radius: 10px;
-    padding: 8px;
-    box-shadow:
-      0 1px 0 rgba(24, 32, 26, 0.06),
-      0 18px 36px -24px rgba(24, 32, 26, 0.35);
-  }
-
-  .nav-link {
-    color: var(--sumi-2);
-    transition: color var(--t-fast) var(--ease-out);
-  }
-  .nav-link:hover {
-    color: var(--sumi);
-  }
-
   /* Vệt đỏ chỉ dòng — chính là thứ ứng dụng vẽ lên ảnh khi bấm một dòng */
   .rowmark {
     background: color-mix(in srgb, var(--shu) 12%, transparent);
@@ -256,12 +193,21 @@
 }
 
 @layer utilities {
-  /* ────────────────────────────────────────────────────────────
-     Mỗi chuyển động dưới đây kể một đoạn của cùng MỘT câu chuyện:
-     ảnh vào → hàng hiện → số đáp xuống ô → son đóng「検算済」→ ô sai
-     ngả vàng. Cái nào không thuộc câu đó thì không có mặt ở đây.
-     Không có nảy, không có đàn hồi.
-     ──────────────────────────────────────────────────────────── */
+  /* CÂU TRẢ LỜI mở ra. `backwards` chứ không `both` — xem ghi chú ở
+     `.settle` bên dưới về chuyện transform còn sót lại làm chữ mất nét. */
+  .faq-a {
+    animation: faqMo 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  @keyframes faqMo {
+    from {
+      opacity: 0;
+      transform: translateY(-5px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 
   /* VỆT QUÉT của màn mở đầu — dải sáng chạy dọc trang giấy đúng một lần,
      mô phỏng việc máy đang đọc từ trên xuống. */
@@ -276,9 +222,10 @@
     );
   }
 
-  /* SỐ ĐÁP XUỐNG Ô: hiện lên, không trượt — "vừa có thêm dữ liệu". */
+  /* Con số vừa được đọc ra thì hiện lên, không trượt — trượt là hiệu ứng
+     trang trí, còn hiện lên là "vừa có thêm dữ liệu". */
   .landed {
-    animation: landed var(--t-base) var(--ease-out) both;
+    animation: landed 0.34s ease-out both;
   }
   @keyframes landed {
     from {
@@ -291,10 +238,18 @@
     }
   }
 
-  /* `backwards` chứ KHÔNG phải `both`: `both` giữ lại `transform: none`,
-     trình duyệt vẫn tách lớp riêng và tắt khử răng cưa — chữ mờ đi. */
+  /* Chỉ dùng cho MỘT màn mở đầu, không rải khắp trang */
+  /* `backwards` chứ KHÔNG phải `both`.
+   *
+   * `both` giữ lại trạng thái cuối, mà trạng thái cuối là `transform: none`
+   * — nghe thì vô hại, nhưng trình duyệt vẫn tính ra một ma trận đơn vị và
+   * chỉ cần CÓ transform là nó tách phần tử thành lớp riêng rồi TẮT khử
+   * răng cưa theo điểm phụ. Chữ mờ đi dù không xoay gì cả.
+   *
+   * `backwards` chỉ áp trạng thái đầu trước khi chạy, chạy xong thì buông
+   * hẳn — chữ trở lại nét như chữ tĩnh. */
   .settle {
-    animation: settle var(--t-slow) var(--ease-out) backwards;
+    animation: settle 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   }
   @keyframes settle {
     from {
@@ -306,163 +261,21 @@
       transform: none;
     }
   }
-
-  /* SON ĐÓNG DẤU. Ấn thẳng xuống rồi đứng yên — không nảy lại. */
   .stamp {
-    animation: stamp var(--t-base) var(--ease-out) both;
+    animation: stamp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
   @keyframes stamp {
-    from {
+    0% {
       opacity: 0;
-      transform: rotate(-4deg) scale(1.35);
+      transform: rotate(-4deg) scale(1.6);
     }
-    to {
+    60% {
+      opacity: 1;
+      transform: rotate(-4deg) scale(0.96);
+    }
+    100% {
       opacity: 1;
       transform: rotate(-4deg) scale(1);
-    }
-  }
-
-  /* Ô SAI NGẢ VÀNG: nền vàng đập một nhịp rồi đứng. */
-  .kin-pulse {
-    animation: kinPulse 900ms var(--ease-in-out) 1 both;
-  }
-  @keyframes kinPulse {
-    0% {
-      background-color: var(--paper-3);
-    }
-    45% {
-      background-color: color-mix(in srgb, var(--kin) 55%, var(--kin-soft));
-    }
-    100% {
-      background-color: var(--kin-soft);
-    }
-  }
-
-  /* FAQ: mở bằng grid-template-rows 0fr → 1fr, nên chiều cao chạy mượt
-     mà không phải đo nội dung bằng JS. */
-  .faq-panel {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--t-base) var(--ease-out);
-  }
-  .faq-panel[data-open='true'] {
-    grid-template-rows: 1fr;
-  }
-  .faq-panel > div {
-    overflow: hidden;
-    min-height: 0;
-  }
-  .faq-mark {
-    transition: transform var(--t-fast) var(--ease-out);
-  }
-  [aria-expanded='true'] > .faq-mark {
-    transform: rotate(45deg);
-  }
-
-  /* #how — BƯỚC ĐANG XEM.
-     Không chỉ lằn son bên trái: một lớp son rất nhạt LOANG từ trái sang
-     phải rồi TAN (::before, chạy một lần mỗi khi bước sáng lên), để lại
-     một lớp nền mờ hơn (::after) cho tới khi sang bước khác. Lớp còn lại
-     tắt bằng transition nên không bao giờ nháy. */
-  .how-row {
-    position: relative;
-    isolation: isolate;
-    border-left: 3px solid transparent;
-    transition: border-color var(--t-base) var(--ease-out);
-  }
-  .how-row::before,
-  .how-row::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--shu) 10%, transparent) 0%,
-      transparent 70%
-    );
-  }
-  .how-row::before {
-    opacity: 0;
-    transform-origin: left center;
-  }
-  .how-row::after {
-    opacity: 0;
-    transition: opacity var(--t-base) var(--ease-out);
-  }
-  .how-row[data-active='true'] {
-    border-left-color: var(--shu);
-  }
-  .how-row[data-active='true']::before {
-    animation: washLoang 1600ms var(--ease-out) forwards;
-  }
-  .how-row[data-active='true']::after {
-    opacity: 0.55;
-    transition-delay: 900ms;
-  }
-  @keyframes washLoang {
-    0% {
-      opacity: 1;
-      transform: scaleX(0);
-    }
-    45% {
-      opacity: 1;
-      transform: scaleX(1);
-    }
-    100% {
-      opacity: 0;
-      transform: scaleX(1);
-    }
-  }
-  .how-num {
-    transition: color var(--t-base) var(--ease-out);
-  }
-
-  /* Vệt son trượt tới đúng hàng trên trang sổ của màn mở đầu */
-  .band-slide {
-    transition:
-      transform var(--t-fast) var(--ease-out),
-      height var(--t-fast) var(--ease-out),
-      opacity var(--t-fast) var(--ease-out);
-  }
-
-  /* Thanh CTA dính đáy trên điện thoại */
-  .cta-dock {
-    /* Tailwind v4 dịch chuyển bằng thuộc tính `translate`, không phải `transform` */
-    transition: translate var(--t-base) var(--ease-out);
-  }
-
-  /* Menu điện thoại gập/mở cùng kỹ thuật với FAQ */
-  .menu-panel {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows var(--t-fast) var(--ease-out);
-  }
-  .menu-panel[data-open='true'] {
-    grid-template-rows: 1fr;
-  }
-  .menu-panel > div {
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  /* ĐỔI NGÔN NGỮ: chỉ mờ-tỏ và nhích 6px. Không morph chữ Nhật ↔ Việt. */
-  ::view-transition-old(root) {
-    animation: vtOut 180ms var(--ease-out) both;
-  }
-  ::view-transition-new(root) {
-    animation: vtIn 280ms var(--ease-out) both;
-  }
-  @keyframes vtOut {
-    to {
-      opacity: 0;
-    }
-  }
-  @keyframes vtIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
     }
   }
 
@@ -470,84 +283,8 @@
     .settle,
     .stamp,
     .landed,
-    .kin-pulse,
-    .how-row::before {
-      animation: none !important;
-    }
-    .faq-panel,
-    .faq-mark,
-    .how-row,
-    .how-row::after,
-    .how-num,
-    .band-slide,
-    .cta-dock,
-    .menu-panel,
-    .btn-shu,
-    .nav-link {
-      transition: none !important;
-    }
-    .btn-shu:hover,
-    .btn-shu:active {
-      transform: none !important;
-    }
-    ::view-transition-old(root),
-    ::view-transition-new(root) {
+    .faq-a {
       animation: none !important;
     }
   }
-}
-
-/* Presentation edition: a quiet financial palette, with the passbook as
-   the visual focus. Motion follows a user's step selection, never a timer. */
-.hero-section { background-image: linear-gradient(115deg, var(--desk) 52%, var(--desk-2)); }
-.hero-grid { padding-top: clamp(48px, 6vw, 88px); padding-bottom: 64px; }
-.hero-context { margin: 0 0 24px; color: #c8dce9; font-size: 13px; line-height: 1.7; }
-.hero-title { font-size: clamp(36px, 3.6vw, 52px); line-height: 1.38; letter-spacing: -.025em; }
-.hero-benefits { max-width: 1152px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid #ffffff26; }
-.hero-benefits a { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 23px 16px; color: #e0eaf0; font-size: 13px; }
-.hero-benefits a + a { border-left: 1px solid #ffffff26; }
-.hero-benefits a:hover { background: #ffffff09; }
-.hero-benefits span { color: #aecbdc; font-size: 20px; }
-.section-inner > div:first-child { border-left-color: var(--ao); }
-.section-inner h2 { max-width: 32ch; line-height: 1.5; }
-.product-tour { border: 1px solid var(--rule); border-radius: 12px; background: var(--paper-3); overflow: hidden; box-shadow: 0 16px 48px -32px #203b5050; }
-.tour-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
-.tour-tabs button { position: relative; display: flex; align-items: center; gap: 10px; padding: 20px 16px; text-align: left; font-size: 13px; line-height: 1.6; color: var(--sumi-2); cursor: pointer; }
-.tour-tabs button + button { border-left: 1px solid var(--rule-soft); }
-.tour-tabs button[aria-selected="true"] { background: var(--desk); color: white; }
-.tour-tabs button:not([aria-selected="true"]):hover { background: var(--paper-2); }
-.tour-number { font-family: var(--font-mono); font-size: 11px; opacity: .8; }
-.tour-panel { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); min-height: 430px; }
-.tour-description { padding: 40px 32px; align-self: center; }
-.tour-count { display: block; font-family: var(--font-mono); font-size: 36px; color: var(--ao); letter-spacing: -.04em; }
-.tour-count span { font-size: 14px; color: var(--sumi-3); letter-spacing: 0; }
-.tour-description h3 { margin: 20px 0 14px; font-family: var(--font-display); font-size: 26px; line-height: 1.5; font-weight: 600; }
-.tour-description p { color: var(--sumi-2); font-size: 14px; line-height: 1.9; }
-.tour-controls { display: flex; gap: 10px; margin-top: 28px; }
-.tour-controls button { padding: 10px 16px; min-height: 44px; border: 1px solid var(--rule); border-radius: 5px; font-size: 13px; cursor: pointer; }
-.tour-controls button:hover:enabled { border-color: var(--ao); background: var(--paper); }
-.tour-controls button:disabled { opacity: .35; cursor: default; }
-.tour-stage { display: grid; align-items: center; min-width: 0; padding: 24px; background: var(--paper-2); border-left: 1px solid var(--rule-soft); }
-.tour-image { position: relative; height: 390px; min-width: 0; }
-.tour-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 8px 10px #203b5012); }
-.tour-note { margin: 0; padding: 14px 24px; border-top: 1px solid var(--rule-soft); font-size: 12px; line-height: 1.7; color: var(--sumi-2); }
-.tour-tabs button:focus-visible, .tour-panel:focus-visible { outline: 3px solid var(--shu); outline-offset: -4px; }
-.skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; transform: translateY(-150%); padding: 12px 20px; background: white; color: var(--sumi); border: 2px solid var(--ao); }
-.skip-link:focus { transform: none; }
-@media (max-width: 760px) {
-  .tour-tabs { grid-template-columns: 1fr; }
-  .tour-tabs button { padding: 12px 18px; min-height: 44px; }
-  .tour-tabs button + button { border-left: 0; border-top: 1px solid var(--rule-soft); }
-  .tour-panel { grid-template-columns: 1fr; }
-  .tour-description { padding: 24px; }
-  .tour-description h3 { margin-top: 12px; font-size: 23px; }
-  .tour-count { font-size: 26px; }
-  .tour-stage { padding: 12px; border-left: 0; border-top: 1px solid var(--rule-soft); }
-  .tour-image { height: clamp(230px, 65vw, 390px); }
-  .hero-benefits { margin: 0 16px; grid-template-columns: 1fr; }
-  .hero-benefits a { justify-content: flex-start; padding: 13px 4px; }
-  .hero-benefits a + a { border-left: 0; border-top: 1px solid #ffffff14; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-section *, .product-tour * { animation: none !important; transition: none !important; }
 }

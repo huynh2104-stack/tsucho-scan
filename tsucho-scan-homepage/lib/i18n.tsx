@@ -1,7 +1,6 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { flushSync } from 'react-dom'
 
 /* Nội dung trang chủ, ba thứ tiếng.
  *
@@ -31,7 +30,7 @@ const DICT = {
       how: '進め方',
       screen: '作業画面',
       output: '出力ファイル',
-      limits: '精度',
+      limits: '精度と費用',
       pricing: '料金',
       faq: 'よくある質問',
       login: 'ログイン',
@@ -176,12 +175,13 @@ const DICT = {
       ],
     },
     limits: {
-      title: '精度について、先にお伝えします',
+      title: '精度と費用について、先にお伝えします',
       lead:
         '100%とは言いません。実際に測った数字はこうです。先に知っておけば道具として使えますが、隠されていれば不具合になります。',
       rows: [
         { metric: '金額・残高', value: '93〜100%', note: '残高チェーンで裏づけが取れる部分です' },
         { metric: '振込先のカナ', value: '60〜95%', note: '検算では守れません。目で見る必要があります' },
+        { metric: '1ページの費用', value: '約$0.004〜0.006', note: '実測。無料枠の範囲なら$0です' },
         { metric: '1ページの時間', value: '数秒〜十数秒', note: '通帳の面数だけ並べて処理します' },
       ],
       notDoTitle: 'できないこと',
@@ -251,7 +251,7 @@ const DICT = {
       featAll: 'すべて',
       best: 'ふつうはこれ',
       plans: [
-        { name: 'おためし', price: '¥0', pages: '20面／月', per: '-', keep: '7日', who: 'まず動きを確かめたい方' },
+        { name: 'おためし', price: '¥0', pages: '20面／月', per: '—', keep: '7日', who: 'まず動きを確かめたい方' },
         { name: '実務', price: '¥2,000', pages: '300面／月', per: '約¥6.7', keep: '90日', who: '毎月の記帳がある事業者' },
         { name: '事務所', price: '¥6,000', pages: '1,500面／月', per: '約¥4.0', keep: '1年', who: '顧問先の通帳をまとめて扱う事務所' },
       ],
@@ -262,6 +262,7 @@ const DICT = {
         '台形補正・切り抜き・回転・明るさ',
         '複数ページPDFの自動分割',
         '面ごと／1つの表にまとめる',
+        '日本語・English・Tiếng Việt',
       ],
       ask: '面数が足りないときや、もっと大きな量をお考えのときはご相談ください。',
     },
@@ -316,16 +317,11 @@ const DICT = {
         },
       ],
     },
-    video: {
-      title: '約1分半の動画で、全体の流れを',
-      lead: '取り込み、検算、修正、書き出しまで。ナレーションつきです。音を出せない場所でも、画面の文字だけで分かるように作ってあります。',
-      play: '動画を再生',
-      phone: 'スマートフォンでは、全画面表示にすると文字が読みやすくなります。',
-    },
     cta: {
       title: '手元の通帳で、1ページだけ試してみてください',
       lead: '見本の通帳なら費用はかかりません。動きを見てから、実際の通帳を出すか決められます。',
       button: '読み取りを始める',
+      note: '日本語でも、English でも、Tiếng Việt でも使えます',
     },
     footer: {
       tagline: '通帳の明細を、検算済みの表に。',
@@ -360,7 +356,7 @@ const DICT = {
       demoRead: 'Kết quả đọc',
       demoChain: 'Chuỗi số dư',
       demoSeal: 'Đã kiểm',
-      demoHint: 'Bấm một dòng trong bảng, ảnh sẽ hiện vệt đỏ ở đúng dòng đó. Dòng cuối là chữ VIẾT TAY. Máy vẫn đọc đúng và xếp nó là ghi chú, không phải giao dịch.',
+      demoHint: 'Bấm một dòng trong bảng, ảnh sẽ hiện vệt đỏ ở đúng dòng đó. Dòng cuối là chữ VIẾT TAY — máy vẫn đọc đúng và xếp nó là ghi chú, không phải giao dịch.',
       tagNote: 'ghi chú',
       col: {
         no: 'Dòng',
@@ -379,7 +375,7 @@ const DICT = {
         {
           title: 'Sổ có cột xếp ngược',
           body:
-            'Sổ ゆうちょ đặt cột tiền VÀO bên trái cột tiền RA, ngược với phần lớn sổ khác. Máy đọc tiêu đề cột trước rồi mới gán, nên không bị đảo thu chi vì đoán mò.',
+            'Sổ ゆうちょ đặt cột tiền VÀO bên trái cột tiền RA — ngược với phần lớn sổ khác. Máy đọc tiêu đề cột trước rồi mới gán, nên không bị đảo thu chi vì đoán mò.',
           sample: 'Ngày｜Chi nhánh｜Tiền vào｜Tiền ra｜Số dư',
         },
         {
@@ -429,7 +425,7 @@ const DICT = {
     verify: {
       title: 'Số có đúng hay không, chính cuốn sổ biết.',
       lead:
-        'Mỗi dòng sổ luôn có một quan hệ với dòng trên. Kiểm quan hệ đó trên toàn bộ các dòng gọi là chuỗi số dư. Máy tự chứng minh nó đọc đúng, anh chị không phải bấm máy tính.',
+        'Mỗi dòng sổ luôn có một quan hệ với dòng trên. Kiểm quan hệ đó trên toàn bộ các dòng gọi là chuỗi số dư — máy tự chứng minh nó đọc đúng, anh chị không phải bấm máy tính.',
       formula: 'Số dư trước − tiền ra + tiền vào = số dư dòng này',
       workedLabel: 'Ba dòng liền nhau, lấy từ sổ mẫu',
       tick: 'khớp',
@@ -446,7 +442,7 @@ const DICT = {
         'Ô nào chưa khớp thì bôi vàng. So với ảnh rồi sửa thẳng trong ô, số dư từ dòng đó trở đi tự tính lại.',
       caveatTitle: 'Chuỗi số dư KHÔNG làm được gì',
       caveatBody:
-        'Nó chỉ chứng minh các con số khớp nhau. Một dòng bị bỏ sót hẳn, hay tên đối tác katakana đọc sai: hai lỗi đó nó không phát hiện được, vẫn phải soát bằng mắt.',
+        'Nó chỉ chứng minh các con số khớp nhau. Một dòng bị bỏ sót hẳn, hay tên đối tác katakana đọc sai — hai lỗi đó nó không phát hiện được, vẫn phải soát bằng mắt.',
     },
     how: {
       title: 'Cách làm',
@@ -476,12 +472,13 @@ const DICT = {
       ],
     },
     limits: {
-      title: 'Nói trước về độ chính xác',
+      title: 'Nói trước về độ chính xác và chi phí',
       lead:
         'Tôi không hứa 100%. Đây là số đo thật. Biết trước thì đây là công cụ dùng được; giấu đi rồi bị phát hiện thì thành lỗi.',
       rows: [
         { metric: 'Số tiền và số dư', value: '93–100%', note: 'Phần này có chuỗi số dư bảo chứng' },
         { metric: 'Tên đối tác katakana', value: '60–95%', note: 'Chuỗi số dư không đỡ được, phải soát mắt' },
+        { metric: 'Chi phí mỗi trang', value: '~$0.004–0.006', note: 'Đo thật. Trong hạn mức miễn phí thì $0' },
         { metric: 'Thời gian mỗi trang', value: 'Vài giây', note: 'Nhiều mặt sổ thì xếp hàng chạy lần lượt' },
       ],
       notDoTitle: 'Những việc nó KHÔNG làm',
@@ -527,7 +524,7 @@ const DICT = {
     app: {
       title: 'Màn hình làm việc thật',
       lead:
-        'Đây không phải hình vẽ mô phỏng, mà là ảnh chụp thẳng từ ứng dụng đang chạy. Trái là danh sách mặt sổ, giữa là ảnh, phải là kết quả đọc. Bấm một dòng trong bảng thì ảnh hiện vệt đỏ ở đúng dòng đó, vừa nhìn vừa sửa ngay tại chỗ.',
+        'Đây không phải hình vẽ mô phỏng — là ảnh chụp thẳng từ ứng dụng đang chạy. Trái là danh sách mặt sổ, giữa là ảnh, phải là kết quả đọc. Bấm một dòng trong bảng thì ảnh hiện vệt đỏ ở đúng dòng đó, vừa nhìn vừa sửa ngay tại chỗ.',
       shotAlt: 'Màn hình làm việc của 通帳スキャン: cột trái là các mặt sổ đã quét, giữa là ảnh cuốn sổ, phải là bảng kết quả.',
       marks: [
         { x: 34, y: 39, text: 'Vệt đỏ ở đúng dòng' },
@@ -551,7 +548,7 @@ const DICT = {
       featAll: 'Đầy đủ',
       best: 'Thường là gói này',
       plans: [
-        { name: 'Dùng thử', price: '¥0', pages: '20 mặt/tháng', per: '-', keep: '7 ngày', who: 'Muốn xem nó chạy thế nào trước đã' },
+        { name: 'Dùng thử', price: '¥0', pages: '20 mặt/tháng', per: '—', keep: '7 ngày', who: 'Muốn xem nó chạy thế nào trước đã' },
         { name: 'Làm việc', price: '¥2.000', pages: '300 mặt/tháng', per: '≈ ¥6,7', keep: '90 ngày', who: 'Hộ kinh doanh ghi sổ hằng tháng' },
         { name: 'Văn phòng', price: '¥6.000', pages: '1.500 mặt/tháng', per: '≈ ¥4,0', keep: '1 năm', who: 'Văn phòng kế toán làm sổ cho nhiều khách' },
       ],
@@ -562,6 +559,7 @@ const DICT = {
         'Nắn phối cảnh · cắt · xoay · chỉnh sáng',
         'Tự tách PDF nhiều trang thành từng mặt',
         'Tách theo mặt sổ hoặc gộp một bảng',
+        '日本語 · English · Tiếng Việt',
       ],
       ask: 'Nếu số mặt sổ không đủ dùng, hoặc anh chị cần khối lượng lớn hơn, cứ trao đổi với chúng tôi.',
     },
@@ -612,20 +610,15 @@ const DICT = {
         },
         {
           q: 'Quét lại cùng một trang có mất tiền lần nữa không?',
-          a: 'Không. Ảnh chưa bị sửa gì thì kết quả cũ được dùng lại. Xoay hay cắt là ảnh đổi thật nên phải đọc lại.',
+          a: 'Không, nếu ảnh chưa bị sửa gì — kết quả cũ được dùng lại. Xoay hay cắt là ảnh đổi thật nên phải đọc lại.',
         },
       ],
-    },
-    video: {
-      title: 'Xem toàn bộ quy trình trong khoảng một phút rưỡi',
-      lead: 'Từ đưa sổ vào, kiểm tra số dư, sửa chỗ sai tới xuất Excel. Có giọng đọc và chữ trên màn hình, cả hai bằng tiếng Nhật.',
-      play: 'Phát video',
-      phone: 'Trên điện thoại, xem toàn màn hình để chữ dễ đọc hơn.',
     },
     cta: {
       title: 'Thử đúng một mặt sổ đang có trên bàn',
       lead: 'Sổ mẫu không tốn phí. Xem nó chạy thế nào rồi hãy quyết có đưa sổ thật lên hay không.',
       button: 'Bắt đầu quét',
+      note: 'Dùng được bằng Tiếng Việt, English và 日本語',
     },
     footer: {
       tagline: 'Sổ ngân hàng Nhật, thành bảng đã kiểm chứng.',
@@ -660,7 +653,7 @@ const DICT = {
       demoRead: 'What was read',
       demoChain: 'Balance chain',
       demoSeal: 'Checked',
-      demoHint: 'Pick a row in the table and a red band marks that row on the photo. The last row is handwritten. It is read correctly and filed as a note, not a transaction.',
+      demoHint: 'Pick a row in the table and a red band marks that row on the photo. The last row is handwritten — it is read correctly and filed as a note, not a transaction.',
       tagNote: 'note',
       col: {
         no: 'Row',
@@ -679,7 +672,7 @@ const DICT = {
         {
           title: 'Books with reversed columns',
           body:
-            'A Japan Post passbook puts paid-in to the left of paid-out, the opposite of most books. Column headings are read first, so money in and out never swap places on a guess.',
+            'A Japan Post passbook puts paid-in to the left of paid-out — the opposite of most books. Column headings are read first, so money in and out never swap places on a guess.',
           sample: 'Date｜Branch｜Paid in｜Paid out｜Balance',
         },
         {
@@ -729,7 +722,7 @@ const DICT = {
     verify: {
       title: 'Whether the numbers are right is something the passbook already knows.',
       lead:
-        'Each row holds a fixed relationship to the row above it. Checking that relationship across every row is the balance chain. The machine proves its own reading, so nobody reaches for a calculator.',
+        'Each row holds a fixed relationship to the row above it. Checking that relationship across every row is the balance chain — the machine proves its own reading, so nobody reaches for a calculator.',
       formula: 'Previous balance − paid out + paid in = this row’s balance',
       workedLabel: 'Three consecutive rows from the sample book',
       tick: 'agrees',
@@ -776,12 +769,13 @@ const DICT = {
       ],
     },
     limits: {
-      title: 'Accuracy, stated up front',
+      title: 'Accuracy and cost, stated up front',
       lead:
         'No promise of 100%. These are measured figures. Known in advance they make this a usable tool; discovered later they would be a defect.',
       rows: [
         { metric: 'Amounts and balances', value: '93–100%', note: 'The part the balance chain backs up' },
         { metric: 'Katakana payee names', value: '60–95%', note: 'The chain cannot protect this. Eyes required' },
+        { metric: 'Cost per page', value: '~$0.004–0.006', note: 'Measured. $0 inside the free allowance' },
         { metric: 'Time per page', value: 'A few seconds', note: 'Pages queue and run one after another' },
       ],
       notDoTitle: 'What it does not do',
@@ -827,7 +821,7 @@ const DICT = {
     app: {
       title: 'The actual workspace',
       lead:
-        'Not a mockup. This is a screenshot of the running app. Passbook pages on the left, the photo in the middle, the reading on the right. Pick a row and a red band marks it on the photo, so you compare and correct in place.',
+        'Not a mockup — a screenshot of the running app. Passbook pages on the left, the photo in the middle, the reading on the right. Pick a row and a red band marks it on the photo, so you compare and correct in place.',
       shotAlt: 'The 通帳スキャン workspace: scanned passbook pages on the left, the passbook photo in the middle, the results table on the right.',
       marks: [
         { x: 34, y: 39, text: 'Red band on that row' },
@@ -851,7 +845,7 @@ const DICT = {
       featAll: 'All of them',
       best: 'Usually this one',
       plans: [
-        { name: 'Trial', price: '¥0', pages: '20 pages/mo', per: '-', keep: '7 days', who: 'Anyone who wants to watch it work first' },
+        { name: 'Trial', price: '¥0', pages: '20 pages/mo', per: '—', keep: '7 days', who: 'Anyone who wants to watch it work first' },
         { name: 'Working', price: '¥2,000', pages: '300 pages/mo', per: '≈ ¥6.7', keep: '90 days', who: 'A business doing its own books each month' },
         { name: 'Practice', price: '¥6,000', pages: '1,500 pages/mo', per: '≈ ¥4.0', keep: '1 year', who: 'An accounting office handling many clients' },
       ],
@@ -862,13 +856,14 @@ const DICT = {
         'Keystone, crop, rotate, brightness',
         'Multi-page PDFs split automatically',
         'One sheet per page, or all in one table',
+        '日本語 · English · Tiếng Việt',
       ],
       ask: 'If the page count does not fit, or you need a much larger volume, get in touch.',
     },
     explains: {
       chain: {
         label: 'The balance chain, worked',
-        body: 'Take the previous balance, subtract what went out, add what came in, and you get this row. One misread digit breaks it, so when every row agrees, the numbers can be trusted.',
+        body: 'Take the previous balance, subtract what went out, add what came in, and you get this row. One misread digit breaks it — so when every row agrees, the numbers can be trusted.',
       },
       kana: {
         label: 'What large kana means',
@@ -880,7 +875,7 @@ const DICT = {
       },
       katakana: {
         label: 'Why katakana is harder',
-        body: 'The balance chain cannot back up a name. An amount is checked by the arithmetic around it; a misread company name leaves the arithmetic intact, so the machine never notices. Those cells are not marked yellow either: they need your eyes.',
+        body: 'The balance chain cannot back up a name. An amount is checked by the arithmetic around it; a misread company name leaves the arithmetic intact, so the machine never notices. Those cells are not marked yellow either — they need your eyes.',
       },
       level: {
         label: 'The three levels',
@@ -912,20 +907,15 @@ const DICT = {
         },
         {
           q: 'Does re-reading the same page cost again?',
-          a: 'Not if the image is untouched: the earlier result is reused. Rotating or cropping genuinely changes the image, so it is read again.',
+          a: 'Not if the image is untouched — the earlier result is reused. Rotating or cropping genuinely changes the image, so it is read again.',
         },
       ],
-    },
-    video: {
-      title: 'The whole workflow in about 90 seconds',
-      lead: 'Import, balance check, fixes and export. Narration and on-screen text are in Japanese.',
-      play: 'Play video',
-      phone: 'On a phone, watch it full screen so the text is easier to read.',
     },
     cta: {
       title: 'Try one page from the passbook on your desk',
       lead: 'The sample costs nothing. Watch it work, then decide whether to upload a real book.',
       button: 'Start scanning',
+      note: 'Available in English, 日本語 and Tiếng Việt',
     },
     footer: {
       tagline: 'Japanese passbooks, as a checked spreadsheet.',
@@ -962,22 +952,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  /* Đổi ngôn ngữ qua View Transitions API: trang cũ mờ đi, trang mới hiện
-     lên và nhích 6px (CSS trong globals.css). Không morph từng chữ — chữ
-     Nhật và chữ Việt không có gì để "biến hình" sang nhau.
-     `flushSync` bắt React vẽ xong ngay trong lượt chuyển, nếu không trình
-     duyệt chụp ảnh "sau" khi DOM chưa đổi. Trình duyệt không hỗ trợ, hoặc
-     người dùng bật giảm chuyển động: đổi thẳng, không hiệu ứng. */
   const setLang = useCallback((l: Lang) => {
-    const doi = () => setLangState(l)
-    const coVT = typeof document !== 'undefined' && 'startViewTransition' in document
-    const it = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (coVT && !it) {
-      ;(document as Document & { startViewTransition: (cb: () => void) => unknown })
-        .startViewTransition(() => flushSync(doi))
-    } else {
-      doi()
-    }
+    setLangState(l)
     document.documentElement.lang = HTML_LANG[l]
     try {
       localStorage.setItem(KEY, l)

@@ -16,5 +16,9 @@ node_modules
 # TypeScript build cache
 *.tsbuildinfo
 
-.vercel
-.env*
+# Generated local QA evidence; keep scripts for repeatable checks
+tools/qa/*.png
+tools/qa/*.json
+tools/qa/*.csv
+tools/qa/*.log
+tools/qa/axe.min.js

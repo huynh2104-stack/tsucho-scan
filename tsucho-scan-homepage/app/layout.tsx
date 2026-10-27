@@ -28,6 +28,7 @@ const newsreader = Newsreader({
   weight: ['400', '500', '600'],
   style: ['normal', 'italic'],
   variable: '--font-newsreader',
+  preload: false,
   display: 'swap',
 })
 
@@ -35,6 +36,7 @@ const shippori = Shippori_Mincho({
   subsets: ['latin'],
   weight: ['400', '600', '800'],
   variable: '--font-shippori',
+  preload: false,
   display: 'swap',
 })
 
@@ -49,6 +51,7 @@ const zenKaku = Zen_Kaku_Gothic_New({
   subsets: ['latin'],
   weight: ['400', '500', '700'],
   variable: '--font-zenkaku',
+  preload: false,
   display: 'swap',
 })
 
@@ -59,6 +62,7 @@ const kleeOne = Klee_One({
   subsets: ['latin'],
   weight: ['400', '600'],
   variable: '--font-klee',
+  preload: false,
   display: 'swap',
 })
 
@@ -66,6 +70,7 @@ const plexMono = IBM_Plex_Mono({
   subsets: ['latin', 'vietnamese'],
   weight: ['400', '500', '600'],
   variable: '--font-plexmono',
+  preload: false,
   display: 'swap',
 })
 
@@ -73,9 +78,9 @@ const plexMono = IBM_Plex_Mono({
  * "tự động仕訳・分類" và "月次レポート" — hai thứ ứng dụng không có. */
 export const metadata: Metadata = {
   metadataBase: new URL('https://tsucho-scan.vercel.app'),
-  title: '通帳スキャン｜通帳の明細を、検算済みのExcelへ',
+  title: '通帳スキャン | AIで読み取り、原本で確かめる。',
   description:
-    '日本の銀行通帳（ゆうちょ・普通預金など）の画像やPDFを読み取り、Excel／CSVに書き出します。残高チェーンで全行を検算し、機械が迷った箇所だけ黄色で示すので、人が直すのは数行だけです。',
+    '通帳の写真・PDFをAIが読み取り、日付・摘要・入出金・残高をデータ化。原本との照合、残高の検算、Excel・CSVへの出力まで、ひとつの画面で進められます。',
   keywords: [
     '通帳スキャン',
     '通帳 OCR',
@@ -85,9 +90,9 @@ export const metadata: Metadata = {
     '残高チェーン',
   ],
   openGraph: {
-    title: '通帳スキャン｜通帳の明細を、検算済みのExcelへ',
+    title: '通帳スキャン | AIで読み取り、原本で確かめる。',
     description:
-      '通帳の画像・PDFを読み取り、残高チェーンで全行を検算してExcel／CSVへ。迷った箇所は黄色で示します。',
+      '通帳の画像・PDFを読み取り、原本と照合して確認・修正。残高チェックからExcel・CSVの書き出しまで、ひとつの画面で進められます。',
     type: 'website',
     locale: 'ja_JP',
   },
@@ -102,13 +107,17 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#203b50',
+  themeColor: '#f7f9ff',
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html
       lang="ja"
@@ -120,7 +129,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             những khối chờ hiện sẽ nằm ẩn mãi mãi. Đoạn này ép chúng hiện.
             Phải là `!important` vì kiểu nội tuyến thắng mọi bảng kiểu. */}
         <noscript>
-          <style>{`[data-motion]{opacity:1!important;transform:none!important}[data-faq-panel]{grid-template-rows:1fr!important}`}</style>
+          <style>{`[data-motion]{opacity:1!important;transform:none!important}`}</style>
         </noscript>
         <MotionRoot>
           <LanguageProvider>{children}</LanguageProvider>
