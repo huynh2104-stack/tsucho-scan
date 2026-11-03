@@ -22,6 +22,12 @@ PROMPT_PATH = Path(__file__).parent / "prompts" / "extract_prompt.txt"
 CACHE_DIR = Path(__file__).parent / ".cache"
 # Tăng số này mỗi khi đổi tham số gọi API (schema, độ phân giải...) để cache cũ hết hạn
 _CACHE_VERSION = "10"
+# Ảnh sổ MẪU đi kèm app + câu trả lời mô hình đã đọc sẵn cho từng ảnh (xem samples/make_seeds.py).
+# Quét đúng ảnh mẫu nguyên vẹn thì dùng câu trả lời này: $0, không tốn lượt, chạy cả khi hết hạn mức.
+SAMPLE_DIR = Path(__file__).parent / "samples"
+# Dừng một chút mỗi trang mẫu để người xem kịp thấy hiệu ứng "đang quét" (đọc sẵn thì xong tức thì)
+SAMPLE_DELAY_S = float(os.environ.get("TSUCHO_SAMPLE_DELAY", "1.5"))
+_sample_index: dict[str, dict] | None = None
 
 # Giới hạn dung lượng (API: ảnh ~5MB, PDF ~32MB)
 MAX_IMAGE_MB = 5
@@ -563,10 +569,42 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True,
     }
 
 
+def _sample_seeds() -> dict[str, dict]:
+    """sha256 của ảnh mẫu → câu trả lời đọc sẵn. Đọc thư mục samples/ một lần."""
+    global _sample_index
+    if _sample_index is None:
+        index: dict[str, dict] = {}
+        for f in sorted(SAMPLE_DIR.glob("*.json")):
+            try:
+                seed = json.loads(f.read_text(encoding="utf-8"))
+                index[seed["sha256"]] = seed["result"]
+            except (OSError, ValueError, KeyError, TypeError):
+                continue                    # file mẫu hỏng: coi như không có, quét thật
+        _sample_index = index
+    return _sample_index
+
+
+def is_sample_file(path) -> bool:
+    """File này có phải ảnh mẫu NGUYÊN VẸN không (quét nó không gọi mô hình)."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest() in _sample_seeds()
+    except OSError:
+        return False
+
+
 def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
-                    model: str, prompt: str, caller, on_progress=None) -> dict:
+                    model: str, prompt: str, caller, on_progress=None,
+                    sample: bool = True) -> dict:
     """Trích xuất 1 đơn vị = 1 ảnh hoặc 1 trang PDF (có cache riêng theo nội dung)."""
     label, media_type, data = unit
+    seed = _sample_seeds().get(hashlib.sha256(data).hexdigest()) if sample and not rotate else None
+    if seed is not None:
+        if SAMPLE_DELAY_S > 0:
+            time.sleep(SAMPLE_DELAY_S)
+        result = json.loads(json.dumps(seed))          # bản sao: bước sau sửa tại chỗ
+        result["usage"] = {"input_tokens": 0, "output_tokens": 0}
+        result["cached"] = True
+        return result
     key = hashlib.sha256(
         data
         + f"|v{_CACHE_VERSION}|{rotate}|{model}|".encode()

@@ -166,6 +166,26 @@ _SAMPLES = [
 ]
 
 
+# Ảnh chụp SỔ THẬT do chủ sổ đồng ý cho dùng làm mẫu (thư mục samples/ ở gốc repo). Khác sổ giả lập ở
+# trên: thêm vào như một lần tải ảnh bình thường nhưng CHƯA quét — người xem tự bấm Quét để thấy app đọc
+# sổ thật thế nào. Quét ảnh mẫu NGUYÊN VẸN không gọi mô hình (xem `extract._sample_seeds`) nên $0 và không
+# tính vào hạn mức của tài khoản dùng thử. Tên hiển thị = tên file (bỏ đuôi).
+_BOOKS = [("福岡銀行通帳.jpg", "fukuoka.jpg"), ("ゆうちょ銀行通帳.jpg", "yucho.jpg")]
+
+
+def add_books(ws_id: str) -> list[str]:
+    """Thêm các ảnh sổ mẫu thật (chưa quét). Không tự xoay/cắt: giữ đúng bytes gốc để quét khớp bản đọc sẵn."""
+    from extract import SAMPLE_DIR
+
+    added: list[str] = []
+    for shown, file in _BOOKS:
+        ws = workspace.load(ws_id)
+        # add_upload xử lý trên một bản workspace nạp LẠI rồi tự lưu ⇒ mỗi ảnh phải nạp mới, không giữ bản cũ
+        made = workspace.add_upload(ws, shown, (SAMPLE_DIR / file).read_bytes(), auto=False)
+        added += [s.id for s in made]
+    return added
+
+
 def add_to(ws: workspace.Workspace) -> list[str]:
     """Thêm các mặt sổ mẫu + kết quả dựng sẵn. Không gọi model, không tốn phí."""
     added: list[str] = []

@@ -44,6 +44,13 @@ _SCRYPT = dict(n=2**14, r=8, p=1)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# ĐĂNG NHẬP MỞ — chỉ dành cho giai đoạn đang phát triển / cho người xem thử. Bật thì trang đăng nhập nhận
+# mọi tên (không cần là email thật) và mọi mật khẩu: tên chưa có thì tự tạo tài khoản rồi vào luôn, khỏi
+# bước đăng ký. Tên đã có thì vẫn phải đúng mật khẩu (dữ liệu mỗi người vẫn tách riêng).
+# Khi có khách dùng thật: đặt TSUCHO_OPEN_LOGIN=0 để về lại đăng ký/đăng nhập chặt như cũ.
+OPEN_LOGIN = os.getenv("TSUCHO_OPEN_LOGIN", "1") != "0"
+OPEN_ID_MAX = 100
+
 
 class AuthError(ValueError):
     """Lỗi tài khoản KÈM MÃ để giao diện tự dịch.
@@ -351,6 +358,30 @@ def create_user(email: str, password: str) -> User:
             )
     except sqlite3.IntegrityError as e:
         raise AuthError("email_taken", "Email này đã có tài khoản") from e
+    return user
+
+
+def create_open_user(login_id: str, password: str) -> User:
+    """Tạo tài khoản ở chế độ đăng nhập mở: tên tuỳ ý, mật khẩu ít nhất 1 ký tự.
+
+    Luôn role 'user' (không như `create_user` phong người đầu tiên làm admin): ai cũng tạo được tài khoản
+    kiểu này, không thể để người lạ thành admin chỉ vì máy chủ còn trống.
+    """
+    login_id = normalize_email(login_id)
+    if not login_id or len(login_id) > OPEN_ID_MAX:
+        raise AuthError("bad_id", "Tên đăng nhập không hợp lệ", max=OPEN_ID_MAX)
+    if not password:
+        raise AuthError("weak_password", "Hãy nhập mật khẩu", min=1)
+    user = User(id=uuid.uuid4().hex[:12], email=login_id, role="user", created_at=time.time())
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash, role, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (user.id, user.email, hash_password(password), user.role, user.created_at),
+            )
+    except sqlite3.IntegrityError as e:
+        raise AuthError("email_taken", "Tên này đã có tài khoản") from e
     return user
 
 

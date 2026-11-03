@@ -45,9 +45,11 @@ export default function LoginPage() {
   // sang tiếng Nhật vẫn thấy câu tiếng Việt đứng nguyên đó.
   const [err, setErr] = useState<unknown>(null);
 
-  const [demo, setDemo] = useState<{ accounts: DemoAccount[]; scan_limit: number } | null>(
-    null,
-  );
+  const [demo, setDemo] = useState<{
+    accounts: DemoAccount[];
+    scan_limit: number;
+    open_login?: boolean;
+  } | null>(null);
   const [dangVao, setDangVao] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,15 +90,19 @@ export default function LoginPage() {
         return t.authLocked(Math.max(1, Math.ceil(so("seconds", 0) / 60)));
       if (e.code === "email_taken") return t.authEmailTaken;
       if (e.code === "bad_email") return t.authBadEmail;
+      if (e.code === "bad_id") return t.authOpenBadId(so("max", 100));
       if (e.code === "weak_password") return t.authWeakPassword(so("min", 8));
     }
     // Ở TRANG NÀY 401 chỉ có một nghĩa: sai email hoặc sai mật khẩu (server cố
     // ý không nói rõ cái nào, để người ngoài không dò ra email nào có thật).
-    if (e instanceof Unauthorized) return t.authBadLogin;
+    // Đăng nhập mở thì tên lạ đã được tự tạo tài khoản, nên 401 chắc chắn là: tên đã có người, sai mật khẩu.
+    if (e instanceof Unauthorized) return open ? t.authOpenBadLogin : t.authBadLogin;
     return e instanceof Error ? e.message : String(e);
   }
 
   const coDemo = mode === "in" && !!demo && demo.accounts.length > 0;
+  // Bản đang phát triển: nhập tên/mật khẩu tuỳ ý, tên mới tự tạo tài khoản ⇒ không cần ô đăng ký riêng
+  const open = mode === "in" && !!demo?.open_login;
 
   return (
     <div className="flex flex-1 items-start justify-center overflow-auto px-4 py-8 sm:px-6 sm:py-12">
@@ -107,6 +113,26 @@ export default function LoginPage() {
             : "max-w-[400px]"
         }`}
       >
+        {/* ── Khung «bản đang phát triển»: nói rõ không cần email thật / mật khẩu chuẩn. Trải hết bề ngang. ── */}
+        {open && (
+          <div
+            role="note"
+            data-testid="dev-notice"
+            className={`rounded-2xl border border-accent/50 bg-accentpale/50 px-5 py-4 ${coDemo ? "lg:col-span-2" : ""}`}
+          >
+            <p className="m-0 flex items-center gap-2 text-[length:calc(15px*var(--fs))] font-bold text-ink">
+              <span className="rounded-md bg-accent px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-bold tracking-wide text-accentink">
+                β
+              </span>
+              {t.devHead}
+            </p>
+            <p className="m-0 mt-2 max-w-[78ch] text-[length:calc(13.5px*var(--fs))] leading-relaxed text-ink">
+              {t.devBody}
+            </p>
+            <p className="m-0 mt-1.5 text-[length:calc(12px*var(--fs))] leading-relaxed text-ink2">{t.devNote}</p>
+          </div>
+        )}
+
         {/* ── Cột trái: lối vào nhanh. Không lặp lại logo — thanh trên đã có. ── */}
         {coDemo && (
           <div className="min-w-0">
@@ -174,13 +200,15 @@ export default function LoginPage() {
           </p>
 
           <label className="mt-5 block text-[length:calc(13px*var(--fs))] font-semibold text-ink2" htmlFor="email">
-            {t.authEmail}
+            {open ? t.authOpenId : t.authEmail}
           </label>
           <input
             id="email"
-            type="email"
+            type={open ? "text" : "email"}
             required
-            autoComplete="email"
+            maxLength={open ? 100 : undefined}
+            autoCapitalize="none"
+            autoComplete={open ? "username" : "email"}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[length:calc(15px*var(--fs))] text-ink outline-none focus:border-accent"
@@ -202,13 +230,14 @@ export default function LoginPage() {
             id="password"
             type={hienMk ? "text" : "password"}
             required
-            minLength={8}
+            minLength={open ? undefined : 8}
             autoComplete={mode === "up" ? "new-password" : "current-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="mt-1.5 w-full rounded-lg border border-rule bg-card2 px-3 py-2.5 text-[length:calc(15px*var(--fs))] text-ink outline-none focus:border-accent"
           />
           {mode === "up" && <p className="mt-1.5 text-[length:calc(12px*var(--fs))] text-ink2">{t.authPasswordHint}</p>}
+          {open && <p className="mt-1.5 text-[length:calc(12px*var(--fs))] text-ink2">{t.authOpenPwHint}</p>}
 
           {err !== null && (
             <p
@@ -228,16 +257,19 @@ export default function LoginPage() {
             {busy ? t.authWorking : mode === "up" ? t.signUp : t.signIn}
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "up" ? "in" : "up");
-              setErr(null);
-            }}
-            className="mt-4 w-full text-[length:calc(13px*var(--fs))] text-accent underline underline-offset-2"
-          >
-            {mode === "up" ? t.authToIn : t.authToUp}
-          </button>
+          {/* Đăng nhập mở thì tên mới tự tạo tài khoản — nút «đăng ký» chỉ thêm một lựa chọn gây bối rối */}
+          {!open && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === "up" ? "in" : "up");
+                setErr(null);
+              }}
+              className="mt-4 w-full text-[length:calc(13px*var(--fs))] text-accent underline underline-offset-2"
+            >
+              {mode === "up" ? t.authToIn : t.authToUp}
+            </button>
+          )}
         </form>
       </div>
     </div>

@@ -52,7 +52,7 @@ export const DICT = {
     redoEditLabel: "Làm lại",
     dragHint: "Kéo để đổi thứ tự",
     trySample: "Thử với sổ mẫu",
-    trySampleHint: "Dữ liệu giả lập — chạy hết luồng, không tốn lượt gọi API",
+    trySampleHint: "2 ảnh chụp sổ thật (福岡銀行・ゆうちょ銀行). Thêm xong bấm «Quét» để xem app đọc sổ — miễn phí, không tính lượt",
     undoEdit: "Hoàn tác",
     redoEdit: "Làm lại",
     nextBad: "Dòng cần soát sau",
@@ -444,6 +444,16 @@ export const DICT = {
     authBadEmail: "Email chưa đúng định dạng.",
     authWeakPassword: (n: number) => `Mật khẩu phải từ ${n} ký tự trở lên.`,
     authBackHome: "Trang giới thiệu",
+    // ── Đăng nhập mở của bản đang phát triển (máy chủ bật TSUCHO_OPEN_LOGIN) ──
+    devHead: "Bản thử nghiệm đang phát triển",
+    devBody:
+      "Không cần email thật hay mật khẩu phức tạp. Gõ một tên đăng nhập tuỳ ý (vd: tanaka) và mật khẩu bao nhiêu ký tự cũng được (vd: 1234) rồi bấm «Đăng nhập» là dùng được ngay. Tên mới sẽ tự được tạo tài khoản; lần sau nhập lại đúng tên và mật khẩu đó để làm tiếp.",
+    devNote: "Giao diện và tính năng có thể thay đổi, dữ liệu có thể bị xoá mà không báo trước.",
+    authOpenId: "Tên đăng nhập (không cần là email)",
+    authOpenPwHint: "Bao nhiêu ký tự cũng được",
+    authOpenBadLogin:
+      "Tên này đã có người dùng và mật khẩu không khớp. Hãy kiểm tra lại mật khẩu hoặc chọn tên khác.",
+    authOpenBadId: (n: number) => `Tên đăng nhập dài từ 1 đến ${n} ký tự.`,
     scanDemoQuota: (n: number) =>
       `Tài khoản dùng thử chỉ quét được ${n} mặt sổ mỗi ngày. Hãy tạo tài khoản riêng để quét thoải mái.`,
 
@@ -553,7 +563,7 @@ export const DICT = {
     redoEditLabel: "Redo",
     dragHint: "Drag to reorder",
     trySample: "Try a sample passbook",
-    trySampleHint: "Synthetic data — full workflow, no API calls used",
+    trySampleHint: "2 photos of real passbooks (Fukuoka Bank, Japan Post Bank). Then press Scan to see how it reads them — free, not counted",
     undoEdit: "Undo",
     redoEdit: "Redo",
     nextBad: "Next flagged row",
@@ -928,6 +938,15 @@ export const DICT = {
     authBadEmail: "That email address is not valid.",
     authWeakPassword: (n: number) => `Password must be at least ${n} characters.`,
     authBackHome: "About page",
+    devHead: "Development preview",
+    devBody:
+      "No real email or strong password needed. Type any ID (e.g. tanaka) and a password of any length (e.g. 1234), then press Sign in. A new ID gets an account automatically; use the same ID and password next time to pick up where you left off.",
+    devNote: "Screens and features may change, and data may be deleted without notice.",
+    authOpenId: "ID (doesn't have to be an email)",
+    authOpenPwHint: "Any length is fine",
+    authOpenBadLogin:
+      "That ID is already taken and the password doesn't match. Check the password or try a different ID.",
+    authOpenBadId: (n: number) => `The ID must be 1 to ${n} characters.`,
     scanDemoQuota: (n: number) =>
       `The shared account reads ${n} pages a day. Create your own account to keep going.`,
 
@@ -1037,7 +1056,7 @@ export const DICT = {
     redoEditLabel: "やり直し",
     dragHint: "ドラッグで並べ替え",
     trySample: "サンプル通帳で試す",
-    trySampleHint: "架空データ — API 呼び出しなしで全機能を確認できます",
+    trySampleHint: "実物の通帳写真2枚（福岡銀行・ゆうちょ銀行）を追加します。続けて「スキャン」を押すと読み取りを体験できます（無料・回数に数えません）",
     undoEdit: "元に戻す",
     redoEdit: "やり直し",
     nextBad: "次の要確認行",
@@ -1412,6 +1431,15 @@ export const DICT = {
     authBadEmail: "メールアドレスの形式が正しくありません。",
     authWeakPassword: (n: number) => `パスワードは${n}文字以上にしてください。`,
     authBackHome: "紹介ページ",
+    devHead: "開発中のテスト版です",
+    devBody:
+      "本物のメールアドレスや複雑なパスワードは必要ありません。お好きなID（例: tanaka）と、何文字でもよいパスワード（例: 1234）を入力して「ログイン」を押せば、そのまま使い始められます。初めてのIDは自動で登録され、次回も同じIDとパスワードで続きから使えます。",
+    devNote: "画面や機能は予告なく変わることがあり、データが削除される場合もあります。",
+    authOpenId: "ID（メールアドレスでなくても可）",
+    authOpenPwHint: "何文字でもかまいません",
+    authOpenBadLogin:
+      "このIDはすでに使われていて、パスワードが一致しません。パスワードを確かめるか、別のIDでお試しください。",
+    authOpenBadId: (n: number) => `IDは1〜${n}文字で入力してください。`,
     scanDemoQuota: (n: number) =>
       `見学用アカウントは1日${n}面までです。続けるにはご自分のアカウントを作成してください。`,
 

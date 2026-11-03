@@ -11,9 +11,9 @@ import { TourProvider } from "@/lib/tour";
 import TopBar from "@/components/TopBar";
 
 export const metadata: Metadata = {
-  title: "通帳スキャン — Sổ ngân hàng Nhật sang Excel",
+  title: "通帳スキャン — 通帳の写真・PDFをExcelに",
   description:
-    "Đọc ảnh/PDF sổ ngân hàng Nhật (通帳) thành Excel, có engine kiểm tra chuỗi số dư và màn hình đối chiếu ảnh ↔ bảng.",
+    "通帳の写真・PDFを読み取り、残高の連続チェックで確かめながらExcelに変換します。画像と表を並べて確認できます。",
 };
 
 /* Chạy đồng bộ trước khi trình duyệt vẽ khung hình đầu tiên: nếu đợi React
@@ -41,7 +41,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi" className="h-full antialiased" suppressHydrationWarning>
+    <html lang="ja" className="h-full antialiased" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

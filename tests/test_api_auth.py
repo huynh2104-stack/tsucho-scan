@@ -42,6 +42,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, "WS_DIR", tmp_path / "ws")
     monkeypatch.setattr(workspace, "_cache", {})
     monkeypatch.setattr(auth, "DB_PATH", tmp_path / "app.db")
+    # Các test ở đây kiểm đăng nhập CHẶT (sai email = 401, bị khoá...). Đăng nhập mở: tests/test_open_login.py
+    monkeypatch.setattr(auth, "OPEN_LOGIN", False)
     auth.init_db()
     with TestClient(main.app) as c:
         yield c

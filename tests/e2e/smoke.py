@@ -231,8 +231,11 @@ def make_rotated_pdf(path: Path) -> list[int]:
 # ── các bước ──────────────────────────────────────────────────────────
 
 def step_register(pg, base: str, ctx: dict) -> str:
+    """Đăng nhập mở (bản đang phát triển, mặc định bật): có khung báo «đang phát triển», không có nút đăng ký riêng —
+    gõ tên mới là tự tạo tài khoản rồi vào luôn."""
     pg.goto(f"{base}/login/")
-    pg.get_by_role("button", name=VI["toSignUp"]).click()
+    pg.locator("[data-testid=dev-notice]").wait_for(timeout=10000)
+    assert pg.get_by_role("button", name=VI["toSignUp"]).count() == 0, "đăng nhập mở mà vẫn hiện nút đăng ký"
     pg.fill("#email", EMAIL)
     pg.fill("#password", PASSWORD)
     pg.click("button[type=submit]")
@@ -254,7 +257,13 @@ def step_skip_tour(pg, base: str, ctx: dict) -> str:
 
 
 def step_sample(pg, base: str, ctx: dict) -> str:
-    pg.locator("button", has_text=VI["trySample"]).click()
+    # Nút「Thử với sổ mẫu」nay thêm ẢNH SỔ THẬT chưa quét (bước 28). Các bước sau cần sổ GIẢ LẬP có kết quả dựng sẵn
+    # (biết trước từng dòng) nên thêm thẳng qua API rồi mở mặt ① như người dùng bấm.
+    ws_id = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+    assert pg.request.post(f"{base}/api/ws/{ws_id}/sample").ok
+    pg.reload()
+    pg.locator('[data-tour="rail"] li', has_text=SAMPLE_SHEET_NAME).first.wait_for(timeout=15000)
+    pg.get_by_text(SAMPLE_SHEET_NAME, exact=True).first.click()
     pg.locator("tr[data-row]").first.wait_for(timeout=15000)
     n = pg.locator("tr[data-row]").count()
     assert n >= 10, f"bảng chỉ có {n} dòng (sổ mẫu mặt 1 có 12)"
@@ -438,10 +447,10 @@ def step_manual_input(pg, base: str, ctx: dict) -> str:
 
 
 def step_language_from_browser(pg, base: str, ctx: dict) -> str:
-    """Task 0.3: chưa chọn ngôn ngữ thì theo trình duyệt (ja → ja, ngôn ngữ lạ → en) và <html lang> đúng."""
+    """Chưa chọn ngôn ngữ thì LUÔN tiếng Nhật, bất kể trình duyệt (bản demo cho khách Nhật, 03/11/2026) và <html lang> đúng."""
     browser = pg.context.browser
     seen = []
-    for locale, button, lang in (("ja-JP", "ログイン", "ja"), ("fr-FR", "Sign in", "en")):
+    for locale, button, lang in (("ja-JP", "ログイン", "ja"), ("vi-VN", "ログイン", "ja"), ("fr-FR", "ログイン", "ja")):
         c = browser.new_context(locale=locale)               # KHÔNG đặt tsucho.lang như context chính
         try:
             p = c.new_page()
@@ -997,7 +1006,8 @@ def step_cases(pg, base: str, ctx: dict) -> str:
     assert b_id != a_id and j(f"/api/ws/{b_id}")["sheets"] == [], "hồ sơ mới phải rỗng"
     assert pg.locator('[data-tour="rail"] li').count() == 0, "bàn làm việc của hồ sơ mới phải chưa có mặt sổ"
     pg.locator("button", has_text=VI["trySample"]).click()
-    pg.locator("tr[data-row]").first.wait_for(timeout=15000)
+    # Nút mẫu thêm 2 ảnh sổ thật CHƯA quét (bước 28 kiểm phần quét) ⇒ đợi hai thẻ ở cột trái, không đợi bảng
+    wait_until(lambda: pg.locator('[data-tour="rail"] li').count() == 2, "hai mặt sổ mẫu ở cột trái", timeout=30)
     b_sheets = [s["id"] for s in j(f"/api/ws/{b_id}")["sheets"]]
     a_sheets = [s["id"] for s in j(f"/api/ws/{a_id}")["sheets"]]
     assert len(b_sheets) == 2 and not set(b_sheets) & set(a_sheets), "hai hồ sơ không được chung mặt sổ"
@@ -2056,6 +2066,33 @@ def step_smooth_table(pg, base: str, ctx: dict) -> str:
             "mọi mặt sổ dùng content-visibility mà DOM còn đủ · bôi đen 4 dòng × 4 cột xuyên hai mặt sổ chép đúng TSV")
 
 
+def step_real_sample(pg, base: str, ctx: dict) -> str:
+    """Nút「Thử với sổ mẫu」(hồ sơ trống): thêm 2 ảnh chụp sổ thật (samples/) CHƯA quét, tick sẵn cả hai; bấm Quét →
+    dùng kết quả đọc sẵn (không gọi mô hình) chạy qua engine thật: ゆうちょ 24 dòng, 福岡 có dòng cần soát."""
+    home = pg.request.get(f"{base}/api/ws").json()["workspaces"][0]["id"]
+    ws_id = pg.request.post(f"{base}/api/ws", data={"book_name": "E2E sổ mẫu thật"}).json()["id"]
+    try:
+        pg.goto(f"{base}/?ws={ws_id}")
+        pg.locator("button", has_text=VI["trySample"]).click(timeout=15000)
+        rail = pg.locator('[data-tour="rail"] li')
+        wait_until(lambda: rail.count() == 2, "hai ảnh sổ mẫu ở cột trái", timeout=30)
+        names = [rail.nth(i).inner_text() for i in range(2)]
+        assert "福岡銀行通帳" in names[0] and "ゆうちょ銀行通帳" in names[1], names
+        pg.get_by_role("button", name="Quét (2)").click(timeout=10000)          # tick sẵn ⇒ nút đã đếm 2
+
+        def both_done():
+            res = pg.request.get(f"{base}/api/ws/{ws_id}").json().get("results") or {}
+            return res if len(res) == 2 else None
+
+        res = wait_until(both_done, "kết quả quét hai sổ mẫu", timeout=60)
+        sheets = {s["name"]: s["id"] for s in pg.request.get(f"{base}/api/ws/{ws_id}").json()["sheets"]}
+        rows = {n: sum(len(b["rows"]) for b in res[sid]["blocks"]) for n, sid in sheets.items()}
+        assert rows["ゆうちょ銀行通帳"] == 24 and rows["福岡銀行通帳"] >= 24, rows
+        return f"thêm 2 ảnh sổ thật, tick sẵn, Quét (2) → {rows}"
+    finally:
+        drop_temp_ws(pg, base, {"home": home, "ws": ws_id})
+
+
 STEPS = [
     ("1. Đăng ký tài khoản", step_register),
     ("2. Bỏ qua hướng dẫn", step_skip_tour),
@@ -2065,7 +2102,7 @@ STEPS = [
     ("6. F5 vẫn còn kết quả", step_reload),
     ("7. Tải PDF sai chiều → tự xoay đúng", step_upload_rotated_pdf),
     ("8. Gõ ngày/số kiểu lạ → Excel không lỗi", step_manual_input),
-    ("9. Ngôn ngữ theo trình duyệt", step_language_from_browser),
+    ("9. Chưa chọn ngôn ngữ → tiếng Nhật", step_language_from_browser),
     ("10. rid bền + orig sống qua F5", step_orig_survives_reload),
     ("11. Dòng vàng thật + ✓ (một định nghĩa 'cần soát')", step_review_definition),
     ("12. ↺, Ctrl+Enter, xác nhận cả mặt, chèn dòng đúng chỗ", step_review_actions),
@@ -2084,6 +2121,7 @@ STEPS = [
     ("25. Từ điển: quản lý, tự áp, tắt", step_dictionary_modes),
     ("26. Cỡ chữ lớn", step_font_scale),
     ("27. Bảng mượt: chọn dòng không vẽ lại cả bảng, chép TSV xuyên hai mặt sổ", step_smooth_table),
+    ("28. Sổ mẫu thật: thêm → tick sẵn → Quét (không gọi mô hình)", step_real_sample),
 ]
 # Bước 1–3 dựng chỗ đứng cho các bước sau: hỏng thì dừng luôn, chạy tiếp chỉ ra lỗi dây chuyền.
 NEED_ALL = 3

@@ -200,6 +200,14 @@ thì đó là tính năng; giấu đi rồi bị phát hiện thì đó là lỗ
 | Quét báo lỗi hạn mức | Chưa bật trả phí ở Bước 0(a). |
 | Báo「sai quá nhiều lần」dù gõ đúng | Đã gõ sai 5 lần trong 15 phút. Đợi 15 phút là tự mở, không phải sửa gì. Nếu nhiều người cùng bị thì thiếu `TSUCHO_TRUST_PROXY=1` (Bước 2). |
 | Mất hết dữ liệu sau khi cập nhật | Ổ đĩa chưa gắn, hoặc Mount Path không phải `/app/.data`. |
+| Lỗi **502** lúc có lúc không | Hết RAM: tiến trình bị Render giết rồi bật lại (tab **Events** ghi «Out of memory»). Bật OCR cục bộ thì luồng demo lên tới ~795MB, tắt thì ~220MB. Ảnh Docker đã tắt sẵn (`TSUCHO_LOCAL_OCR=0`); chỉ đặt `TSUCHO_LOCAL_OCR=1` khi máy chủ có ≥2GB. |
+
+## Hai biến cho giai đoạn demo (03/11/2026)
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `TSUCHO_OPEN_LOGIN` | `1` (bật) | Đăng nhập mở: gõ tên tuỳ ý + mật khẩu tuỳ ý là vào, tên mới tự tạo tài khoản; trang đăng nhập ghi rõ «開発中のテスト版です». **Khi có khách dùng thật: đặt `0`.** |
+| `TSUCHO_LOCAL_OCR` | `0` trong ảnh Docker | OCR cục bộ (tự xoay ảnh lúc tải lên, khung đỏ chính xác hơn). Cần máy ≥2GB RAM. |
 
 ---
 

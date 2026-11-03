@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from export import export_accounts
+from extract import is_sample_file
 
 from . import (
     auth, autofix, corrections, demo, export_csv, imgjobs, jobs, prefs, results, rowmap, rowanchors, sample, workspace,
@@ -132,11 +133,22 @@ def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
         raise HTTPException(429, {"kind": "locked", "seconds": wait})
 
     found = auth.get_by_email(email)
+    password = str(body.get("password", ""))
+    if not found and auth.OPEN_LOGIN:
+        # Đăng nhập mở (bản đang phát triển): tên chưa có ⇒ tạo luôn tài khoản rồi vào, khỏi bước đăng ký
+        try:
+            user = auth.create_open_user(email, password)
+        except auth.AuthError as e:
+            raise HTTPException(400, {"kind": e.code, **e.info}) from e
+        auth.clear_failures(keys)
+        auth.set_cookie(response, auth.start_session(user))
+        return {**user.to_json(), "created": True}
+
     # Sai email và sai mật khẩu phải trả CÙNG một câu — nếu khác nhau thì người
     # ngoài dò được email nào đã có tài khoản.
     if not found:
         auth.burn_time()          # trả lời chậm y như khi email có thật
-    if not found or not auth.verify_password(str(body.get("password", "")), found[1]):
+    if not found or not auth.verify_password(password, found[1]):
         auth.record_failure(keys)
         raise HTTPException(401, "Email hoặc mật khẩu không đúng")
 
@@ -158,6 +170,8 @@ def demo_accounts() -> dict:
             for t in demo.danh_sach()
         ],
         "scan_limit": demo.han_muc(),
+        # Trang đăng nhập dựa vào đây để hiện khung «bản đang phát triển — nhập tên/mật khẩu tuỳ ý»
+        "open_login": auth.OPEN_LOGIN,
     }
 
 
@@ -179,17 +193,29 @@ def me(user: CurrentUser) -> dict:
 
 # ── Cài đặt theo tài khoản (task 3.1) ─────────────────────────────────
 
+# Tài khoản dùng thử là tài khoản CHUNG: nếu lưu ngôn ngữ/giao diện lên máy chủ thì người trước chọn
+# tiếng Việt + nền tối là người sau (máy khác) cũng bị theo, mất mặc định tiếng Nhật + theo thiết bị.
+# Nên với tài khoản này hai khoá đó chỉ nằm trên từng máy (localStorage), máy chủ không ghi, không trả.
+_PER_DEVICE = ("lang", "theme")
+
+
+def _shared_view(user: auth.User, p: dict) -> dict:
+    return {**p, **{k: None for k in _PER_DEVICE}} if demo.la_demo(user.email) else p
+
+
 @app.get("/api/me/prefs")
 def get_prefs(user: CurrentUser) -> dict:
     """Cài đặt đầy đủ của CHÍNH người đang đăng nhập (khoá chưa đổi lấy mặc định)."""
-    return prefs.get(user.id)
+    return _shared_view(user, prefs.get(user.id))
 
 
 @app.put("/api/me/prefs")
 def put_prefs(user: CurrentUser, body: dict = Body(...)) -> dict:
     """Đổi một vài khoá (các khoá không gửi giữ nguyên). Khoá lạ / sai kiểu → 400."""
+    if demo.la_demo(user.email) and isinstance(body, dict):
+        body = {k: v for k, v in body.items() if k not in _PER_DEVICE}
     try:
-        return prefs.update(user.id, body)
+        return _shared_view(user, prefs.update(user.id, body))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -643,6 +669,20 @@ def add_sample(ws_id: str, user: CurrentUser) -> dict:
         }
 
 
+@app.post("/api/ws/{ws_id}/sample-books")
+def add_sample_books(ws_id: str, user: CurrentUser) -> dict:
+    """Thêm ảnh chụp sổ THẬT làm mẫu (chưa quét). Quét chúng không gọi model — xem `sample.add_books`."""
+    _ws(ws_id, user)
+    with workspace.locked(ws_id):
+        added = sample.add_books(ws_id)
+        ws = _ws(ws_id, user)
+        return {
+            "added": added,
+            **workspace.to_json(ws),
+            "results": results.load_all(ws_id),
+        }
+
+
 # ── Cắt nhanh thông minh (thuật toán, KHÔNG gọi model nên $0) ────────
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/autofix")
@@ -728,11 +768,13 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
         ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
 
         sheets = [_sheet(ws, sid) for sid in ids]
+        paths = [str(s.scan_path(ws.id)) for s in sheets]
 
         # Tài khoản dùng thử là tài khoản CÔNG KHAI — chặn một người quét hết hạn
-        # mức gọi mô hình của cả ngày. Sổ mẫu không đi qua đây nên không bị tính.
+        # mức gọi mô hình của cả ngày. Ảnh sổ mẫu nguyên vẹn không gọi mô hình nên không bị tính.
         con = demo.con_lai(user)
-        if con is not None and len(sheets) > con:
+        real = sum(1 for p in paths if not is_sample_file(p))
+        if con is not None and real > con:
             raise HTTPException(
                 429,
                 {"kind": "demo_quota", "limit": demo.han_muc(), "left": con},
@@ -740,12 +782,10 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
         if any(s.status != "ready" for s in sheets):
             raise HTTPException(409, {"kind": "not_ready"})
 
-        paths = [str(s.scan_path(ws.id)) for s in sheets]
-
         job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
         jobs.start(job, use_cache=not bool(body.get("no_cache")))
-        if con is not None:
-            demo.ghi_nhan(user.id, len(sheets))
+        if con is not None and real:
+            demo.ghi_nhan(user.id, real)
         for s in sheets:
             s.scanned = True
         ws.save()

@@ -18,26 +18,30 @@ import {
   type ReactNode,
 } from "react";
 
-import { DICT, LANGS, LANG_LABEL, detectLang, type Dict, type Lang } from "./dict";
+import { DICT, LANGS, LANG_LABEL, type Dict, type Lang } from "./dict";
 
 // Giữ nguyên đường import cũ (`@/lib/i18n`) cho các component đang dùng.
 export { LANGS, LANG_LABEL };
 export type { Dict, Lang };
 
+/** Ngôn ngữ khi người dùng CHƯA từng chọn: tiếng Nhật, bất kể trình duyệt — người dùng thật là người Nhật,
+ *  và trang dựng sẵn (static export) cũng vẽ bằng ngôn ngữ này nên khung hình đầu không nháy tiếng khác. */
+export const DEFAULT_LANG: Lang = "ja";
+
 const LangCtx = createContext<{ lang: Lang; t: Dict; setLang: (l: Lang) => void }>({
-  lang: "vi",
-  t: DICT.vi,
+  lang: DEFAULT_LANG,
+  // `Dict` là kiểu literal của bản tiếng Việt nên ép thẳng bản tiếng Nhật sang đó phải qua `unknown`
+  t: DICT[DEFAULT_LANG] as unknown as Dict,
   setLang: () => {},
 });
 
 const KEY = "tsucho.lang";
 
 export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>("vi");
+  const [lang, setLangState] = useState<Lang>(DEFAULT_LANG);
 
   // Đọc lựa chọn cũ sau khi hydrate — không đọc lúc render đầu để server và
-  // client cho ra cùng một HTML. Chưa từng chọn thì theo ngôn ngữ của trình duyệt
-  // (người Nhật mở lần đầu phải thấy tiếng Nhật, không phải tiếng Việt).
+  // client cho ra cùng một HTML. Chưa từng chọn thì tiếng Nhật (DEFAULT_LANG).
   useEffect(() => {
     let saved: string | null = null;
     try {
@@ -46,9 +50,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
       /* trình duyệt chặn localStorage: coi như chưa có lựa chọn */
     }
     const chosen: Lang =
-      saved && (LANGS as readonly string[]).includes(saved)
-        ? (saved as Lang)
-        : detectLang(navigator.languages?.length ? navigator.languages : [navigator.language]);
+      saved && (LANGS as readonly string[]).includes(saved) ? (saved as Lang) : DEFAULT_LANG;
     setLangState(chosen);
     // LUÔN đặt lang của <html> lúc nạp, không chỉ khi bấm đổi: trình duyệt chọn phông Hán theo
     // `lang` (Android dễ hiện nét chữ Trung Quốc nếu vẫn là lang="vi" khi đang xem tiếng Nhật).

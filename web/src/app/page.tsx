@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
-  addSample,
+  addSampleBooks,
   addSheetsWithProgress,
   autoprepSheets,
   adjustSheets,
@@ -1384,8 +1384,8 @@ export default function Workbench() {
             <span className="text-[length:calc(11.5px*var(--fs))] leading-snug text-ink2">✨ {t.autoPrepToggle}</span>
           </div>
 
-          {/* Sổ mẫu: chạy hết luồng mà KHÔNG gọi model — cho người khác bấm thử
-              mà không tốn lượt gọi và không cần đưa sổ thật lên. */}
+          {/* Sổ mẫu: hai ảnh chụp sổ thật, CHƯA quét — tick sẵn để người xem chỉ cần bấm Quét và thấy app đọc
+              sổ thế nào. Quét ảnh mẫu không gọi model nên không tốn lượt và không cần đưa sổ của mình lên. */}
           {sheets.length === 0 && (
             <div className="px-3 pb-3">
               <button
@@ -1394,10 +1394,11 @@ export default function Workbench() {
                   void (async () => {
                     setBusy(true);
                     try {
-                      const w = await addSample(ws.id);
+                      const w = await addSampleBooks(ws.id);
                       setWs(w);
                       syncStore(w.results ?? {}, w.added);
                       if (w.added[0]) setActive(w.added[0]);
+                      setTicked(new Set(w.added));
                     } catch (e) {
                       setErr({ text: e instanceof Error ? e.message : String(e) });
                     } finally {

@@ -314,7 +314,8 @@ export const logout = () => jsonPost<{ ok: true }>("/api/auth/logout", {});
  *  rỗng và trang đăng nhập không hiện khối đó. */
 export type DemoAccount = { email: string; password: string; label: string };
 export const fetchDemoAccounts = async () =>
-  asJson<{ accounts: DemoAccount[]; scan_limit: number }>(
+  // open_login: máy chủ đang ở chế độ «đăng nhập mở» của bản phát triển (tên/mật khẩu tuỳ ý, tên mới tự tạo tài khoản)
+  asJson<{ accounts: DemoAccount[]; scan_limit: number; open_login?: boolean }>(
     await fetch(`${API}/api/auth/demo`, CRED),
   );
 
@@ -598,6 +599,10 @@ export const getSheets = async (wsId: string) =>
 /** Thêm sổ MẪU (dữ liệu giả lập) — chạy hết luồng mà không gọi model. */
 export const addSample = (wsId: string) =>
   jsonPost<Workspace & { added: string[] }>(`/api/ws/${wsId}/sample`, {});
+
+/** Ảnh chụp sổ THẬT làm mẫu (chưa quét) — quét chúng không gọi mô hình nên miễn phí. */
+export const addSampleBooks = (wsId: string) =>
+  jsonPost<Workspace & { added: string[] }>(`/api/ws/${wsId}/sample-books`, {});
 
 export const resetSheets = (wsId: string, sheet_ids: string[]) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/reset`, { sheet_ids });
