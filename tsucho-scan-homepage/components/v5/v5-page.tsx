@@ -11,7 +11,7 @@ import { V5_COPY, type V5Copy } from '@/lib/v5-copy'
 import { Story } from './story'
 import { Seal } from './seal'
 import { Rosette } from './rosette'
-import { PauseGlyph, PlayGlyph, ToolDemo } from './tool-demo'
+import { ToolDemo } from './tool-demo'
 import {
   ArrowIcon,
   CloseIcon,
@@ -318,13 +318,16 @@ function ScreenBlock() {
       <h3 className="h2 h2-sm">{c.title[0]}</h3>
       <motion.figure className="sc-fig" initial="off" whileInView="on" viewport={{ once: true, amount: 0.35 }}>
         <div className="sc-shot">
-          <Image
-            src="/shots/app-light.webp"
-            alt={c.alt}
-            width={2200}
-            height={1375}
-            sizes="(max-width: 1400px) 100vw, 1000px"
-          />
+          {/* Bấm vào ảnh mở bản gốc 2200px ở tab mới: trên điện thoại để chụm hai ngón phóng to đọc chữ */}
+          <a className="sc-open" href="/shots/app-light.webp" target="_blank" rel="noopener" aria-label={c.zoom}>
+            <Image
+              src="/shots/app-light.webp"
+              alt={c.alt}
+              width={2200}
+              height={1375}
+              sizes="(max-width: 1600px) 100vw, 1500px"
+            />
+          </a>
           {c.marks.map((m, k) => (
             <motion.span
               key={k}
@@ -339,6 +342,7 @@ function ScreenBlock() {
             </motion.span>
           ))}
         </div>
+        <p className="sc-hint">{c.zoom}</p>
         <ol className="sc-legend">
           {c.marks.map((m, k) => (
             <li key={k}>
@@ -360,12 +364,48 @@ function Film() {
   const video = useRef<HTMLVideoElement>(null)
   const [started, setStarted] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const watch = useRef<number | undefined>(undefined)
+  const tries = useRef(0)
+
+  /* Trên điện thoại, lần bấm phát đầu đôi khi treo ở vòng xoay (mạng di động, tệp 12MB) và chỉ chạy khi người xem tự
+   * dừng rồi phát lại. Làm thay họ: sau vài giây vẫn chưa chạy thì nạp lại và phát lại, tối đa 2 lần. */
+  function stopWatch() {
+    window.clearTimeout(watch.current)
+    watch.current = undefined
+  }
+  function startWatch() {
+    stopWatch()
+    watch.current = window.setTimeout(() => {
+      const v = video.current
+      if (!v || v.paused) return
+      if (v.readyState >= 3 && v.currentTime > 0) return
+      if (tries.current >= 2) {
+        setLoading(false)
+        setFailed(true)
+        return
+      }
+      tries.current += 1
+      v.load()
+      v.play().catch(() => {})
+      startWatch()
+    }, 6000)
+  }
+  useEffect(() => stopWatch, [])
+
   async function play() {
     setFailed(false)
     setStarted(true)
+    setLoading(true)
+    tries.current = 0
+    startWatch()
     try {
       await video.current?.play()
-    } catch {
+    } catch (e) {
+      /* AbortError = chính cơ chế tự thử lại ở trên vừa nạp lại video, không phải lỗi thật */
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      stopWatch()
+      setLoading(false)
       setFailed(true)
     }
   }
@@ -379,16 +419,33 @@ function Film() {
         <div className={`film-stage ${started ? 'is-started' : ''}`}>
           <video
             ref={video}
-            controls={started}
+            controls
             playsInline
-            preload="none"
+            preload="metadata"
             poster="/video/gioi-thieu-poster.jpg"
             aria-label={c.title.join('')}
             onPlay={() => setStarted(true)}
-            onError={() => started && setFailed(true)}
+            onWaiting={() => started && setLoading(true)}
+            onPlaying={() => {
+              stopWatch()
+              setLoading(false)
+            }}
+            onPause={stopWatch}
+            onEnded={() => setLoading(false)}
+            onError={() => {
+              if (!started) return
+              stopWatch()
+              setLoading(false)
+              setFailed(true)
+            }}
           >
             <source src="/video/gioi-thieu.mp4" type="video/mp4" />
           </video>
+          {loading && (
+            <div className="film-spin" role="status">
+              {c.loading}
+            </div>
+          )}
           {!started && (
             <button type="button" className="film-play" onClick={play}>
               <span className="film-play-dot">
@@ -554,17 +611,12 @@ function ReadSheet({ c }: { c: V5Copy['reads'] }) {
 function Formats({ note }: { note: string }) {
   const all = useCopy()
   const f = all.formats
-  const [stop, setStop] = useState(false)
   return (
     <div className="fm">
       <div className="fm-head">
         <p className="fm-label">{f.label}</p>
-        <button type="button" className="fm-toggle" aria-pressed={stop} onClick={() => setStop((v) => !v)}>
-          {stop ? <PlayGlyph /> : <PauseGlyph />}
-          {stop ? all.nav.play : all.nav.pause}
-        </button>
       </div>
-      <div className={`fm-view ${stop ? 'is-stopped' : ''}`}>
+      <div className="fm-view">
         <ul className="fm-track">
           {[...f.items, ...f.items].map((it, k) => (
             <li key={k} className="fm-card" aria-hidden={k >= f.items.length || undefined}>

@@ -44,6 +44,15 @@ export function ToolDemo({ c }: { c: V5Copy }) {
   const inView = useInView(root, { amount: 0.4 })
   const reduce = useReduced()
   const paused = hold || !inView || !auto
+  /* Hoạt cảnh (Motion) chạy bằng JS, không dừng theo `is-paused` như thanh đỏ. Nếu dựng ngay lúc tải trang thì đến khi
+   * người xem cuộn tới, 台形補正 đã diễn xong và đứng im ở khung cuối. Nên chỉ dựng hoạt cảnh khi khối vào màn hình,
+   * và cho diễn lại (cùng thanh đỏ) mỗi lần vào lại. */
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    if (!inView) return
+    setSeen(true)
+    setRun((r) => r + 1)
+  }, [inView])
 
   const show = (i: number) => {
     setK(i)
@@ -98,7 +107,7 @@ export function ToolDemo({ c }: { c: V5Copy }) {
       </div>
       <div className="td-side">
         <Stage id="td-panel" label={items[k].t} tabId={`td-tab-${k}`} text={items[k].b}>
-          {(s) => <Scene key={`${k}-${run}`} tool={k} c={c} s={s} still={reduce} />}
+          {(s) => (seen || reduce ? <Scene key={`${k}-${run}`} tool={k} c={c} s={s} still={reduce} /> : null)}
         </Stage>
         {!reduce && (
           <button type="button" className="td-toggle" aria-pressed={!auto} onClick={toggle}>
