@@ -39,6 +39,10 @@
   --dotj: var(--font-dotgothic), monospace;
   --handf: var(--font-klee), cursive;
   --hd: 64px;
+  /* Bề rộng trang: nội dung rộng tối đa 1480px (trước là 1240px) để màn hình lớn không bỏ trống hai bên */
+  --w-page: 1480px;
+  --w-hd: 1560px;
+  --gut: clamp(24px, 3.4vw, 64px);
 
   background: var(--ji);
   color: var(--sumi);
@@ -184,10 +188,10 @@
   border-bottom: 1px solid rgba(28, 29, 31, 0.08);
 }
 .v5 .hd-in {
-  max-width: 1320px;
+  max-width: var(--w-hd);
   height: 100%;
   margin: 0 auto;
-  padding: 0 32px;
+  padding: 0 var(--gut);
   display: flex;
   align-items: center;
   gap: 32px;
@@ -943,12 +947,12 @@
 /* ---------------- Khung chung các mục ---------------- */
 
 .v5 .wrap {
-  max-width: 1240px;
+  max-width: var(--w-page);
   margin: 0 auto;
-  padding: 0 40px;
+  padding: 0 var(--gut);
 }
 .v5 .wrap-wide {
-  max-width: 1440px;
+  max-width: calc(var(--w-page) + 200px);
 }
 .v5 .sec {
   position: relative;
