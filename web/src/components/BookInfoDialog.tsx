@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import DialogFrame from "@/components/ui/DialogFrame";
 import type { AccountMeta } from "@/lib/api";
 import { META_INPUT_MAX, draftOf, type MetaDraft, type MetaField } from "@/lib/bookinfo";
 import { useT } from "@/lib/i18n";
@@ -45,17 +46,8 @@ export default function BookInfoDialog({
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-      onClick={onCancel}
-      role="presentation"
-    >
+    <DialogFrame labelledBy="bi-title" onClose={onCancel} maxWidth={480} testId="bookinfo-dialog">
       <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bi-title"
-        data-testid="bookinfo-dialog"
-        onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
           onSave(draft, followers > 0 && propagate);
@@ -64,66 +56,61 @@ export default function BookInfoDialog({
           if (e.key === "Escape") onCancel();
           e.stopPropagation();                  // phím gõ trong hộp không được lọt ra phím tắt của bảng (n, p, Ctrl+Z…)
         }}
-        className="w-full max-w-md overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
+        className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="flex flex-col gap-3 px-5 py-4">
-          <div>
-            <h2 id="bi-title" className="text-[length:calc(15px*var(--fs))] font-bold">
-              {t.bookInfoTitle}
-            </h2>
-            <p className="mt-1 text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink2">{t.bookInfoHint}</p>
-          </div>
+        <div className="dlg-head">
+          <h2 id="bi-title" className="text-t16 font-bold">
+            {t.bookInfoTitle}
+          </h2>
+        </div>
+
+        <div className="dlg-body flex flex-col gap-3">
+          <p className="text-t13 leading-[1.7] text-ink2">{t.bookInfoHint}</p>
 
           {fields.map((f, i) => (
-            <label key={f.key} className="flex flex-col gap-1 text-[length:calc(12.5px*var(--fs))] font-medium text-ink2">
-              {f.label}
+            <label key={f.key} className="grid items-center gap-x-4 gap-y-1 sm:grid-cols-[calc(88px*var(--fs))_minmax(0,1fr)]">
+              <span className="text-t13 font-bold text-ink2">{f.label}</span>
               <input
                 ref={i === 0 ? first : undefined}
                 value={draft[f.key]}
                 maxLength={META_INPUT_MAX}
                 onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
                 data-field={f.key}
-                className="rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(14px*var(--fs))] font-normal text-ink"
+                className="field"
               />
             </label>
           ))}
 
-          {followers > 0 ? (
-            <label className="flex items-start gap-2 rounded-lg bg-card2 px-3 py-2 text-[length:calc(12.5px*var(--fs))] text-ink2">
-              <input
-                type="checkbox"
-                checked={propagate}
-                onChange={(e) => setPropagate(e.target.checked)}
-                data-testid="bookinfo-propagate"
-                className="mt-0.5"
-              />
-              <span>
-                <span className="font-medium text-ink">{t.biApply(followers)}</span>
-                <span className="block text-[length:calc(11.5px*var(--fs))] text-ink3">{t.biApplyHint}</span>
-              </span>
-            </label>
-          ) : (
-            <p className="text-[length:calc(11.5px*var(--fs))] text-ink3">{t.biApplyNone}</p>
-          )}
+          <div className="mt-1 border-t border-rule2 pt-3">
+            {followers > 0 ? (
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={propagate}
+                  onChange={(e) => setPropagate(e.target.checked)}
+                  data-testid="bookinfo-propagate"
+                  className="mt-[calc(3px*var(--fs))] size-4 flex-none accent-[var(--accent)]"
+                />
+                <span className="min-w-0">
+                  <span className="block text-t14 text-ink">{t.biApply(followers)}</span>
+                  <span className="block text-t12 leading-[1.6] text-ink3">{t.biApplyHint}</span>
+                </span>
+              </label>
+            ) : (
+              <p className="text-t12 text-ink3">{t.biApplyNone}</p>
+            )}
+          </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-rule bg-card2 px-5 py-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-          >
+        <div className="dlg-foot">
+          <button type="button" onClick={onCancel} className="btn btn-quiet">
             {t.cancel}
           </button>
-          <button
-            type="submit"
-            data-testid="bookinfo-save"
-            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
-          >
+          <button type="submit" data-testid="bookinfo-save" className="btn btn-primary">
             {t.biSave}
           </button>
         </div>
       </form>
-    </div>
+    </DialogFrame>
   );
 }

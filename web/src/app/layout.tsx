@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BIZ_UDPGothic, Be_Vietnam_Pro, Noto_Sans_JP, Shippori_Antique } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { CaseProvider } from "@/lib/case";
@@ -10,8 +11,41 @@ import { ThemeProvider, THEME_KEY } from "@/lib/theme";
 import { TourProvider } from "@/lib/tour";
 import TopBar from "@/components/TopBar";
 
+/* preload: false vì phông Nhật chia hàng trăm lát theo unicode-range: trình duyệt chỉ tải lát có chữ cần dùng. */
+const uiFont = BIZ_UDPGothic({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-ui",
+  display: "swap",
+  preload: false,
+});
+/* Số tiền: Noto Sans JP với số đều bề ngang. BIZ UDGothic đã thử: dấu phẩy chiếm trọn một ô chữ nên 88,699
+   trông như "88, 699". Kế toán đọc số cả ngày nên chỗ này không nhân nhượng. */
+const dataFont = Noto_Sans_JP({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-data",
+  display: "swap",
+  preload: false,
+});
+const viFont = Be_Vietnam_Pro({
+  subsets: ["latin", "vietnamese"],
+  weight: ["400", "700"],
+  variable: "--font-vi",
+  display: "swap",
+  preload: false,
+});
+/* Nét mực loang kiểu chữ cổ: chỉ dùng cho chữ trong con dấu */
+const sealFont = Shippori_Antique({
+  subsets: ["latin"],
+  weight: "400",
+  variable: "--font-seal",
+  display: "swap",
+  preload: false,
+});
+
 export const metadata: Metadata = {
-  title: "通帳スキャン — 通帳の写真・PDFをExcelに",
+  title: "通帳スキャン｜通帳の写真・PDFをExcelに",
   description:
     "通帳の写真・PDFを読み取り、残高の連続チェックで確かめながらExcelに変換します。画像と表を並べて確認できます。",
 };
@@ -41,7 +75,11 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ja" className="h-full antialiased" suppressHydrationWarning>
+    <html
+      lang="ja"
+      className={`h-full antialiased ${uiFont.variable} ${dataFont.variable} ${viFont.variable} ${sealFont.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

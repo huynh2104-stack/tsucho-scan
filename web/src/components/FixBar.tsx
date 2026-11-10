@@ -1,16 +1,14 @@
 "use client";
 
 /**
- * Thanh「vì sao dòng này vàng + sửa một chạm」, nằm ngay dưới thanh công cụ của khung kết quả.
+ * Nội dung「vì sao dòng này vàng + sửa một chạm」: một câu giải thích bằng ngôn ngữ của người dùng (chuỗi tiếng Nhật gốc của
+ * máy nằm trong tooltip của cột 確認メモ) và tối đa 3 nút gợi ý sửa, cho dòng đang chọn nếu dòng đó cần soát.
  *
- * Hiện cho dòng đang chọn nếu dòng đó cần soát: một câu giải thích bằng ngôn ngữ của người dùng
- * (chuỗi tiếng Nhật gốc của máy nằm trong tooltip của cột 確認メモ) và tối đa 3 nút gợi ý sửa.
- *
- * CHIỀU CAO CỐ ĐỊNH, kể cả khi không có gì để hiện: thanh mà lúc có lúc không sẽ đẩy cả bảng
- * lên xuống đúng lúc người dùng đang nhấn chuột (bài học từ lỗi bấm trượt của thanh công cụ).
- * Lúc rảnh nó nhắc các phím tắt — giao diện chưa có chỗ nào ghi chúng.
+ * Chỉ là PHẦN RUỘT: khung nằm ở thanh chân sổ của ReviewPane, CAO CỐ ĐỊNH và luôn có mặt, hiện thứ này thay cho các nút cột
+ * phụ. Thanh mà lúc có lúc không sẽ đẩy cả bảng lên xuống đúng lúc người dùng đang nhấn chuột.
  */
 
+import { Lightbulb, Warning } from "@/components/ui/icons";
 import { useT, type Dict } from "@/lib/i18n";
 import type { Fix } from "@/lib/review";
 
@@ -22,11 +20,13 @@ export function fixLabel(t: Dict, f: Fix): string {
     case "swap":
       return t.fixSwap;
     case "balance":
-      return `残高 → ${yen(f.value)}`;
+      return `${t.colBal} → ${yen(f.value)}`;
     case "amount":
-      return `${f.field === "amount_out" ? "出金" : "入金"} → ${yen(f.value)}`;
+      return `${f.field === "amount_out" ? t.colOut : t.colIn} → ${yen(f.value)}`;
     case "addrow":
       return f.side === "out" ? t.fixAddOut(yen(f.amount)) : t.fixAddIn(yen(f.amount));
+    case "note":
+      return t.fixAsNote;
   }
 }
 
@@ -43,34 +43,28 @@ export default function FixBar({
   const { t } = useT();
 
   return (
-    <div
-      data-fixbar
-      className="flex h-9 flex-none items-center gap-2 overflow-hidden whitespace-nowrap border-b border-rule2 bg-card2 px-3 text-[length:calc(11.5px*var(--fs))]"
-    >
-      {explain.length === 0 ? (
-        <span className="truncate text-ink3">{t.inspectorHint}</span>
-      ) : (
-        <>
-          <span className="min-w-0 flex-1 truncate font-medium text-warnink" title={explain.join(" · ")}>
-            ⚠ {explain.join(" · ")}
-          </span>
-          {fixes.length > 0 && (
-            <>
-              <span className="flex-none text-ink3">{t.fixesLabel}</span>
-              {fixes.map((f) => (
-                <button
-                  key={f.kind}
-                  data-fix={f.kind}
-                  onClick={() => onApply(f)}
-                  title={t.fixesHint}
-                  className="flex-none rounded-md border border-accent/50 bg-accentpale px-2 py-1 text-[length:calc(11.5px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
-                >
-                  {fixLabel(t, f)}
-                </button>
-              ))}
-            </>
-          )}
-        </>
+    <div className="flex min-w-0 flex-1 items-center gap-2 text-t13">
+      <Warning size={15} className="flex-none text-warnink" />
+      <span className="max-w-[64%] flex-none truncate font-bold text-warnink" title={explain.join(" · ")}>
+        {explain.join(" · ")}
+      </span>
+      <span className="min-w-0 flex-1" />
+      {fixes.length > 0 && (
+        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+          <span className="flex-none text-t12 text-ink3 @max-[820px]/ledger:hidden">{t.fixesLabel}</span>
+          {fixes.map((f) => (
+            <button
+              key={f.kind}
+              data-fix={f.kind}
+              onClick={() => onApply(f)}
+              title={t.fixesHint}
+              className="btn btn-quiet btn-sm flex-none"
+            >
+              <Lightbulb size={14} className="text-accent" />
+              {fixLabel(t, f)}
+            </button>
+          ))}
+        </span>
       )}
     </div>
   );

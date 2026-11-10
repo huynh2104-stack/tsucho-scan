@@ -300,3 +300,81 @@ def test_dong_bieu_mau_in_muc_mau_khong_bi_tinh_la_dong():
         ke_dong(y, HONG)
 
     assert_hits(rowmap.bands_for(img, len(rows)), rows, 1000, pitch)
+
+
+# ── Vị trí dòng theo số thứ tự in ở lề sổ (mặt sổ mới ghi một phần) ──
+
+def test_slot_numbers_muon_so_cho_dong_ghi_chu_va_tu_choi_so_lui():
+    from api.rowmap import slot_numbers
+
+    assert slot_numbers([{"row_no": 1}, {"row_no": None}, {"row_no": 2}]) == [1, 1, 2]
+    assert slot_numbers([{"row_no": None}, {"row_no": 3}]) == [3, 3]
+    assert slot_numbers([{"row_no": 5}, {"row_no": 4}]) is None          # số lùi = đọc sai, dùng cách cũ
+    assert slot_numbers([{"balance": 1}, {"balance": 2}]) is None         # không có số
+    assert slot_numbers([{"row_no": True}]) is None                       # bool không phải số dòng
+
+
+def test_bands_for_rows_tra_dung_so_dai_ke_ca_mat_ghi_mot_phan():
+    from PIL import Image
+
+    from api.rowmap import bands_for_rows
+
+    img = Image.new("RGB", (600, 800), "white")
+    rows = [{"row_no": i + 1} for i in range(5)] + [{"row_no": None}]
+    out = bands_for_rows(img, rows)
+    assert len(out["bands"]) == len(rows)
+    assert all(0 <= b["y0"] <= b["y1"] <= 1 for b in out["bands"])
+    assert out["bands"][-1] == out["bands"][-2]                           # dòng ghi chú nằm cùng ô với dòng trước
+
+
+# ── Vệt chữ theo độ dốc từng vùng + rãnh giữa hai cuốn sổ (cho rowanchors) ──
+
+import pytest
+
+def _bars(slope=0.0, width=600, height=800, count=10):
+    """Trang trắng có `count` dòng đen, tâm dòng i ở y = 100 + 60·i tại giữa trang; `slope` = độ dốc (px/px)."""
+    from PIL import ImageDraw
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+    for i in range(count):
+        for x in range(50, width - 50, 4):
+            y = 100 + 60 * i + (x - width / 2) * slope
+            draw.rectangle([x, y - 6, x + 3, y + 6], fill="black")
+    return img
+
+
+def _near(found, wanted, tolerance):
+    return all(any(abs(f - w) <= tolerance for f in found) for w in wanted)
+
+
+def test_bands_report_ink_peaks_for_the_row_matcher():
+    found = rowmap.bands_for(_bars(), 10)
+    assert _near(found["peaks"], [(100 + 60 * i) / 800 for i in range(10)], .008)
+    assert rowmap.bands_for(_bars(), 0)["peaks"] == []
+
+
+def test_peaks_follow_a_tilt_that_changes_down_the_page():
+    wanted = [(100 + 60 * i) / 800 for i in range(10)]
+    tilted = _bars(slope=.2)                            # hai đầu dòng lệch nhau 100px, gần gấp đôi nhịp dòng
+    line = (0., .2 * 600 / 800, -1., 1.)                # độ dốc theo đơn vị tỉ lệ cao / tỉ lệ ngang
+    found = rowmap.peaks_at(tilted, 10, line)
+    assert _near(found, wanted, .008) and len(found) == 10
+    # Nắn sai góc (coi như trang thẳng) thì mực của mỗi dòng trải sang dòng bên cạnh, không còn 10 đỉnh nằm đúng dòng
+    flat = rowmap.peaks_at(tilted, 10, (0., 0., 0., 0.))
+    assert not (_near(flat, wanted, .008) and len(flat) == 10)
+    assert rowmap.peaks_at(tilted, 0, line) == []
+
+
+def test_peaks_can_be_limited_to_one_of_two_books():
+    from PIL import ImageDraw
+    img = Image.new("RGB", (1000, 800), "white")
+    draw = ImageDraw.Draw(img)
+    for i in range(10):
+        draw.rectangle([40, 94 + 60 * i, 440, 106 + 60 * i], fill="black")          # cuốn trái
+        draw.rectangle([560, 124 + 60 * i, 960, 136 + 60 * i], fill="black")        # cuốn phải, lệch nửa nhịp
+    left = rowmap.peaks_at(img, 10, (0., 0., 0., 0.), 0., .5)
+    right = rowmap.peaks_at(img, 10, (0., 0., 0., 0.), .5, 1.)
+    assert _near(left, [(100 + 60 * i) / 800 for i in range(10)], .008) and len(left) == 10
+    assert _near(right, [(130 + 60 * i) / 800 for i in range(10)], .008) and len(right) == 10
+    assert rowmap.gutter_between(img, .3, .7) == pytest.approx(.5, abs=.02)
+    assert rowmap.gutter_between(img, .5, .5) is None

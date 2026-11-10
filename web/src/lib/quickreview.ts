@@ -97,12 +97,18 @@ export function sheetRowIndex(store: ResultStore, ref: RowRef): number {
 
 /**
  * Phần ảnh cần cắt để xem MỘT dòng: dải của dòng đó nới thêm một dòng mỗi phía (lấy dải hàng xóm nếu có, không
- * thì bằng đúng chiều cao dòng), theo bề ngang TỜ GIẤY. Toạ độ 0..1 của ảnh hiện tại. Null nếu dải không dùng được.
+ * thì bằng đúng chiều cao dòng), theo bề ngang TỜ GIẤY và lố sang phải một chút (`STRIP_RIGHT_PAD`): `x1` đo mép dải,
+ * còn số dư in sát mép phải có thể nằm ngoài nó, cắt đúng ở đó là mất chữ số cuối của con số đang soát.
+ * Toạ độ 0..1 của ảnh hiện tại. Null nếu dải không dùng được.
  */
+export const STRIP_RIGHT_PAD = 0.06;
+export const STRIP_LEFT_PAD = 0.03;
+
 export type StripRect = {
   cx0: number; cx1: number; cy0: number; cy1: number;      // vùng cắt
+  ox: number;                                              // tâm TỜ GIẤY: chỗ độ nghiêng được đo, khác tâm vùng cắt
   y0: number; y1: number;                                  // dải của chính dòng (nằm trong vùng cắt)
-  exact: boolean;                                          // true = dải khớp theo nội dung; false = ước lượng
+  exact: boolean;                                          // true = khớp theo nội dung hoặc suy từ các dòng đã khớp; false = ước lượng
   skew: number;                                            // độ nghiêng trang (độ)
 };
 
@@ -115,10 +121,13 @@ export function stripRect(bands: RowBands | null, index: number): StripRect | nu
   const next = bands.bands[index + 1];
   const cy0 = clamp(prev && prev.y1 > prev.y0 ? prev.y0 : band.y0 - h);
   const cy1 = clamp(next && next.y1 > next.y0 ? next.y1 : band.y1 + h);
-  const cx0 = clamp(bands.x0 ?? 0);
-  const cx1 = clamp(bands.x1 ?? 1);
-  if (!(cx1 > cx0) || !(cy1 > cy0)) return null;
-  return { cx0, cx1, cy0, cy1, y0: clamp(band.y0), y1: clamp(band.y1), exact: band.method === "content", skew: bands.skew_deg || 0 };
+  // Khung có bề ngang / độ nghiêng riêng (hai cuốn sổ cạnh nhau, ảnh chụp có phối cảnh) thì theo khung, không theo cả trang
+  const px0 = clamp(band.x0 ?? bands.x0 ?? 0);
+  const px1 = clamp(band.x1 ?? bands.x1 ?? 1);
+  const cx0 = clamp(px0 - (px1 - px0) * STRIP_LEFT_PAD);
+  const cx1 = clamp(px1 + (px1 - px0) * STRIP_RIGHT_PAD);
+  if (!(px1 > px0) || !(cy1 > cy0)) return null;
+  return { cx0, cx1, cy0, cy1, ox: (px0 + px1) / 2, y0: clamp(band.y0), y1: clamp(band.y1), exact: band.method === "content" || band.method === "inferred", skew: band.skew_deg ?? (bands.skew_deg || 0) };
 }
 
 /**

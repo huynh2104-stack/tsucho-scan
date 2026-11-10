@@ -146,8 +146,20 @@ test("sheetRowIndex: thứ tự dòng qua mọi khối của mặt sổ; mặt/k
 test("stripRect: nới một dòng mỗi phía bằng dải hàng xóm; bề ngang theo tờ giấy; giữ nguyên dải của chính dòng", () => {
   const r = stripRect(bandsOf(5), 2)!;
   const r2 = (v: number) => Math.round(v * 1000) / 1000;
-  assert.deepEqual([r.cy0, r.cy1, r.y0, r.y1, r.cx0, r.cx1].map(r2), [0.2, 0.5, 0.3, 0.4, 0.1, 0.9], "dòng 2: hàng xóm 0.2–0.3 và 0.4–0.5");
+  assert.deepEqual([r.cy0, r.cy1, r.y0, r.y1, r.cx0].map(r2), [0.2, 0.5, 0.3, 0.4, 0.076], "dòng 2: hàng xóm 0.2–0.3 và 0.4–0.5; mép trái lố 3% của 0.1–0.9");
   assert.equal(r.exact, false);
+});
+
+test("stripRect: mép phải lố qua tờ giấy 6% để không mất chữ số cuối, và không vượt mép ảnh", () => {
+  const r2 = (v: number) => Math.round(v * 1000) / 1000;
+  assert.equal(r2(stripRect(bandsOf(5, { x0: 0.1, x1: 0.9 }), 2)!.cx1), 0.948, "0.9 + 0.8 × 6%");
+  assert.equal(stripRect(bandsOf(5, { x0: 0.05, x1: 0.99 }), 2)!.cx1, 1, "sát mép ảnh thì dừng ở mép ảnh");
+});
+
+test("stripRect: tâm nghiêng là tâm TỜ GIẤY, không xê dịch theo phần lố bên phải (lệch tâm thì ảnh lệch khỏi dải)", () => {
+  const r = stripRect(bandsOf(5, { x0: 0.1, x1: 0.9 }), 2)!;
+  assert.equal(Math.round(r.ox * 1000) / 1000, 0.5);
+  assert.notEqual(r.ox, (r.cx0 + r.cx1) / 2);
 });
 
 test("stripRect: hàng xóm cao thấp khác nhau thì lấy ĐÚNG mép của hàng xóm (không chỉ nới bằng chiều cao dòng)", () => {
@@ -172,6 +184,22 @@ test("stripRect: nét liền khi dải khớp theo nội dung, mang theo độ n
   assert.equal(stripRect(null, 0), null);
   assert.equal(stripRect(bandsOf(2, { bands: [{ y0: 0.3, y1: 0.3 }, { y0: 0.4, y1: 0.5 }] }), 0), null, "dải rỗng");
   assert.equal(stripRect(bandsOf(2, { x0: 0.6, x1: 0.5 }), 0), null, "bề ngang không hợp lệ");
+});
+
+test("stripRect: dải suy từ các dòng đã khớp cũng là nét liền; dải có bề ngang / độ nghiêng riêng thì theo dải", () => {
+  const b = bandsOf(3, {
+    skew_deg: 1.5, x0: 0, x1: 1,
+    bands: [
+      { y0: 0.1, y1: 0.2, method: "inferred" },
+      { y0: 0.2, y1: 0.3, method: "content", x0: 0.5, x1: 1, skew_deg: -2 },   // cuốn sổ bên phải, dòng dốc ngược cả trang
+      { y0: 0.3, y1: 0.4, method: "estimated", skew_deg: 0 },
+    ],
+  });
+  assert.deepEqual([stripRect(b, 0)!.exact, stripRect(b, 0)!.skew, stripRect(b, 0)!.ox], [true, 1.5, 0.5]);
+  const own = stripRect(b, 1)!;
+  assert.deepEqual([own.exact, own.skew, own.ox], [true, -2, 0.75], "tâm nghiêng là tâm của chính dải");
+  assert.equal(Math.round(own.cx0 * 1000) / 1000, 0.485, "0.5 − 0.5 × 3%: chỉ cắt phần cuốn sổ chứa dòng");
+  assert.deepEqual([stripRect(b, 2)!.exact, stripRect(b, 2)!.skew], [false, 0], "độ nghiêng 0 của dải vẫn thắng độ nghiêng trang");
 });
 
 test("calcOf: số dư trước − rút + gửi = kỳ vọng, chênh = in − kỳ vọng; ghi chú / chưa có mốc → null", () => {
@@ -203,7 +231,7 @@ test("stripSegments: các đoạn phủ kín bề ngang tờ giấy, đoạn k�
 });
 
 test("stripSegments: dải cao 0 hoặc ảnh không rõ kích thước không làm hỏng (không NaN, ít nhất một đoạn)", () => {
-  const rect = { cx0: 0, cx1: 1, cy0: 0, cy1: 1, y0: 0.5, y1: 0.5, exact: false, skew: 0 };
+  const rect = { cx0: 0, cx1: 1, ox: 0.5, cy0: 0, cy1: 1, y0: 0.5, y1: 0.5, exact: false, skew: 0 };
   const segs = stripSegments(rect, 1000, 1000);
   assert.ok(segs.length >= 1 && segs.every((x) => Number.isFinite(x.x0) && Number.isFinite(x.x1)));
   assert.equal(STRIP_COL_PX > 0, true);

@@ -17,8 +17,14 @@ import { useRef, useState } from "react";
 
 import { useT } from "@/lib/i18n";
 import { sheetImage, type PerSheet, type Sheet } from "@/lib/api";
+import { Check, CircleNotch, LinkBreak, Warning, WarningCircle } from "@/components/ui/icons";
 
 export type ScanState = "idle" | "wait" | "scanning" | "done" | "skipped" | "failed";
+
+/** Tâm ảnh thu nhỏ tính từ đầu mục (đệm 6px + nửa ảnh 60px): mắt xích treo đúng ngang đây. */
+const NODE_Y = 36;
+/** Khoảng hở của đường chuỗi quanh biểu tượng đứt, tính từ ranh giới hai mặt sổ. */
+const BREAK_GAP = 9;
 
 export function Tick({
   on,
@@ -39,17 +45,14 @@ export function Tick({
       title={title}
       onClick={onClick}
       style={{ width: size, height: size }}
-      className={`flex flex-none items-center justify-center rounded-[5px] border transition-colors ${
+      /* Ô vẽ nhỏ cho gọn cột, vùng bấm thì đủ 28px (40px trên điện thoại) nhờ lớp đè vô hình */
+      className={`relative flex flex-none items-center justify-center rounded-sm border transition-colors before:absolute before:-inset-1.5 before:content-[''] max-lg:before:-inset-3 ${
         on
           ? "border-accent bg-accent text-accentink"
-          : "border-rule bg-card hover:border-accent"
+          : "border-ink3 bg-card hover:border-accent"
       }`}
     >
-      {on && (
-        <svg width={size - 6} height={size - 6} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M4 12.5 9.5 18 20 6.5" />
-        </svg>
-      )}
+      {on && <Check size={size - 5} weight="bold" />}
     </button>
   );
 }
@@ -109,15 +112,11 @@ export default function SheetRail({
   };
 
   if (sheets.length === 0) {
-    return (
-      <p className="px-4 py-6 text-center text-[length:calc(12.5px*var(--fs))] leading-relaxed text-ink3">
-        {t.railEmpty}
-      </p>
-    );
+    return <p className="ml-3.5 px-1.5 py-2 text-t13 leading-relaxed text-ink3">{t.railEmpty}</p>;
   }
 
   return (
-    <ul className="flex flex-col gap-1.5 px-2 pb-3">
+    <ul className="flex flex-col pb-2">
       {sheets.map((s, i) => {
         const isSel = selected.has(s.id);
         const isActive = active === s.id;
@@ -134,32 +133,85 @@ export default function SheetRail({
         // Trạng thái viết thành CHỮ, không chỉ icon
         const status: { label: string; cls: string } | null =
           proc === "failed"
-            ? { label: t.stImportFailed, cls: "bg-danger/15 text-danger" }
+            ? { label: t.stImportFailed, cls: "tag-shu" }
             : procBusy
-              ? {
-                  label:
-                    proc === "queued" ? t.stQueued : proc === "rendering" ? t.stRendering : t.stAnalyzing,
-                  cls: "bg-accentpale text-accent",
-                }
+              ? { label: proc === "queued" ? t.stQueued : proc === "rendering" ? t.stRendering : t.stAnalyzing, cls: "bg-rule2" }
               : st === "scanning"
-            ? { label: t.stScanning, cls: "bg-accentpale text-accent" }
-            : st === "wait"
-              ? { label: t.stWaiting, cls: "bg-rule2 text-ink3" }
-              : st === "failed"
-                ? { label: t.stFailed, cls: "bg-danger/15 text-danger" }
-                : st === "skipped"
-                  ? { label: t.stSkipped, cls: "bg-warnbg text-warnink" }
-                  : ps
-                    ? ps.need_check > 0
-                      ? { label: t.stNeedCheck(ps.need_check), cls: "bg-warnbg text-warnink" }
-                      : { label: t.stScanned(ps.rows), cls: "bg-okbg text-okink" }
-                    : st === "done"
-                      ? { label: t.stNoRows, cls: "bg-rule2 text-ink3" }
-                      : null;
+                ? { label: t.stScanning, cls: "bg-rule2" }
+                : st === "wait"
+                  ? { label: t.stWaiting, cls: "bg-rule2" }
+                  : st === "failed"
+                    ? { label: t.stFailed, cls: "tag-shu" }
+                    : st === "skipped"
+                      ? { label: t.stSkipped, cls: "tag-warn" }
+                      : ps
+                        ? ps.need_check > 0
+                          ? { label: t.stNeedCheck(ps.need_check), cls: "tag-warn" }
+                          : { label: t.stScanned(ps.rows), cls: "tag-ok" }
+                        : st === "done"
+                          ? { label: t.stNoRows, cls: "bg-rule2" }
+                          : null;
+
+        /* Việc máy/người đã làm với ảnh: chỉ là ghi chú nên viết thành một dòng chữ nhỏ, không thành thêm thẻ.
+           Máy đã tự xoay/cắt thì nói việc máy làm, khỏi lặp số độ. 354° đọc là -6° dễ hiểu hơn nhiều. */
+        const notes = [
+          ...(autoDone && s.auto
+            ? [
+                s.auto.rotate ? t.autoRotated(s.auto.rotate > 180 ? s.auto.rotate - 360 : s.auto.rotate) : "",
+                s.auto.cropped ? t.autoCropped : "",
+              ]
+            : [s.rotation !== 0 ? `${s.rotation > 180 ? s.rotation - 360 : s.rotation}°` : "", s.cropped ? t.cropped : ""]),
+          s.adjusted ? t.adjustedBadge : "",
+        ].filter(Boolean);
+
+        // Chuỗi số dư đi tiếp qua các mặt sổ: chỗ nối hai mặt mà đứt thì đường hở ra, có biểu tượng 朱 đứng giữa
+        const first = i === 0;
+        const last = i === sheets.length - 1;
+        const broken = brokenLinks.has(s.id);
+        const nextBroken = !last && brokenLinks.has(sheets[i + 1].id);
+        const lineTop = first ? NODE_Y : broken ? BREAK_GAP : 0;
+        const open = broken || (ps?.need_check ?? 0) > 0;
 
         return (
           /* data-need: số dòng cần soát theo định nghĩa chung (lib/review.ts) — E2E đối chiếu với bộ đếm */
-          <li key={s.id} data-need={ps ? ps.need_check : undefined}>
+          <li key={s.id} data-need={ps ? ps.need_check : undefined} className="relative pb-1">
+            {sheets.length > 1 && (
+              <span
+                aria-hidden
+                className="absolute left-1.5 w-0.5 bg-[var(--chain-rail)]"
+                style={
+                  last
+                    ? { top: lineTop, height: NODE_Y - lineTop }
+                    : { top: lineTop, bottom: nextBroken ? BREAK_GAP : 0 }
+                }
+              />
+            )}
+            {/* Cùng ngôn ngữ với chuỗi trong sổ: đứt = vòng 朱 rỗng, đã quét và nối được = mắt xích đặc,
+                chưa quét = vòng mảnh trung tính */}
+            <span
+              aria-hidden
+              className={`absolute rounded-full ${
+                open
+                  ? "left-[2px] h-2.5 w-2.5 border-2 border-shu bg-page"
+                  : ps
+                    ? "left-[3px] h-2 w-2 bg-[var(--chain)]"
+                    : "left-[3px] h-2 w-2 border border-ink3 bg-page"
+              }`}
+              style={{ top: NODE_Y - (open ? 5 : 4) }}
+            />
+            {broken && (
+              <button
+                type="button"
+                data-link-chip
+                title={t.linkRailTip}
+                aria-label={t.linkRailTip}
+                onClick={() => onActivate(s.id)}
+                className="absolute -top-[7px] left-0 z-10 flex h-3.5 w-3.5 items-center justify-center bg-page text-shu before:absolute before:-inset-2 before:content-['']"
+              >
+                <LinkBreak size={13} weight="bold" />
+              </button>
+            )}
+
             <div
               draggable={editing !== s.id}
               onDragStart={(e) => {
@@ -190,17 +242,18 @@ export default function SheetRail({
                 setDragging(null);
                 setOver(null);
               }}
-              className={`flex items-start gap-2 rounded-xl border p-2 transition-colors ${
-                dragging === s.id ? "opacity-40" : ""
-              } ${over === s.id && dragging !== s.id ? "border-t-4 border-t-accent" : ""} ${
-                isActive
-                  ? "border-accent bg-accentpale/50"
-                  : isSel
-                    ? "border-accentmid/60 bg-card2"
-                    : "border-rule bg-card hover:border-accentmid/70"
+              /* Mặt đang xem là tờ trắng đặt lên nền tint; các mặt khác nằm phẳng trên nền. Không viền, không thẻ. */
+              className={`relative ml-3.5 rounded-sm p-1.5 transition-colors max-lg:mr-2.5 ${dragging === s.id ? "opacity-40" : ""} ${
+                isActive ? "bg-card shadow-ply" : "hover:bg-card/60"
               }`}
             >
-              <div className="pt-0.5">
+              {/* Vạch chỗ thả: đè lên chứ không đẩy dòng xuống */}
+              {over === s.id && dragging !== s.id && (
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 -top-[3px] h-0.5 bg-accent" />
+              )}
+
+              {/* Ô tick đứng cạnh chứ không nằm TRONG nút xem (nút lồng nút là sai), chỉ đặt đè lên góc ảnh để chữ có đủ chỗ */}
+              <div className="absolute left-[9px] top-[9px] z-10 flex">
                 <Tick
                   on={isSel}
                   title={t.tickToScan}
@@ -225,17 +278,17 @@ export default function SheetRail({
                     onActivate(s.id);
                   }
                 }}
-                className="flex min-w-0 flex-1 cursor-pointer gap-2 text-left"
+                className="flex min-w-0 cursor-pointer gap-2 text-left"
                 title={t.clickToView}
               >
-                <div className="relative h-[52px] w-10 flex-none overflow-hidden rounded-md border border-rule2 bg-card2">
+                <div className="relative h-[60px] w-11 flex-none overflow-hidden rounded-sm bg-card3 shadow-ply">
                   {noImage ? (
                     /* Chưa có ảnh (đang tách trang / nhập hỏng): vẽ ô chờ thay vì ảnh hỏng */
-                    <span className="flex h-full w-full items-center justify-center bg-rule2/60">
+                    <span className="flex h-full w-full items-center justify-center">
                       {proc === "failed" ? (
-                        <span className="text-[length:calc(15px*var(--fs))] font-bold text-danger">!</span>
+                        <WarningCircle size={20} className="text-danger" />
                       ) : (
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-rule border-t-accent" />
+                        <CircleNotch size={18} className="animate-spin text-ink3 motion-reduce:animate-none" />
                       )}
                     </span>
                   ) : (
@@ -252,16 +305,18 @@ export default function SheetRail({
                     />
                   )}
                   {st === "scanning" && (
-                    <>
-                      <span className="pointer-events-none absolute inset-0 bg-accent/20" />
-                      <span className="scanline pointer-events-none absolute inset-x-0 top-0 h-[40%] bg-gradient-to-b from-transparent via-accentmid/70 to-transparent" />
-                    </>
+                    <span
+                      className="scanline pointer-events-none absolute inset-x-0 top-0 h-[78%]"
+                      style={{
+                        background:
+                          "linear-gradient(to bottom, transparent 4%, color-mix(in srgb, var(--accent) 22%, transparent) 12%, var(--accent) 13%, var(--accent) 15%, transparent 15.5%)",
+                      }}
+                    />
                   )}
                 </div>
 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  {/* Tên hiện ĐỦ, xuống dòng chứ không cắt cụt.
-                      Click ĐÚP để sửa — click đơn vẫn là xem mặt sổ. */}
+                  {/* Click ĐÚP để sửa — click đơn vẫn là xem mặt sổ. */}
                   {editing === s.id ? (
                     <input
                       autoFocus
@@ -280,11 +335,11 @@ export default function SheetRail({
                           el.blur();
                         }
                       }}
-                      className="w-full rounded border border-accent bg-card px-1 py-0.5 text-[length:calc(12.5px*var(--fs))] font-semibold focus:outline-none"
+                      className="field min-h-[calc(26px*var(--fs))] px-1 text-t13 font-bold"
                     />
                   ) : (
                     <span
-                      className="break-words text-[length:calc(12.5px*var(--fs))] font-semibold leading-snug"
+                      className="line-clamp-2 text-t13 font-bold leading-snug [overflow-wrap:anywhere]"
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         setEditing(s.id);
@@ -294,84 +349,44 @@ export default function SheetRail({
                       {s.name}
                     </span>
                   )}
-                  <span className="break-all text-[length:calc(10.5px*var(--fs))] leading-tight text-ink3">
+                  <span className="truncate text-t12 leading-tight text-ink3" title={s.origin}>
                     {s.origin}
                     {s.page ? ` · ${t.pageLabel(s.page)}` : ""}
                   </span>
 
-                  <span className="flex flex-wrap items-center gap-1 text-[length:calc(10px*var(--fs))]">
-                    {status && (
-                      <span
-                        className={`rounded px-1.5 py-px font-semibold ${status.cls}`}
-                      >
-                        {status.label}
-                      </span>
-                    )}
-                    {brokenLinks.has(s.id) && (
-                      <span
-                        data-link-chip
-                        className="rounded bg-warnbg px-1 font-semibold text-warnink"
-                        title={t.linkRailTip}
-                      >
-                        ⛓✕
-                      </span>
-                    )}
-                    {dupWith[s.id] && (
-                      <button
-                        type="button"
-                        data-dup-chip
-                        onClick={(e) => {
-                          e.stopPropagation();           // không kích hoạt thẻ (chọn mặt sổ) khi bấm huy hiệu
-                          onOpenDup(s.id);
-                        }}
-                        title={t.dupTitle}
-                        className="max-w-full break-words rounded bg-warnbg px-1.5 py-px text-left font-semibold leading-snug text-warnink hover:brightness-95"
-                      >
-                        ⚠ {t.dupChip(dupWith[s.id])}
-                      </button>
-                    )}
-                    {autoDone && s.auto && (
-                      <span
-                        className="rounded bg-accentpale px-1 font-semibold text-accent"
-                        title={t.autoPrepToggleHint}
-                      >
-                        ✨{" "}
-                        {[
-                          s.auto.rotate
-                            ? t.autoRotated(s.auto.rotate > 180 ? s.auto.rotate - 360 : s.auto.rotate)
-                            : "",
-                          s.auto.cropped ? t.autoCropped : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    )}
-                    {autoUnsure && (
-                      <span className="rounded bg-warnbg px-1 font-semibold text-warnink" title={t.autoUnsure}>
-                        ⚠ {t.autoUnsureBadge}
-                      </span>
-                    )}
-                    {/* Máy đã tự xoay/cắt thì nhãn ✨ ở trên đã nói rồi, khỏi lặp */}
-                    {!autoDone && s.rotation !== 0 && (
-                      <span className="tnum rounded bg-card3 px-1 text-ink2">
-                        {/* 354° đọc là "nghiêng -6°" dễ hiểu hơn nhiều */}
-                        {s.rotation > 180 ? s.rotation - 360 : s.rotation}°
-                      </span>
-                    )}
-                    {!autoDone && s.cropped && (
-                      <span className="rounded bg-card3 px-1 text-ink2">{t.cropped}</span>
-                    )}
-                    {s.adjusted && (
-                      <span className="rounded bg-card3 px-1 text-ink2">
-                        {t.adjustedBadge}
-                      </span>
-                    )}
-                    {s.duplicate_of && (
-                      <span className="rounded bg-warnbg px-1 font-semibold text-warnink">
-                        {t.duplicateBadge}
-                      </span>
-                    )}
-                  </span>
+                  {(status || dupWith[s.id] || autoUnsure || s.duplicate_of) && (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {status && <span className={`tag tnum whitespace-normal ${status.cls}`}>{status.label}</span>}
+                      {dupWith[s.id] && (
+                        <button
+                          type="button"
+                          data-dup-chip
+                          onClick={(e) => {
+                            e.stopPropagation();           // không kích hoạt thẻ (chọn mặt sổ) khi bấm huy hiệu
+                            onOpenDup(s.id);
+                          }}
+                          title={t.dupTitle}
+                          className="tag tag-warn max-w-full cursor-pointer whitespace-normal py-0.5 text-left leading-snug [overflow-wrap:anywhere] hover:bg-warnedge"
+                        >
+                          <Warning size={13} className="flex-none" />
+                          <span className="min-w-0">{t.dupChip(dupWith[s.id])}</span>
+                        </button>
+                      )}
+                      {autoUnsure && (
+                        <span className="tag tag-warn" title={t.autoUnsure}>
+                          <Warning size={13} />
+                          {t.autoUnsureBadge}
+                        </span>
+                      )}
+                      {s.duplicate_of && <span className="tag tag-warn">{t.duplicateBadge}</span>}
+                    </span>
+                  )}
+
+                  {notes.length > 0 && (
+                    <span className="tnum text-t12 leading-tight text-ink3" title={autoDone ? t.autoPrepToggleHint : undefined}>
+                      {notes.join(" · ")}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

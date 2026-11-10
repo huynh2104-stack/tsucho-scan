@@ -600,7 +600,9 @@ def sheet_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, rows: int = 0) ->
         return {"bands": [], "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0}
     img = Image.open(sheet.dir(ws.id) / "current.png")
     img.load()
-    return rowmap.bands_for(img, rows)
+    found = rowmap.bands_for(img, rows)
+    found.pop("peaks", None)        # chỉ dùng nội bộ cho bước ghép dòng (rowanchors)
+    return found
 
 
 class RowAnchorRequest(BaseModel):
@@ -619,7 +621,7 @@ def anchored_rowmap(ws_id: str, sheet_id: str, user: CurrentUser, body: RowAncho
         raise HTTPException(409, "Image changed; reload row positions")
     path = sheet.dir(ws.id) / "current.png"
     with Image.open(path) as image:
-        geometry = rowmap.bands_for(image, len(body.rows))
+        geometry = rowmap.bands_for_rows(image, body.rows)
     located = rowanchors.locate(path, sheet.sha256, body.rows, geometry)
     if body.image_revision != sheet.sha256:
         raise HTTPException(409, "Image changed; reload row positions")

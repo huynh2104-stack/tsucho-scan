@@ -14,6 +14,8 @@ Nguyên tắc an toàn (xoay nhầm tệ hơn không xoay):
     trong cùng một file thì được xoay theo (`consensus`) — cùng một máy scan thường đặt giấy
     cùng chiều. Trang bìa có hướng riêng nên chỉ theo khi CHÍNH nó cũng nghiêng về hướng đó.
   • cắt chỉ bỏ vùng trắng và vệt máy scan, không bao giờ cắt vào chữ (xem `pagecrop`)
+  • ảnh CHỤP (quanh sổ là mặt bàn, túi xách): cắt theo tờ giấy tìm được (xem `pagequad`), và chỉ khi gần như mọi dòng
+    chữ máy thấy đều nằm trong khung — còn chữ ở ngoài thì có thể khung đã lẹm vào trang, thà không cắt
 """
 
 from dataclasses import dataclass
@@ -21,11 +23,15 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from . import orient, pagecrop
+from . import orient, pagecrop, pagequad
 
 STRONG_LINES = 20       # trang có ≥ 20 dòng chữ và chắc chắn mới được tính vào "đa số" của cả file
 CONSENSUS_MIN = 3       # cần ít nhất 3 trang mạnh…
 CONSENSUS_SHARE = 0.7   # …và ≥ 70% trong số đó cùng một hướng
+# Ảnh chụp: phần chữ (tính theo độ dài dòng) được phép nằm NGOÀI khung cắt. Vài chữ lạc trên đồ vật quanh cuốn sổ là
+# bình thường; nhiều hơn thế nghĩa là khung đã cắt mất một phần trang.
+MAX_TEXT_OUT = 0.05
+MIN_TEXT_LINES = 6      # ít dòng chữ hơn thế thì không đủ căn cứ để tin khung
 
 _TURN = {
     90: Image.Transpose.ROTATE_270,     # PIL: ROTATE_90 là ngược chiều kim đồng hồ
@@ -64,10 +70,39 @@ class Plan:
         }
 
 
-def _crop_plan(rotated_small: Image.Image) -> tuple[tuple | None, bool]:
+def _turn_box(box: tuple, clockwise: int) -> tuple:
+    """Khung (x0, y0, x1, y1) theo tỉ lệ của ảnh gốc → theo tỉ lệ của ảnh đã xoay `clockwise` độ."""
+    x0, y0, x1, y1 = box
+    turn = clockwise % 360
+    if turn == 90:
+        return 1 - y1, x0, 1 - y0, x1
+    if turn == 180:
+        return 1 - x1, 1 - y1, 1 - x0, 1 - y0
+    if turn == 270:
+        return y0, 1 - x1, y1, 1 - x0
+    return x0, y0, x1, y1
+
+
+def _photo_box(rotated_small: Image.Image, texts: tuple) -> tuple | None:
+    """Khung cắt cho ảnh CHỤP, hoặc None. `texts` = các dòng chữ (x0, y0, x1, y1, độ dài) trên ảnh ĐÃ xoay."""
+    if len(texts) < MIN_TEXT_LINES:
+        return None
+    found = pagequad.find(rotated_small)
+    if not found:
+        return None
+    left, top, right, bottom = found["box"]
+    total = sum(t[4] for t in texts)
+    out = sum(t[4] for t in texts
+              if not (left <= (t[0] + t[2]) / 2 <= right and top <= (t[1] + t[3]) / 2 <= bottom))
+    if total <= 0 or out / total > MAX_TEXT_OUT:
+        return None
+    return found["box"]
+
+
+def _crop_plan(rotated_small: Image.Image, texts: tuple = ()) -> tuple[tuple | None, bool]:
     gray = np.asarray(rotated_small.convert("L"))
     if not pagecrop.is_flat(gray):
-        return None, False
+        return _photo_box(rotated_small, texts), False
     return pagecrop.content_box(gray), True
 
 
@@ -76,6 +111,7 @@ def analyze(img: Image.Image, rotate: int | None = None) -> Plan:
     lan hướng từ các trang khác trong file)."""
     small = orient.shrink(img.convert("RGB"))
     plan = Plan()
+    texts: tuple = ()
     if rotate is not None:
         plan.rotate = plan.detected = rotate % 360
     else:
@@ -86,7 +122,8 @@ def analyze(img: Image.Image, rotate: int | None = None) -> Plan:
                 found.rotate, found.sure, found.ratio, found.lines,
             )
             plan.rotate = found.rotate if found.sure else 0
-    plan.box, plan.flat = _crop_plan(turn(small, plan.rotate))
+            texts = tuple((*_turn_box(t[:4], plan.rotate), t[4]) for t in found.texts)
+    plan.box, plan.flat = _crop_plan(turn(small, plan.rotate), texts)
     return plan
 
 

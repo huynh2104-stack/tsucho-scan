@@ -672,11 +672,14 @@ export type Fix =
   | { kind: "swap" }
   | { kind: "balance"; value: number }
   | { kind: "amount"; field: "amount_out" | "amount_in"; value: number }
-  | { kind: "addrow"; side: "out" | "in"; amount: number; balance: number };
+  | { kind: "addrow"; side: "out" | "in"; amount: number; balance: number }
+  | { kind: "note" };
 
 /**
  * Gợi ý sửa cho dòng `i` — CHỈ khi dòng đó đang NG (và chưa ✓, không phải ghi chú). Gọi P = số dư
  * trước, O/I = rút/gửi, B = số dư in, E = P − O + I, diff = B − E. Tối đa 3 phương án, theo thứ tự:
+ *  0. coi là dòng ghi chú — nếu BỎ QUA dòng này thì số dư kế tiếp nối đúng từ P: đó là dòng thông báo (vd của máy ATM)
+ *     chứ không phải giao dịch, và «thêm dòng sót» ở mục 4 sẽ bịa ra một giao dịch không có thật;
  *  1. đổi cột 出金↔入金 — nếu P − I + O = B;
  *  2. sửa 残高 thành E — chỉ khi dòng có số dư KẾ TIẾP khớp với E (bằng chứng hai phía);
  *  3. sửa 出金 (hoặc 入金) thành số làm chuỗi khớp — chỉ khi số đó khác số đang có tối đa 2 chữ số;
@@ -694,6 +697,8 @@ export function suggestFixes(rows: Tx[], i: number): Fix[] {
   const B = tx.balance;
   const E = P - O + I;
   const out: Fix[] = [];
+
+  if (nextBalanceMatches(rows, i, P)) out.push({ kind: "note" });
 
   if (O !== I && P - I + O === B) out.push({ kind: "swap" });
 
@@ -739,6 +744,12 @@ export function applyFix(rows: Tx[], i: number, fix: Fix): Tx[] {
         balance: fix.balance,
       };
       return insertRowAfter(rows, i - 1, row);
+    }
+    case "note": {
+      // Phải xoá cả 残高: dòng ghi chú có số dư là MỐC cho dòng sau, giữ lại thì dòng kế vẫn lệch. Xoá qua `applyEdit` để
+      // `orig` còn giữ số máy đọc. Chữ giữ nguyên: đó chính là nội dung của dòng thông báo.
+      const cleared = (["amount_out", "amount_in", "balance"] as const).reduce((r, f) => applyEdit(r, i, f, null), rows);
+      return cleared.map((t, k) => (k === i ? { ...t, is_note: true } : t));
     }
   }
 }

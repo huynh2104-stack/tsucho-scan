@@ -826,7 +826,7 @@ def step_sheet_links(pg, base: str, ctx: dict) -> str:
         pg.locator("tr[data-row]").first.wait_for(timeout=10000)
 
     def strip():
-        return pg.locator("[data-link]").first
+        return pg.locator("div[data-link]").first
 
     def chips():
         return pg.locator("[data-link-chip]").count()
@@ -850,7 +850,7 @@ def step_sheet_links(pg, base: str, ctx: dict) -> str:
     assert "Đứt chuỗi với mặt trước" in text and "-729,414" in text, text
     wait_until(lambda: chips() == 1, "thẻ mặt ① ở cột trái có chip ⛓✕")
     badge = pg.locator("[data-links-badge]")
-    wait_until(lambda: badge.count() == 1 and badge.inner_text().strip() == "⚠ 1 chỗ đứt", "thanh công cụ báo 1 chỗ đứt")
+    wait_until(lambda: badge.count() == 1 and badge.inner_text().strip() == "1 chỗ đứt", "thanh công cụ báo 1 chỗ đứt")
     assert need_review(pg) == 0, "chỗ đứt tính riêng, không cộng vào số dòng cần soát"
 
     # 3. Chip ⚠: sang dạng danh sách
@@ -881,7 +881,7 @@ def step_sheet_links(pg, base: str, ctx: dict) -> str:
     wait_until(lambda: strip().get_attribute("data-link") == "ok", "trả đúng thứ tự thì nối liền")
     assert chips() == 0 and pg.locator("[data-links-badge]").count() == 0
     open_sheet(SAMPLE_SHEET_NAME)
-    assert pg.locator("[data-link]").count() == 0, "mặt ① đứng đầu danh sách: không có mặt trước nên không có dải nào"
+    assert pg.locator("div[data-link]").count() == 0, "mặt ① đứng đầu danh sách: không có mặt trước nên không có dải nào"
     return "đúng thứ tự: nối liền · đổi thứ tự: dải đứt + ⛓✕ + chip ⚠ (không cộng vào số dòng) · Không phải lỗi sống qua F5 và bỏ được · trả đúng thứ tự thì nối liền"
 
 
@@ -1391,6 +1391,7 @@ def step_settings(pg, base: str, ctx: dict) -> str:
         pg2 = other.new_page()
         pg2.set_default_timeout(10000)
         pg2.goto(f"{base}/login/")
+        pg2.locator("[data-testid=dev-notice]").wait_for()    # gõ trước khi trang sẵn sàng thì mất chữ
         pg2.fill("#email", EMAIL)
         pg2.fill("#password", PASSWORD)
         pg2.click("button[type=submit]")
@@ -1491,7 +1492,7 @@ def step_quick_review(pg, base: str, ctx: dict) -> str:
         total = need[s1] + need[s2]
         assert need[s1] >= 1 and need[s2] >= 1, f"cần dòng cần soát ở cả hai mặt: {need}"
         start.wait_for(timeout=5000)
-        assert start.inner_text().strip() == f"▶ Soát nhanh ({total})", start.inner_text()
+        assert start.inner_text().strip() == f"Soát nhanh ({total})", start.inner_text()
 
         # ── Vào chế độ: thẻ một dòng, bắt đầu ở mặt sổ ĐẦU TIÊN có dòng cần soát ──
         start.click()
@@ -1643,7 +1644,7 @@ def step_quick_finish(pg, base: str, ctx: dict) -> str:
         pg.locator("[data-testid=quick-start]").click()
         card.wait_for(timeout=5000)
         wait_until(lambda: "Dòng 1/3" in progress.inner_text(), "dòng 1/3")
-        assert "Đúng rồi — tiếp (Ctrl+Enter)" in confirm.inner_text(), confirm.inner_text()
+        assert "Đúng rồi — tiếp (Ctrl+Enter)" in (confirm.get_attribute("aria-label") or ""), confirm.get_attribute("aria-label")
 
         # ── Ba cách xác nhận: Ctrl+Enter (kể cả khi đang gõ dở), nút, Enter ──
         pg.locator('[data-qf="description"]').click()                      # đang đứng trong một ô, chữ gõ dở phải được ghi lại
@@ -1855,7 +1856,7 @@ def step_dictionary_modes(pg, base: str, ctx: dict) -> str:
         victim = next(e for e in j("/api/dict")["entries"] if e["wrong"] == "振込1")
         dialog.locator(f'[data-dict-delete="{victim["id"]}"]').click()
         wait_until(lambda: [e["wrong"] for e in j("/api/dict")["entries"]] == ["ヨキンキ"], "xoá một mục thì máy chủ cũng xoá")
-        assert dialog.locator("[data-dict-entry]").count() == 1
+        wait_until(lambda: dialog.locator("[data-dict-entry]").count() == 1, "hộp ⚙ bớt đúng mục vừa xoá")
 
         # ── Tự áp dụng: lưu theo tài khoản; áp MỘT lượt khi nạp kết quả; báo + Hoàn tác ──
         dialog.get_by_role("button", name="Tự áp dụng").click()
@@ -1918,6 +1919,7 @@ def step_font_scale(pg, base: str, ctx: dict) -> str:
         return pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()")
 
     def export_px():
+        pg.locator("[data-tour=export]").wait_for(timeout=15000)      # nút nằm ở thanh đầu sổ: hiện sau khi kết quả tải xong
         return pg.evaluate("parseFloat(getComputedStyle(document.querySelector('[data-tour=export]')).fontSize)")
 
     def overflow():
@@ -1964,6 +1966,7 @@ def step_font_scale(pg, base: str, ctx: dict) -> str:
             pg2 = other.new_page()
             pg2.set_default_timeout(10000)
             pg2.goto(f"{base}/login/")
+            pg2.locator("[data-testid=dev-notice]").wait_for()
             px = pg2.evaluate("parseFloat(getComputedStyle(document.querySelector('button[type=submit]')).fontSize)")
             assert abs(px - 15) < 0.05, f"máy lạ chưa chọn gì: chữ phải đúng cỡ chuẩn (15px) nhờ --fs mặc định trong CSS, đang là {px}"
             pg2.fill("#email", EMAIL)

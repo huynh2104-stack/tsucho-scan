@@ -41,6 +41,9 @@ class Orientation:
     ratio: float                # phiếu hướng thắng / phiếu á quân
     lines: int                  # số dòng chữ có phiếu
     votes: dict                 # {0: n, 90: n, 180: n, 270: n}
+    # Mọi dòng chữ tìm thấy: (x0, y0, x1, y1, độ dài) theo tỉ lệ 0..1 của ảnh CHƯA xoay. `autoprep` dùng để chắc rằng
+    # khung cắt không bỏ sót chữ.
+    texts: tuple = ()
 
 
 def shrink(img: Image.Image, long_side: int = WORK_PX) -> Image.Image:
@@ -67,7 +70,8 @@ def decide(lines: list[dict], long_side: float) -> Orientation:
         sure = True                                # không xoay thì không có gì để nhầm
     else:
         sure = n >= MIN_LINES_TURN and ratio >= RATIO_TURN
-    return Orientation(rotate=best, sure=sure, ratio=round(ratio, 2), lines=n, votes=votes)
+    texts = tuple((*ln["box"], ln["length"]) for ln in lines if ln.get("box"))
+    return Orientation(rotate=best, sure=sure, ratio=round(ratio, 2), lines=n, votes=votes, texts=texts)
 
 
 def detect(img: Image.Image) -> Orientation | None:

@@ -560,7 +560,16 @@ export const splitSheet = (wsId: string, sheetId: string, x: number) =>
   jsonPost<Workspace>(`/api/ws/${wsId}/split`, { sheet_ids: [sheetId], x });
 
 /** Dải ảnh của từng dòng — ước lượng từ ảnh, MIỄN PHÍ (xem api/rowmap.py). */
-export type RowBand = { y0: number; y1: number; method?: "content" | "estimated" };
+/** `method`: "content" = khớp số tiền + số dư đọc được trên ảnh; "inferred" = suy từ các dòng đã khớp ở trên/dưới nó;
+ *  "estimated" = chỉ ước lượng hình học. `x0`/`x1`/`skew_deg` chỉ có khi dòng cần khác cả trang: ảnh có hai cuốn sổ
+ *  cạnh nhau (khung chỉ phủ cuốn chứa dòng), ảnh chụp có phối cảnh (mỗi dòng nghiêng một kiểu). */
+export type RowBand = {
+  y0: number; y1: number;
+  method?: "content" | "inferred" | "estimated";
+  x0?: number; x1?: number; skew_deg?: number;
+};
+/** Dòng gửi lên để máy chủ tìm chỗ của nó trên ảnh: các con số + số in ở lề + khối (sổ) chứa nó. */
+export type AnchorRow = Pick<Tx, "balance" | "amount_in" | "amount_out" | "is_note"> & { row_no: number | null; block: number };
 export type RowBands = {
   bands: RowBand[];
   image_revision?: string;
@@ -575,7 +584,7 @@ export type RowBands = {
   x1: number;
 };
 
-export const rowMap = async (wsId: string, sheetId: string, rows: Pick<Tx, "balance" | "amount_in" | "amount_out" | "is_note">[], revision: string, signal?: AbortSignal) =>
+export const rowMap = async (wsId: string, sheetId: string, rows: AnchorRow[], revision: string, signal?: AbortSignal) =>
   asJson<RowBands>(
     await fetch(`${API}/api/ws/${wsId}/sheets/${sheetId}/rowmap`, {
       ...CRED, method: "POST", headers: { "Content-Type": "application/json" },

@@ -42,6 +42,7 @@ import {
   startScan,
   undoSheet,
   warpSheet,
+  type AnchorRow,
   type PerSheet,
   type ResultStore,
   type RowBands,
@@ -91,12 +92,13 @@ import {
 } from "@/lib/review";
 import { useT } from "@/lib/i18n";
 import { useTour } from "@/lib/tour";
-import DropZone from "@/components/DropZone";
+import DropZone, { BenchDrop } from "@/components/DropZone";
 import Tour from "@/components/Tour";
 import SheetRail, { Tick, type ScanState } from "@/components/SheetRail";
 import SheetViewer from "@/components/SheetViewer";
 import ReviewPane, {
   type EditFn,
+  type ColPrefs,
   type OptCols,
   type RestoreFn,
   type RowActionFn,
@@ -107,8 +109,12 @@ import ExportDialog, { type ExportOpts } from "@/components/ExportDialog";
 import ImportProgress, { type PendingUpload } from "@/components/ImportProgress";
 import SheetBusy from "@/components/SheetBusy";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import LedgerToolbar from "@/components/LedgerToolbar";
 import FixBar from "@/components/FixBar";
 import DupCompare from "@/components/DupCompare";
+import Splitter from "@/components/Splitter";
+import StatusBar from "@/components/StatusBar";
+import { MagicWand, Scan, Trash, UploadSimple, X, CircleNotch } from "@/components/ui/icons";
 
 /** Lỗi đang hiện trên thanh đỏ — giữ MÃ chứ không giữ câu đã dịch. */
 type ErrInfo = {
@@ -250,10 +256,11 @@ export default function Workbench() {
   const [pane, setPane] = useState<"list" | "image" | "result">("list");
 
   const [mode, setMode] = useState<ViewMode>("page");
-  const [cols, setCols] = useState<OptCols>({ store: true, extra: false, kind: true });
+  const [cols, setCols] = useState<ColPrefs>({ store: null, extra: false, kind: true });
 
   const stopSse = useRef<(() => void) | null>(null);
   const booted = useRef<string | null>(null);   // đã mở workspace cho user nào
+  const fileInput = useRef<HTMLInputElement>(null);   // MỘT ô chọn file cho cả nút 取込 lẫn khung ảnh trống
 
   /* ── Autosave công soát ──────────────────────────────────────────────
      `savedRef` giữ ĐÚNG object của từng mặt sổ mà server đang có. Mọi hàm sửa
@@ -360,6 +367,8 @@ export default function Workbench() {
 
   const sheets = ws?.sheets ?? [];
   const activeSheet = sheets.find((s) => s.id === active) ?? null;
+  /** Hồ sơ đã mở mà chưa có mặt sổ nào: khung ảnh thành chỗ thả file lớn. */
+  const firstRun = !!ws && sheets.length === 0;
 
   /* Mặt sổ mới nhập còn được máy xử lý NỀN (tách trang PDF, tự xoay/cắt gọn): hỏi lại mỗi giây
      tới khi xong. Chỉ thay danh sách mặt sổ, không đụng kết quả người dùng đang sửa. */
@@ -387,8 +396,8 @@ export default function Workbench() {
 
   // Include content as well as row count: deleting/inserting/reordering rows
   // must never reuse another transaction's coordinates, even at equal length.
-  const anchorRows = JSON.stringify((active ? store[active]?.blocks ?? [] : []).flatMap(b =>
-    b.rows.map(tx => ({ balance: tx.balance, amount_in: tx.amount_in, amount_out: tx.amount_out, is_note: !!tx.is_note })),
+  const anchorRows = JSON.stringify((active ? store[active]?.blocks ?? [] : []).flatMap((b, block) =>
+    b.rows.map(tx => ({ balance: tx.balance, amount_in: tx.amount_in, amount_out: tx.amount_out, is_note: !!tx.is_note, row_no: tx.row_no ?? null, block })),
   ));
   const rowMapKey = JSON.stringify([ws?.id, active, activeSheet?.sha256, anchorRows]);
   const bands = mappedRows?.key === rowMapKey ? mappedRows.data : null;
@@ -591,6 +600,10 @@ export default function Workbench() {
 
   const allTicked = sheets.length > 0 && ticked.size === sheets.length;
   const tickedIds = () => sheets.filter((s) => ticked.has(s.id)).map((s) => s.id);
+  /** Mọi mặt đang tick đã có kết quả còn khớp ảnh: quét không còn là việc chính nữa. */
+  const scanDone =
+    Object.keys(store).length > 0 &&
+    sheets.filter((s) => ticked.has(s.id)).every((s) => s.scanned && store[s.id]?.blocks?.length);
 
 
   /** Các dòng của mặt đang xem kèm「có cần soát không」và ô cần đặt con trỏ — dùng cho phím n/p.
@@ -618,6 +631,7 @@ export default function Workbench() {
   storeRef.current = store;
   /** Số dòng cần soát của TOÀN hồ sơ — «Soát nhanh» đi qua mọi mặt sổ. */
   const totalNeed = Object.values(perSheet).reduce((n, s) => n + s.need_check, 0);
+  const totalRows = Object.values(perSheet).reduce((n, s) => n + s.rows, 0);
 
   /** Thoát «Soát nhanh»: bảng nhảy về ĐÚNG dòng đang xem (con trỏ vào ô gây lệch). */
   const closeQuick = (ref: RowRef | null, field: FocusField | null) => {
@@ -651,7 +665,7 @@ export default function Workbench() {
     if (!ws || !activeSheet || anchorRows === "[]") return;
     let alive = true;
     const abort = new AbortController();
-    const rows = JSON.parse(anchorRows) as Pick<Tx, "balance" | "amount_in" | "amount_out" | "is_note">[];
+    const rows = JSON.parse(anchorRows) as AnchorRow[];
     rowMapEstimate(ws.id, activeSheet.id, rows.length, abort.signal)
       .then(data => {
         if (alive && data.bands.length === rows.length) setMappedRows(previous =>
@@ -1290,7 +1304,7 @@ export default function Workbench() {
   const sAcceptSug = useStable(acceptSuggestion);
   const sDismissLink = useStable(dismissLink);
   const sUndismissLink = useStable(undismissLink);
-  const sToggleCol = useStable((k: keyof OptCols) => setCols((p) => ({ ...p, [k]: !p[k] })));
+  const sToggleCol = useStable((k: keyof OptCols, current: boolean) => setCols((p) => ({ ...p, [k]: !current })));
   const sSelectRow = useStable((ref: TxRef) => {
     setSelRow(ref);
     setActive(ref.sheet);
@@ -1301,7 +1315,7 @@ export default function Workbench() {
   // (Đặt SAU mọi hook: React cấm số lượng hook thay đổi giữa các lần render.)
   if (!ready || !user) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-[length:calc(14px*var(--fs))] text-ink2">
+      <div className="flex flex-1 items-center justify-center p-6 text-t14 text-ink2">
         {t.authChecking}
       </div>
     );
@@ -1334,152 +1348,80 @@ export default function Workbench() {
       // Lưới an toàn: kéo xong dù thả ở đâu cũng phải tắt lớp phủ
       onDragEnd={() => setDragging(false)}
     >
-      {err && (
-        // role=alert: trình đọc màn hình phải ĐỌC LÊN thanh lỗi này, nếu không
-        // người khiếm thị bấm quét xong chỉ thấy im lặng, tưởng không có gì xảy ra.
-        <p
-          role="alert"
-          aria-live="assertive"
-          className="flex items-start gap-2 border-b border-danger bg-danger/10 px-4 py-2 text-[length:calc(13px*var(--fs))] text-danger"
-        >
-          {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
-          <span>{errText(err)}</span>
-          <button
-            onClick={() => setErr(null)}
-            className="ml-auto flex-none text-[length:calc(15px*var(--fs))] leading-none hover:opacity-70"
-            aria-label={t.cancel}
-          >
-            ×
-          </button>
-        </p>
-      )}
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 lg:grid-cols-[272px_minmax(0,1fr)_minmax(0,1.15fr)] lg:grid-rows-1">
-        {/* ── Cột trái: kéo thả + danh sách mặt sổ ───────────── */}
+      <div className="workbench">
+        {/* ── Cột trang: nút thêm file, chọn để quét, danh sách mặt sổ ── */}
         <aside
-          className={`min-h-0 flex-col overflow-hidden border-b border-rule bg-card lg:flex lg:border-b-0 lg:border-r ${
-            pane === "list" ? "flex" : "hidden"
+          className={`min-h-0 flex-col overflow-hidden bg-page lg:flex ${
+            pane === "list" ? `flex ${firstRun ? "flex-none" : "flex-1"}` : "hidden"
           }`}
         >
-          <div data-tour="drop">
-            <DropZone busy={false} onFiles={(f) => void upload(f)} />
+          <div data-tour="drop" className="flex h-11 flex-none items-center border-b border-rule pl-3.5 pr-2.5">
+            <DropZone busy={false} onFiles={(f) => void upload(f)} inputRef={fileInput} />
           </div>
 
-          {/* Công tắc tự xoay & cắt gọn — bật sẵn */}
-          <div className="flex items-center gap-2 px-3 pb-2" title={t.autoPrepToggleHint}>
-            <Tick
-              on={autoPrep}
-              size={15}
-              title={t.autoPrepToggleHint}
-              onClick={() => {
-                const v = !autoPrep;
-                setAutoPrep(v);
-                try {
-                  localStorage.setItem("tsucho.autoprep", v ? "1" : "0");
-                } catch {
-                  /* không nhớ được cũng không sao */
+          {/* Điện thoại, chưa có mặt sổ: khung ảnh hiện ngay dưới nút thêm file nên phần chọn và danh sách còn trống thì ẩn */}
+          <div className={`flex-none border-b border-rule pb-2 pl-3.5 pr-2.5 ${firstRun ? "max-lg:hidden" : ""}`}>
+            {/* Cao cố định: các nút chỉ hiện khi có mặt được tick, không được xô danh sách */}
+            <div className="flex h-9 items-center gap-1 pl-[9px] max-lg:h-11">
+              <Tick
+                on={allTicked}
+                title={t.selectAll}
+                onClick={() =>
+                  setTicked(allTicked ? new Set() : new Set(sheets.map((s) => s.id)))
                 }
-              }}
-            />
-            <span className="text-[length:calc(11.5px*var(--fs))] leading-snug text-ink2">✨ {t.autoPrepToggle}</span>
-          </div>
-
-          {/* Sổ mẫu: hai ảnh chụp sổ thật, CHƯA quét — tick sẵn để người xem chỉ cần bấm Quét và thấy app đọc
-              sổ thế nào. Quét ảnh mẫu không gọi model nên không tốn lượt và không cần đưa sổ của mình lên. */}
-          {sheets.length === 0 && (
-            <div className="px-3 pb-3">
-              <button
-                onClick={() => {
-                  if (!ws) return;
-                  void (async () => {
-                    setBusy(true);
-                    try {
-                      const w = await addSampleBooks(ws.id);
-                      setWs(w);
-                      syncStore(w.results ?? {}, w.added);
-                      if (w.added[0]) setActive(w.added[0]);
-                      setTicked(new Set(w.added));
-                    } catch (e) {
-                      setErr({ text: e instanceof Error ? e.message : String(e) });
-                    } finally {
-                      setBusy(false);
-                    }
-                  })();
-                }}
-                disabled={busy}
-                className="w-full rounded-lg border border-dashed border-accent bg-accentpale/40 px-3 py-2 text-[length:calc(12.5px*var(--fs))] font-semibold text-accent hover:bg-accentpale disabled:opacity-50"
-              >
-                ✨ {t.trySample}
-                <span className="mt-0.5 block text-[length:calc(10.5px*var(--fs))] font-normal text-ink3">
-                  {t.trySampleHint}
-                </span>
-              </button>
+              />
+              <span className="tnum ml-1.5 min-w-0 truncate text-t13 font-bold">{t.chosen(ticked.size)}</span>
+              <span className="flex-1" />
+              {ticked.size > 0 && (
+                <button
+                  onClick={() => {
+                    const ids = tickedIds();
+                    if (!ws || ids.length === 0) return;
+                    const withResult = ids.filter((id) => store[id]?.blocks?.length).length;
+                    setConfirm({
+                      title: t.confirmDeleteManyTitle,
+                      message: t.confirmDeleteManyMsg(ids.length),
+                      warning:
+                        withResult > 0 ? t.confirmDeleteManyHasResult(withResult) : undefined,
+                      label: t.deleteSheet,
+                      danger: true,
+                      run: () => {
+                        setTicked(new Set());
+                        if (active && ids.includes(active)) setActive(null);
+                        void (async () => {
+                          for (const id of ids) await guard(() => deleteSheet(ws.id, id));
+                        })();
+                      },
+                    });
+                  }}
+                  title={t.remove}
+                  aria-label={t.remove}
+                  className="btn btn-ghost btn-sm btn-icon flex-none hover:!text-danger max-lg:min-h-10 max-lg:w-10"
+                >
+                  <Trash size={16} />
+                </button>
+              )}
+              {ticked.size > 0 && (
+                <button
+                  onClick={() => void runAutoprep()}
+                  title={t.autoPrepBtn}
+                  aria-label={t.autoPrepBtn}
+                  className="btn btn-ghost btn-sm btn-icon flex-none max-lg:min-h-10 max-lg:w-10"
+                >
+                  <MagicWand size={16} />
+                </button>
+              )}
             </div>
-          )}
-
-          <div className="flex items-center gap-1.5 border-y border-rule bg-card2 px-2.5 py-2">
-            <Tick
-              on={allTicked}
-              title={t.selectAll}
-              onClick={() =>
-                setTicked(allTicked ? new Set() : new Set(sheets.map((s) => s.id)))
-              }
-            />
-            <span className="tnum whitespace-nowrap text-[length:calc(12px*var(--fs))] font-semibold">
-              {t.chosen(ticked.size)}
-            </span>
-            <span className="flex-1" />
-            {ticked.size > 0 && (
-              <button
-                onClick={() => {
-                  const ids = tickedIds();
-                  if (!ws || ids.length === 0) return;
-                  const withResult = ids.filter((id) => store[id]?.blocks?.length).length;
-                  setConfirm({
-                    title: t.confirmDeleteManyTitle,
-                    message: t.confirmDeleteManyMsg(ids.length),
-                    warning:
-                      withResult > 0 ? t.confirmDeleteManyHasResult(withResult) : undefined,
-                    label: t.deleteSheet,
-                    danger: true,
-                    run: () => {
-                      setTicked(new Set());
-                      if (active && ids.includes(active)) setActive(null);
-                      void (async () => {
-                        for (const id of ids) await guard(() => deleteSheet(ws.id, id));
-                      })();
-                    },
-                  });
-                }}
-                title={t.remove}
-                className="rounded-md p-1 text-ink3 hover:bg-danger/10 hover:text-danger"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
-                </svg>
-              </button>
-            )}
-            {ticked.size > 0 && (
-              <button
-                onClick={() => void runAutoprep()}
-                title={t.autoPrepBtn}
-                className="rounded-md px-1 py-1 text-[length:calc(13px*var(--fs))] leading-none hover:bg-accentpale/70"
-              >
-                ✨
-              </button>
-            )}
             <button
               data-tour="scan"
               onClick={() => void runScan(tickedIds())}
               disabled={scanning || ticked.size === 0}
-              className="flex items-center gap-1 whitespace-nowrap rounded-lg border border-accent bg-accent px-2.5 py-1 text-[length:calc(12px*var(--fs))] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
+              className={`btn tnum w-full max-lg:min-h-10 ${scanDone ? "btn-quiet font-bold" : "btn-primary"}`}
             >
               {scanning ? (
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                <CircleNotch size={16} className="animate-spin motion-reduce:animate-none" />
               ) : (
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M6 4l14 8-14 8z" />
-                </svg>
+                <Scan size={16} />
               )}
               {scanning
                 ? progress?.index
@@ -1489,7 +1431,11 @@ export default function Workbench() {
             </button>
           </div>
 
-          <div data-tour="rail" className="thin-scroll min-h-0 flex-1 overflow-auto">
+          {/* Chừa sẵn chỗ thanh cuộn: có cuộn hay không thì hàng mặt sổ vẫn đứng nguyên */}
+          <div
+            data-tour="rail"
+            className={`thin-scroll min-h-0 flex-1 overflow-y-auto pt-2 [scrollbar-gutter:stable] ${firstRun ? "max-lg:hidden" : ""}`}
+          >
             <ImportProgress
               uploads={uploads}
               done={batchTotal - busySheets.length}
@@ -1531,21 +1477,65 @@ export default function Workbench() {
             />
           </div>
 
-          <div className="flex items-center gap-2 border-t border-rule bg-card2 px-3 py-1.5 text-[length:calc(10.5px*var(--fs))] text-ink3">
-            <span className="tnum">{t.totalSheets(sheets.length)}</span>
-            <span className="flex-1" />
-            <span>{t.shiftHint}</span>
+          <div className={`flex-none border-t border-rule py-2 pl-3.5 pr-2.5 text-t12 leading-snug text-ink2 ${firstRun ? "max-lg:hidden" : ""}`}>
+            {/* Màn hình cảm ứng: tổng số đã có ở thanh trạng thái, còn phím Shift thì không có */}
+            <div className="flex flex-wrap justify-between gap-x-2 max-lg:hidden">
+              <span className="tnum">{t.totalSheets(sheets.length)}</span>
+              <span className="text-ink3">{t.shiftHint}</span>
+            </div>
+            {/* Công tắc tự xoay & cắt gọn — bật sẵn */}
+            <div className="mt-2 flex items-start gap-2 max-lg:mt-0" title={t.autoPrepToggleHint}>
+              <Tick
+                on={autoPrep}
+                size={15}
+                title={t.autoPrepToggleHint}
+                onClick={() => {
+                  const v = !autoPrep;
+                  setAutoPrep(v);
+                  try {
+                    localStorage.setItem("tsucho.autoprep", v ? "1" : "0");
+                  } catch {
+                    /* không nhớ được cũng không sao */
+                  }
+                }}
+              />
+              <span>{t.autoPrepToggle}</span>
+            </div>
           </div>
         </aside>
 
         {/* ── Khung giữa: chỉnh ảnh ──────────────────────────── */}
         <section
           data-tour="viewer"
-          className={`min-h-0 border-b border-rule bg-card lg:block lg:border-b-0 lg:border-r ${
-            pane === "image" ? "block" : "hidden"
+          className={`on-ink min-h-0 min-w-0 bg-bench text-shellink lg:block ${
+            pane === "image" || (firstRun && pane === "list") ? "block flex-1" : "hidden"
           }`}
         >
-          {activeSheet && activeSheet.status && activeSheet.status !== "ready" ? (
+          {!ws ? null : firstRun ? (
+            /* Sổ mẫu: hai ảnh chụp sổ thật, CHƯA quét — tick sẵn để người xem chỉ cần bấm Quét và thấy app đọc
+               sổ thế nào. Quét ảnh mẫu không gọi model nên không tốn lượt và không cần đưa sổ của mình lên. */
+            <BenchDrop
+              busy={busy}
+              onPick={() => fileInput.current?.click()}
+              onSample={() => {
+                if (!ws) return;
+                void (async () => {
+                  setBusy(true);
+                  try {
+                    const w = await addSampleBooks(ws.id);
+                    setWs(w);
+                    syncStore(w.results ?? {}, w.added);
+                    if (w.added[0]) setActive(w.added[0]);
+                    setTicked(new Set(w.added));
+                  } catch (e) {
+                    setErr({ text: e instanceof Error ? e.message : String(e) });
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            />
+          ) : activeSheet && activeSheet.status && activeSheet.status !== "ready" ? (
             <SheetBusy
               sheet={activeSheet}
               onDelete={() => {
@@ -1566,6 +1556,7 @@ export default function Workbench() {
             sheet={activeSheet}
             busy={busy}
             scanning={scanning}
+            scanBeam={!!active && states[active] === "scanning"}
             onRotate={(deg) =>
               ws && active && void guard(() => rotateSheets(ws.id, editTarget(), deg))
             }
@@ -1612,126 +1603,57 @@ export default function Workbench() {
               });
             }}
             highlight={highlight}
-            highlightExact={highlight?.method === "content"}
-            highlightSkew={bands?.skew_deg ?? 0}
-            highlightSpan={bands ? { x0: bands.x0, x1: bands.x1 } : null}
+            highlightKind={highlight?.method ?? "estimated"}
+            highlightSkew={highlight?.skew_deg ?? bands?.skew_deg ?? 0}
+            highlightSpan={bands ? { x0: highlight?.x0 ?? bands.x0, x1: highlight?.x1 ?? bands.x1 } : null}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
           />
           )}
         </section>
 
+        <Splitter />
+
         {/* ── Cột phải: kết quả ──────────────────────────────── */}
         <section
           data-tour="review"
-          className={`min-h-0 flex-col bg-page lg:flex ${
-            pane === "result" ? "flex" : "hidden"
+          className={`min-h-0 min-w-0 flex-col bg-card lg:flex ${
+            pane === "result" ? "flex flex-1" : "hidden"
           }`}
         >
           {Object.keys(store).length > 0 && (
-            <>
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-1.5">
-              <button
-                onClick={undoEdit}
-                disabled={hist.past.length === 0}
-                title={`${t.undoEditLabel} (Ctrl+Z)`}
-                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
-              >
-                ↶ {t.undoEditLabel}
-                {hist.past.length > 0 && (
-                  <span className="tnum ml-1 text-ink3">{hist.past.length}</span>
-                )}
-              </button>
-              <button
-                onClick={redoEdit}
-                disabled={hist.future.length === 0}
-                title={`${t.redoEditLabel} (Ctrl+Y)`}
-                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
-              >
-                ↷ {t.redoEditLabel}
-              </button>
-
-              <span className="mx-1 h-4 w-px bg-rule" />
-
-              <button
-                onClick={() => jumpBad(1)}
-                disabled={badCount === 0}
-                title={t.nextBadHint}
-                className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink disabled:opacity-35"
-              >
-                {t.nextBad} <kbd className="ml-0.5 rounded border border-rule px-1 text-[length:calc(10px*var(--fs))]">n</kbd>
-              </button>
-              <span
-                className={`tnum rounded-md px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold ${
-                  badCount > 0
-                    ? "bg-warnbg text-warnink"
-                    : "bg-okbg text-okink"
-                }`}
-              >
-                {badCount > 0 ? t.badLeft(badCount) : t.allChecked}
-              </span>
-              {totalNeed > 0 && !quickOpen && (
-                <button
-                  data-testid="quick-start"
-                  onClick={() => {
-                    setPane("result");
-                    setQuickOpen(true);
-                  }}
-                  title={t.qrStartHint}
-                  className="tnum rounded-md border border-accent bg-accent px-2.5 py-1 text-[length:calc(11.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
-                >
-                  ▶ {t.qrStart(totalNeed)}
-                </button>
-              )}
-              {/* Cụm trạng thái bên phải KHÔNG được làm thanh công cụ xuống dòng. Trước đây mỗi chữ ở đây
-                  là một phần tử riêng; chọn một dòng là hiện「vị trí ước lượng…」, thanh bị đẩy xuống dòng
-                  thứ hai và cả bảng bên dưới tụt xuống một nấc NGAY GIỮA lúc người dùng đang nhấn chuột,
-                  nên cú bấm nút nhỏ (✓, ↺, ×) ở dòng chưa chọn bị trượt: nhấn xuống một nơi, nhả ra nơi khác.
-                  Nay là một khung co giãn (basis 0) tự cắt bớt chữ, không bao giờ ép xuống dòng. */}
-              <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden whitespace-nowrap">
-                {alarms.length > 0 && (
-                  <button
-                    data-links-badge
-                    onClick={goFirstBreak}
-                    title={t.linksBadgeHint(alarms.length)}
-                    className="tnum flex-none rounded-md bg-warnbg px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold text-warnink hover:brightness-95"
-                  >
-                    {t.linksBadge(alarms.length)}
-                  </button>
-                )}
-                {/* Trạng thái autosave — người dùng vừa mất công soát vì tưởng đã lưu, nên nói rõ ra. */}
-                {saveState !== "idle" && (
-                  <span
-                    className={`flex-none text-[length:calc(10.5px*var(--fs))] ${
-                      saveState === "error" ? "font-semibold text-danger" : "text-ink3"
-                    }`}
-                  >
-                    {saveState === "saving"
-                      ? t.saveSaving
-                      : saveState === "saved"
-                        ? `✓ ${t.saveSaved}`
-                        : t.saveFailed}
-                  </span>
-                )}
-                {highlight && (
-                  <span className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">
-                    {highlight.method === "content" ? t.rowLinkExact : t.rowLinkEstimated}
-                  </span>
-                )}
-                {selRow?.sheet === active && !highlight && anchorRows !== "[]" && (
-                  <span role="status" className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">
-                    {mappedRows?.key === rowMapKey ? t.rowLinkUnavailable : t.rowLinkLoading}
-                  </span>
-                )}
-              </div>
-            </div>
-            {!quickOpen && (
-              <FixBar
-                explain={fixBar?.explain ?? []}
-                fixes={fixBar?.fixes ?? []}
-                onApply={(fix) => fixBar && applyFixAt(fixBar.ref, fix)}
-              />
-            )}
-            </>
+            <LedgerToolbar
+              undoCount={hist.past.length}
+              redoCount={hist.future.length}
+              onUndo={undoEdit}
+              onRedo={redoEdit}
+              onNextBad={() => jumpBad(1)}
+              badCount={badCount}
+              totalNeed={totalNeed}
+              quickOpen={quickOpen}
+              onQuick={() => {
+                setPane("result");
+                setQuickOpen(true);
+              }}
+              alarmCount={alarms.length}
+              onFirstBreak={goFirstBreak}
+              saveState={saveState}
+              rowLink={
+                highlight
+                  ? highlight.method === "content"
+                    ? "exact"
+                    : highlight.method === "inferred"
+                      ? "inferred"
+                      : "estimated"
+                  : selRow?.sheet === active && anchorRows !== "[]"
+                    ? mappedRows?.key === rowMapKey
+                      ? "unavailable"
+                      : "loading"
+                    : null
+              }
+              onExport={() => setShowExport(true)}
+              exportDisabled={Object.keys(store).length === 0}
+              tagCount={active ? badCount : totalNeed}
+            />
           )}
           <div className="min-h-0 flex-1">
             {quickOpen && ws ? (
@@ -1779,41 +1701,69 @@ export default function Workbench() {
               onUndismissLink={sUndismissLink}
               selected={selRow}
               onSelectRow={sSelectRow}
+              footer={
+                <input
+                  value={ws?.book_name ?? ""}
+                  onChange={(e) =>
+                    setWs((p) => (p ? { ...p, book_name: e.target.value } : p))
+                  }
+                  onBlur={(e) => ws && void renameBook(ws.id, e.target.value)}
+                  placeholder={t.bookNamePlaceholder}
+                  aria-label={t.bookNamePlaceholder}
+                  className="field min-h-[calc(34px*var(--fs))] w-auto min-w-0 flex-[0_1_220px] text-t13 max-lg:min-h-10 max-lg:flex-1"
+                />
+              }
+              fixBar={
+                fixBar && !quickOpen ? (
+                  <FixBar
+                    explain={fixBar.explain}
+                    fixes={fixBar.fixes}
+                    onApply={(fix) => applyFixAt(fixBar.ref, fix)}
+                  />
+                ) : null
+              }
+              scanText={
+                scanning
+                  ? progress?.index
+                    ? t.scanningProgress(progress.index, progress.total ?? progress.index)
+                    : t.scanning
+                  : undefined
+              }
             />
             )}
           </div>
 
-          {/* Thanh xuất file */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-rule bg-card px-3 py-2">
-            <input
-              value={ws?.book_name ?? ""}
-              onChange={(e) =>
-                setWs((p) => (p ? { ...p, book_name: e.target.value } : p))
-              }
-              onBlur={(e) => ws && void renameBook(ws.id, e.target.value)}
-              placeholder={t.bookNamePlaceholder}
-              className="min-w-0 flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] placeholder:text-ink3"
-            />
-            <button
-              data-tour="export"
-              onClick={() => setShowExport(true)}
-              disabled={Object.keys(store).length === 0}
-              className="flex items-center gap-1.5 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110 disabled:opacity-40"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M12 4v11m0 0-4-4m4 4 4-4" />
-                <path d="M4 17v1.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V17" />
-              </svg>
-              {t.exportBtn}
-            </button>
-          </div>
         </section>
       </div>
+
+      {/* Nằm NGOÀI lưới và DƯỚI lưới: khi hiện ra chỉ mép dưới co lại, bảng neo từ trên nên dòng đang bấm không xê dịch */}
+      {err && (
+        // role=alert: trình đọc màn hình phải ĐỌC LÊN thanh lỗi này, nếu không
+        // người khiếm thị bấm quét xong chỉ thấy im lặng, tưởng không có gì xảy ra.
+        <p
+          role="alert"
+          aria-live="assertive"
+          className="flex flex-none items-start gap-2 border-t border-shu bg-shupale px-3 py-1.5 text-t13 text-shu"
+        >
+          {/* Dịch tại chỗ VẼ, không dịch lúc lưu → đổi ngôn ngữ là đổi ngay */}
+          <span className="min-w-0 flex-1">{errText(err)}</span>
+          <button
+            onClick={() => setErr(null)}
+            className="btn btn-ghost btn-sm btn-icon -my-0.5 flex-none !text-shu max-lg:min-h-10 max-lg:w-10"
+            aria-label={t.cancel}
+          >
+            <X size={15} />
+          </button>
+        </p>
+      )}
+
+      {/* Giới hạn công cụ — không bao giờ giấu (WEB_PLAN §7.4-5) */}
+      <StatusBar pages={sheets.length} rows={totalRows} />
 
       {/* Ba thẻ chuyển khung — CHỈ trên màn hình hẹp (điện thoại, tablet dọc).
           Kèm số đếm để biết đang có bao nhiêu mặt sổ / bao nhiêu dòng kết quả
           mà không phải chuyển qua chuyển lại. */}
-      <nav className="flex border-t border-rule bg-card lg:hidden">
+      <nav className="flex flex-none border-t border-rule bg-card pb-[env(safe-area-inset-bottom)] lg:hidden">
         {(
           [
             { id: "list", label: t.paneSheets, n: sheets.length },
@@ -1825,27 +1775,16 @@ export default function Workbench() {
             key={p.id}
             onClick={() => setPane(p.id)}
             aria-current={pane === p.id}
-            className={`flex flex-1 items-center justify-center gap-1.5 border-t-2 py-2.5 text-[length:calc(13px*var(--fs))] ${
-              pane === p.id
-                ? "border-accent font-semibold text-accent"
-                : "border-transparent text-ink2"
+            className={`relative flex h-11 flex-1 items-center justify-center gap-1.5 text-t13 transition-colors ${
+              pane === p.id ? "font-bold text-accent" : "text-ink2 active:bg-card2"
             }`}
           >
+            {pane === p.id && <span aria-hidden className="absolute inset-x-0 -top-px h-0.5 bg-accent" />}
             {p.label}
-            {p.n > 0 && (
-              <span className="tnum rounded bg-card3 px-1.5 text-[length:calc(11px*var(--fs))] text-ink3">
-                {p.n}
-              </span>
-            )}
+            {p.n > 0 && <span className="tnum text-t12 font-normal text-ink3">{p.n}</span>}
           </button>
         ))}
       </nav>
-
-      {/* Giới hạn công cụ — không bao giờ giấu (WEB_PLAN §7.4-5) */}
-      <p className="flex items-start gap-2 border-t border-rule bg-card px-4 py-1.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
-        <span className="font-bold text-accent">!</span>
-        {t.caveat}
-      </p>
 
       {dupOpen && ws && sheets.some((x) => x.id === dupOpen.a) && sheets.some((x) => x.id === dupOpen.b) && (
         <DupCompare
@@ -1895,8 +1834,9 @@ export default function Workbench() {
       />
 
       {dragging && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-accent/15 backdrop-blur-[1px]">
-          <p className="rounded-xl border-2 border-dashed border-accent bg-card px-8 py-6 text-lg font-semibold text-accent">
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-accentpale/90">
+          <p className="flex items-center gap-3 text-t22 font-bold text-accent">
+            <UploadSimple size={28} />
             {t.dropActive}
           </p>
         </div>

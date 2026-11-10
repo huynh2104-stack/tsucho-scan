@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import DialogFrame from "@/components/ui/DialogFrame";
 import { useT } from "@/lib/i18n";
 
 export default function ConfirmDialog({
@@ -53,50 +54,24 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-      onClick={onCancel}
-      role="presentation"
-    >
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="cf-title"
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
-      >
-        <div className="flex flex-col gap-2 px-5 py-4">
-          <h2 id="cf-title" className="text-[length:calc(15px*var(--fs))] font-bold">
-            {title}
-          </h2>
-          <p className="text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{message}</p>
-          {warning && (
-            <p className="rounded-lg border border-warnedge bg-warnbg px-2.5 py-1.5 text-[length:calc(12.5px*var(--fs))] font-medium text-warnink">
-              {warning}
-            </p>
-          )}
-        </div>
-        <div className="flex justify-end gap-2 border-t border-rule bg-card2 px-5 py-3">
-          <button
-            ref={cancelRef}
-            onClick={onCancel}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-          >
-            {t.cancel}
-          </button>
-          <button
-            ref={confirmRef}
-            onClick={onConfirm}
-            className={`rounded-lg border px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold ${
-              danger
-                ? "border-danger bg-danger text-white hover:brightness-110"
-                : "border-accent bg-accent text-accentink hover:brightness-110"
-            }`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
+    <DialogFrame role="alertdialog" labelledBy="cf-title" onClose={onCancel} maxWidth={440}>
+      <div className="dlg-head">
+        <h2 id="cf-title" className="min-w-0 text-t16 font-bold">
+          {title}
+        </h2>
       </div>
-    </div>
+      <div className="dlg-body flex flex-col gap-3">
+        <p className="text-t14 leading-[1.7] break-words text-ink2">{message}</p>
+        {warning && <p className="rounded-[3px] bg-warnbg px-3 py-2 text-t13 font-bold leading-[1.6] text-warnink">{warning}</p>}
+      </div>
+      <div className="dlg-foot">
+        <button ref={cancelRef} type="button" onClick={onCancel} className="btn btn-quiet">
+          {t.cancel}
+        </button>
+        <button ref={confirmRef} type="button" onClick={onConfirm} className={`btn ${danger ? "btn-danger-solid" : "btn-primary"}`}>
+          {confirmLabel}
+        </button>
+      </div>
+    </DialogFrame>
   );
 }

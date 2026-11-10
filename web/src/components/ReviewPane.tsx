@@ -15,7 +15,7 @@
  * Tên cột giữ tiếng Nhật + chú thích bản địa ngay cạnh (WEB_PLAN §8).
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useT, type Dict, type Lang } from "@/lib/i18n";
 import {
   FIELD_LABEL,
@@ -35,10 +35,53 @@ import { followersOf, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import type { DictField } from "@/lib/corrections";
 import { renderProbe } from "@/lib/renderProbe";
 import BookInfoDialog from "@/components/BookInfoDialog";
+import Seal from "@/components/ui/Seal";
+import Segmented from "@/components/ui/Segmented";
+import {
+  ArrowCounterClockwise,
+  Check,
+  CircleNotch,
+  Lightbulb,
+  LinkBreak,
+  LinkSimple,
+  MagicWand,
+  MagnifyingGlass,
+  PencilSimple,
+  Plus,
+  Warning,
+  X,
+} from "@/components/ui/icons";
 
 const yen = (v: number | null) => (v == null ? "" : v.toLocaleString("en-US"));
+/** Nhãn ở chân khối: số đã nằm ngay dưới nên bỏ dấu hai chấm của từ điển. */
+const plainLabel = (s: string) => s.replace(/[:：]\s*$/, "");
+
+/** Chuỗi từ điển còn ký tự tượng trưng ở đầu (⚠ ⛓): nay đã có biểu tượng vẽ thật nên bỏ ký tự đi khi hiện. */
+export const noGlyph = (s: string) => s.replace(/^[⚠⛓✓]\uFE0F?\s*/u, "");
+
+/** Hiệu ứng chuỗi chỉ trễ dần tới dòng này: sổ dài hơn thì phần còn lại hiện cùng lúc, không bắt người chờ. */
+const CHAIN_CAP = 40;
+/** Thời gian giữ hiệu ứng sau một lần quét mới (ms). */
+const CHAIN_MS = 1600;
+/** Kết quả quét trong vòng từng này giây mới vẽ chuỗi: mở lại hồ sơ cũ thì không. */
+const FRESH_S = 30;
+const NOT_FRESH: ReadonlySet<string> = new Set();
+/** Số dòng kẻ trống của sổ chưa có kết quả. */
+const BLANK_ROWS = [0, 1, 2, 3, 4, 5, 6, 7];
+
+/** Mắt xích của một dòng. Dòng không in số dư (検算 ―) chưa chứng minh được gì nên chỉ là vạch ngang, không phải mắt khép kín. */
+function chainLink(info: RowInfo, first: boolean, last: boolean): string {
+  if (info.state === "note") return "note";
+  if (info.state === "confirmed") return "sealed";
+  if (info.need) return "open";
+  if (first) return "first";
+  if (last) return "last";
+  return info.chk === "OK" ? "ok" : "note";
+}
 
 export type OptCols = { store: boolean; extra: boolean; kind: boolean };
+/** Lựa chọn của người dùng. `store: null` = chưa chọn: cột 取扱店 tự hiện khi sổ có dữ liệu cột đó (cột trống chỉ tốn chỗ của 摘要). */
+export type ColPrefs = Omit<OptCols, "store"> & { store: boolean | null };
 export type ViewMode = "page" | "list";
 
 /** Địa chỉ một dòng trong kho: mặt sổ nào, khối nào, dòng thứ mấy. */
@@ -52,22 +95,43 @@ export type RestoreFn = (ref: TxRef, field: EditField) => void;
 const TableHead = memo(function TableHead({ cols, t }: { cols: OptCols; t: Dict }) {
   const g = t.colGloss;
   return (
-    <thead>
-      <tr>
-        <Th jp="行" vn="" align="center" width="34px" />
-        <Th jp="年月日" vn={g.date} width="112px" />
-        {cols.kind && <Th jp="区分" vn={g.kind} width="72px" />}
-        <Th jp="摘要" vn={g.desc} />
-        <Th jp="お支払" vn={g.out} align="right" width="106px" />
-        <Th jp="お預り" vn={g.in} align="right" width="106px" />
-        <Th jp="差引残高" vn={g.bal} align="right" width="118px" />
-        {cols.store && <Th jp="取扱店" vn="" align="center" width="76px" />}
-        {cols.extra && <Th jp="備考" vn="" align="center" width="76px" />}
-        <Th jp="検算" vn="" align="center" width="38px" />
-        <Th jp="確認メモ" vn="" width="140px" />
-        <Th jp="" vn="" width="52px" pinRight />
-      </tr>
-    </thead>
+    <>
+      <colgroup>
+        <col className="c-row" />
+        <col className="c-date" />
+        {cols.kind && <col className="c-kind" />}
+        <col />
+        <col className="c-out" />
+        <col className="c-in" />
+        <col className="c-bal" />
+        {cols.store && <col className="c-store" />}
+        {cols.extra && <col className="c-extra" />}
+        <col className="c-chk" />
+        <col className="c-memo" />
+        <col className="c-act" />
+      </colgroup>
+      <thead>
+        <tr>
+          <Th jp="行" vn="" pin="left" />
+          <Th jp="年月日" vn={g.date} />
+          {cols.kind && <Th jp="区分" vn={g.kind} />}
+          <Th jp="摘要" vn={g.desc} />
+          <Th jp="お支払" vn={g.out} align="right" />
+          <Th jp="お預り" vn={g.in} align="right" />
+          <Th jp="差引残高" vn={g.bal} align="right" />
+          {cols.store && <Th jp="取扱店" vn="" />}
+          {cols.extra && <Th jp="備考" vn="" />}
+          <Th jp="検算" vn="" align="center" tight />
+          <th className="ledger-memo-head">
+            <span className="ledger-th items-center">
+              <span className="ledger-memo-long">確認メモ</span>
+              <span className="ledger-memo-short">メモ</span>
+            </span>
+          </th>
+          <Th jp="" vn="" pin="right" />
+        </tr>
+      </thead>
+    </>
   );
 });
 
@@ -75,25 +139,23 @@ function Th({
   jp,
   vn,
   align = "left",
-  width,
-  pinRight = false,
+  pin,
+  tight = false,
 }: {
   jp: string;
   vn: string;
   align?: "left" | "right" | "center";
-  width?: string;
-  /** Ghim sát mép phải khi bảng rộng hơn khung và phải cuộn ngang (cột nút ✓ / ×). */
-  pinRight?: boolean;
+  /** Ghim mép khi bảng rộng hơn khung và phải cuộn ngang (cột 行 và cột nút). */
+  pin?: "left" | "right";
+  /** Cột hẹp đúng bằng tên cột: bỏ đệm hai bên. */
+  tight?: boolean;
 }) {
   return (
-    <th
-      style={width ? { width } : undefined}
-      className={`sticky top-0 whitespace-nowrap border-b border-rule bg-head px-2 py-2 text-[length:calc(12px*var(--fs))] font-semibold text-headink ${
-        pinRight ? "right-0 z-20" : "z-10"
-      } ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"}`}
-    >
-      {jp}
-      {vn && <span className="ml-1 font-normal opacity-70">({vn})</span>}
+    <th data-pin={pin} data-tight={tight ? "" : undefined}>
+      <span className={`ledger-th ${align === "right" ? "items-end" : align === "center" ? "items-center" : "items-start"}`}>
+        <span>{jp}</span>
+        {vn && <span className="max-w-full truncate font-normal opacity-85">{vn}</span>}
+      </span>
     </th>
   );
 }
@@ -215,7 +277,7 @@ function Cell({
   align = "left",
   money = false,
   tone,
-  placeholder,
+  tip,
   picked,
   readOnly,
   invalidHint,
@@ -230,7 +292,8 @@ function Cell({
   /** Ô chỉ để chép (cột 行) — không cho gõ, nhưng vẫn bôi đen được. */
   readOnly?: boolean;
   tone?: string;
-  placeholder?: string;
+  /** Chữ đầy đủ khi ô hẹp phải cắt bớt. */
+  tip?: string;
   /** Nằm trong vùng bôi đen — tô nền để thấy đang chọn tới đâu. */
   picked?: boolean;
   /** Câu báo khi giá trị gõ vào bị từ chối (onCommit trả false). */
@@ -253,7 +316,7 @@ function Cell({
       data-money={money ? "" : undefined}
       readOnly={readOnly}
       defaultValue={value}
-      placeholder={placeholder}
+      title={tip}
       onBlur={(e) => {
         const el = e.target;
         if (el.value === value) return;
@@ -303,17 +366,15 @@ function Cell({
         if (moveCell(el, e.key)) e.preventDefault();
       }}
       inputMode={money ? "numeric" : undefined}
-      className={`w-full rounded border border-transparent px-1 py-0.5 placeholder:text-ink3/60 hover:border-rule focus:border-accent focus:bg-card focus:outline-none data-[invalid]:border-danger data-[invalid]:bg-danger/10 ${
-        picked ? "bg-accent/25" : "bg-transparent"
-      } ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""} ${
-        money ? "tnum" : ""
-      } ${readOnly ? "tnum cursor-default text-[length:calc(10.5px*var(--fs))] text-ink3" : ""} ${tone ?? ""}`}
+      className={`ledger-cell num ${picked ? "bg-accent/25" : ""} ${
+        align === "right" ? "text-right" : align === "center" ? "text-center" : ""
+      } ${tone ?? ""}`}
     />
   );
 }
 
-/** Nút «💡 chữ đáp án» của từ điển, nằm đè lên mép phải ô (không chiếm chỗ ⇒ không đẩy dòng, không làm lệch cú bấm).
- *  Lúc thường chỉ lộ biểu tượng 💡 cho khỏi che chữ máy đọc; rê chuột / đứng trong ô thì bung ra đủ chữ đáp án. */
+/** Nút «gợi ý + chữ đáp án» của từ điển, nằm đè lên mép phải ô (không chiếm chỗ ⇒ không đẩy dòng, không làm lệch cú bấm).
+ *  Lúc thường chỉ lộ biểu tượng cho khỏi che chữ máy đọc; rê chuột / đứng trong ô thì bung ra đủ chữ đáp án. */
 function SugChip({ field, right, title, onAccept }: { field: DictField; right: string; title: string; onAccept: () => void }) {
   return (
     <button
@@ -326,9 +387,10 @@ function SugChip({ field, right, title, onAccept }: { field: DictField; right: s
         e.stopPropagation();
         onAccept();
       }}
-      className="absolute right-1 top-1/2 z-[2] max-w-[1.9rem] -translate-y-1/2 overflow-hidden whitespace-nowrap rounded border border-accent/50 bg-accentpale px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-accent shadow-sm transition-[max-width] hover:max-w-[70%] hover:bg-accent hover:text-accentink focus:max-w-[70%] group-focus-within/c:max-w-[70%] group-hover/c:max-w-[70%]"
+      className="absolute right-1 top-1/2 z-[2] flex h-7 max-w-[26px] -translate-y-1/2 items-center gap-1 overflow-hidden whitespace-nowrap rounded-sm bg-card px-1.5 text-t12 text-ink shadow-ply transition-[max-width] duration-150 hover:max-w-[80%] focus:max-w-[80%] group-focus-within/c:max-w-[80%] group-hover/c:max-w-[80%]"
     >
-      💡 {right}
+      <Lightbulb size={14} className="flex-none text-accent" />
+      {right}
     </button>
   );
 }
@@ -336,11 +398,14 @@ function SugChip({ field, right, title, onAccept }: { field: DictField; right: s
 function RowImpl({
   tx,
   n,
+  last,
+  gap,
   cols,
   info,
   ref_,
   dim,
   sel,
+  fresh,
   rowIdx,
   pc0,
   pc1,
@@ -357,6 +422,10 @@ function RowImpl({
 }: {
   tx: Tx;
   n: number;
+  /** Dòng cuối của khối — đường chuỗi dừng ở đây. */
+  last: boolean;
+  /** Dòng ngay dưới là mắt xích đứt: đường chuỗi của dòng này dừng sớm để chỗ đứt vắt qua ranh hai dòng. */
+  gap: boolean;
   cols: OptCols;
   /** Kết quả của định nghĩa「cần soát」dùng chung (lib/review.ts) — Row không tự tính gì. */
   info: RowInfo;
@@ -364,6 +433,8 @@ function RowImpl({
   /** Đang lọc và dòng này không khớp → làm mờ thay vì ẩn, để không mất mạch sổ. */
   dim: boolean;
   sel: boolean;
+  /** Mặt sổ vừa quét xong: dòng lắng vào cùng lúc đường chuỗi được vẽ. */
+  fresh: boolean;
   /** Số thứ tự dòng trong TOÀN lưới — toạ độ hàng của vùng bôi đen. */
   rowIdx: number;
   /** Các cột của dòng này nằm trong vùng bôi đen: từ `pc0` tới `pc1` (cả hai −1 = dòng không nằm trong vùng).
@@ -389,6 +460,15 @@ function RowImpl({
   const fixed = state === "fixed";
   const confirmed = state === "confirmed";
   const note = state === "note";
+  // Dấu 検印 chỉ ấn đúng lần dòng vừa được xác nhận; dòng đã xác nhận từ trước thì nằm yên. Phải cùng `rid`: chèn hay xoá dòng
+  // làm vị trí này đổi sang dòng khác thì không phải ai vừa đóng dấu. Giữ cờ cho tới khi dòng đổi trạng thái: nếu tắt ngay ở lần
+  // vẽ sau (chọn sang dòng kế) thì hiệu ứng bị cắt giữa chừng.
+  const seal = useRef({ rid: tx.rid, on: confirmed, press: false }).current;
+  if (seal.on !== confirmed || seal.rid !== tx.rid) {
+    seal.press = confirmed && !seal.on && seal.rid === tx.rid;
+    seal.on = confirmed;
+    seal.rid = tx.rid;
+  }
   // Ngày là thủ phạm (hỏng/trống) thì tô thêm ô ngày để mắt tìm ra ngay
   const dateBad = flag && !isISO(tx.date);
   const fmt = (v: string | number | null | undefined) =>
@@ -397,7 +477,7 @@ function RowImpl({
   const changes = editChanges(tx);
   const hasOrig = changes.length > 0;
   const editTip = changes.map((c) => `${FIELD_LABEL[c.field]}: ${fmt(c.from)} → ${fmt(c.to)}`).join("\n");
-  /** Nút ↺ nhỏ ở góc ô, chỉ hiện khi rê chuột vào ô ĐÃ BỊ SỬA: bấm để trả về giá trị máy đọc. */
+  /** Nút nhỏ trong ô, chỉ hiện khi rê chuột vào ô ĐÃ BỊ SỬA: bấm để trả về giá trị máy đọc. */
   const restore = (f: EditField, side: "l" | "r" = "r") => {
     const o = tx.orig;
     if (!o || !(f in o)) return null;
@@ -413,11 +493,11 @@ function RowImpl({
         }}
         title={t.restoreTitle(fmt(o[f]))}
         aria-label={t.restoreTitle(fmt(o[f]))}
-        className={`absolute top-0 ${
-          side === "l" ? "left-0" : "right-0"
-        } z-[1] flex h-4 w-4 items-center justify-center rounded border border-rule bg-card text-[length:calc(11px*var(--fs))] leading-none text-accent opacity-0 transition-opacity hover:bg-accentpale focus:opacity-100 group-hover/c:opacity-100`}
+        className={`ledger-restore opacity-0 transition-opacity duration-100 focus:opacity-100 group-hover/c:opacity-100 ${
+          side === "l" ? "left-0.5" : "right-0.5"
+        }`}
       >
-        ↺
+        <ArrowCounterClockwise size={12} weight="bold" />
       </button>
     );
   };
@@ -449,29 +529,37 @@ function RowImpl({
     <tr
       data-row={`${ref_.sheet}:${ref_.block}:${ref_.row}`}
       data-state={state}
+      data-sel={sel ? "" : undefined}
       onClick={() => onSelect(ref_)}
       /* Đi bằng bàn phím cũng phải kéo theo vệt đỏ trên ảnh, không thì gõ tới
          dòng nào mà ảnh vẫn đứng ở dòng cũ. Sự kiện focus có nổi bọt lên tr. */
       onFocus={() => onSelect(ref_)}
-      className={`group cursor-default border-b border-rule2 ${
-        note ? "italic text-ink3" : ""
-      } ${n % 2 === 0 ? "bg-band" : ""} ${dim ? "opacity-25" : ""} ${
-        sel ? "outline outline-2 -outline-offset-2 outline-danger" : ""
-      } hover:bg-accentpale/30`}
+      style={{ "--i": Math.min(n - 1, CHAIN_CAP) } as CSSProperties}
+      className={`group ${fresh ? "row-in" : ""} ${dim ? "opacity-25" : ""}`}
     >
-      {/* Cột 行 KHÔNG sửa được nhưng vẫn phải bôi đen chép được: người dùng
+      {/* Cột 行 là lề của đường chuỗi. KHÔNG sửa được nhưng vẫn phải bôi đen chép được: người dùng
           muốn dán sang Excel kèm số dòng để đối chiếu với sổ giấy.
           `readOnly` + con trỏ mặc định → nhìn và cư xử y như ô chữ thường. */}
-      <td className="w-8 border-r border-rule2 bg-card2 px-0.5">
+      <td
+        className="chain"
+        data-link={chainLink(info, n === 1, last)}
+        data-end={n === 1 ? "first" : last ? "last" : undefined}
+        data-gap={gap ? "" : undefined}
+      >
+        {confirmed && (
+          <span className="ledger-chain-seal">
+            <Seal size={18} press={seal.press} />
+          </span>
+        )}
         <Cell
           value={tx.row_no != null ? String(tx.row_no).padStart(2, "0") : String(n).padStart(2, "0")}
-          align="center"
           readOnly
+          tone={flag ? "font-bold text-shu" : ""}
           picked={on(cRow)}
           onCommit={() => {}}
         />
       </td>
-      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${dateBad ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative ${dateBad ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.date ?? tx.date_raw ?? ""}
           field="date"
@@ -482,10 +570,12 @@ function RowImpl({
         {restore("date")}
       </td>
       {cols.kind && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(12.5px*var(--fs))]">
+        <td className="group/c relative">
           <Cell
             value={tx.kind ?? ""}
             field="kind"
+            tone="text-t13 text-ink2"
+            tip={tx.kind ?? undefined}
             picked={on(cKind)}
             onTab={sug.kind ? () => (onAcceptSug(ref_, "kind", sug.kind as string), true) : undefined}
             onCommit={(v) => onEdit(ref_, "kind", v || null)}
@@ -498,14 +588,15 @@ function RowImpl({
               onAccept={() => onAcceptSug(ref_, "kind", sug.kind as string)}
             />
           )}
-          {restore("kind")}
+          {restore("kind", sug.kind ? "l" : "r")}
         </td>
       )}
-      <td className={`group/c relative px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={tx.description ?? ""}
           field="description"
           tone={flag ? "text-warnink" : ""}
+          tip={tx.description ?? undefined}
           picked={on(cDesc)}
           onTab={sug.description ? () => (onAcceptSug(ref_, "description", sug.description as string), true) : undefined}
           onCommit={(v) => onEdit(ref_, "description", v || null)}
@@ -518,17 +609,16 @@ function RowImpl({
             onAccept={() => onAcceptSug(ref_, "description", sug.description as string)}
           />
         )}
-        {restore("description")}
+        {restore("description", sug.description ? "l" : "r")}
       </td>
-      {/* Rút = đỏ, Gửi = xanh ngọc. Ô trống hiện gạch ngang cho dễ dò */}
-      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
+      {/* Tiền ra màu 朱 nhạt, tiền vào mực xanh. Ô trống để trống hẳn: bảng tiền càng ít nét thừa càng dễ dò */}
+      <td className={`group/c relative ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_out)}
           field="amount_out"
           align="right"
           money
-          placeholder="–"
-          tone={tx.amount_out != null ? "font-medium text-outink" : ""}
+          tone={fixed ? "text-okink" : "text-outink"}
           picked={on(cOut)}
           invalidHint={t.cellNumberOnly}
           onCommit={(v) => {
@@ -539,14 +629,13 @@ function RowImpl({
         />
         {restore("amount_out", "l")}
       </td>
-      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${fixed ? "bg-okbg" : ""}`}>
+      <td className={`group/c relative ${fixed ? "bg-okbg" : ""}`}>
         <Cell
           value={yen(tx.amount_in)}
           field="amount_in"
           align="right"
           money
-          placeholder="–"
-          tone={tx.amount_in != null ? "font-medium text-inink" : ""}
+          tone={fixed ? "text-okink" : "text-inink"}
           picked={on(cIn)}
           invalidHint={t.cellNumberOnly}
           onCommit={(v) => {
@@ -557,14 +646,13 @@ function RowImpl({
         />
         {restore("amount_in", "l")}
       </td>
-      <td className={`group/c relative whitespace-nowrap px-1 py-0.5 ${flag ? "bg-warnbg" : ""}`}>
+      <td className={`group/c relative ${flag ? "bg-warnbg" : ""}`}>
         <Cell
           value={yen(tx.balance)}
           field="balance"
           align="right"
           money
-          placeholder="–"
-          tone={`font-semibold ${flag ? "text-warnink" : ""}`}
+          tone={flag ? "font-bold text-warnink" : note ? "text-ink2" : "font-bold text-ink"}
           picked={on(cBal)}
           invalidHint={t.cellNumberOnly}
           onCommit={(v) => {
@@ -576,10 +664,11 @@ function RowImpl({
         {restore("balance", "l")}
       </td>
       {cols.store && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
+        <td className="group/c relative">
           <Cell
             value={tx.store_code ?? ""}
             field="store_code"
+            tone="text-t13 text-ink2"
             picked={on(cStore)}
             onCommit={(v) => onEdit(ref_, "store_code", v || null)}
           />
@@ -587,10 +676,12 @@ function RowImpl({
         </td>
       )}
       {cols.extra && (
-        <td className="group/c relative whitespace-nowrap px-1 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
+        <td className="group/c relative">
           <Cell
             value={tx.extra_text ?? ""}
             field="extra_text"
+            tone="text-t13 text-ink2"
+            tip={tx.extra_text ?? undefined}
             picked={on(cExtra)}
             onCommit={(v) => onEdit(ref_, "extra_text", v || null)}
           />
@@ -598,65 +689,68 @@ function RowImpl({
         </td>
       )}
       <td
-        className={`w-9 text-center text-[length:calc(10.5px*var(--fs))] font-bold ${
-          chk === "NG" ? "text-warnink" : chk === "OK" ? "text-inink" : "text-ink3"
-        }`}
-        title={tx.reason || undefined}
+        /* relative: chữ ẩn bên trong là position:absolute, không có mốc ở đây thì nó thoát khỏi khung cuộn và làm cả trang tràn ngang */
+        className="num relative text-center text-t12 font-bold text-shu"
+        title={tx.reason || chk}
       >
-        {chk}
+        {/* Khớp thì để trống: lặp chữ OK cả cột chỉ làm nhiễu, chỗ NG mới là thứ mắt phải bắt được */}
+        {chk === "NG" ? chk : <span className="sr-only">{chk}</span>}
       </td>
-      <td
-        className="max-w-[140px] truncate px-2 py-0.5 text-[length:calc(11px*var(--fs))]"
-        title={[editTip, tx.reason].filter(Boolean).join("\n") || undefined}
-      >
-        {flag && memo && <span className="text-warnink">⚠ {memo}</span>}
-        {fixed && <span className="text-inink">✓ {fixedMemo}</span>}
-        {confirmed && (
-          <span className="text-okink">
-            ✓ {t.rowConfirmed}
-            {hasOrig ? " ✎" : ""}
-          </span>
-        )}
-        {state === "edited" && (
-          <span className="text-ink2">
-            ✎ {tx.dict_fixed?.length ? t.rowDictFixed : hasOrig ? t.rowEdited : t.rowInferred}
-          </span>
-        )}
+      <td className="ledger-memo-cell" title={[editTip, tx.reason].filter(Boolean).join("\n") || undefined}>
+        <div className="ledger-memo">
+          {flag && memo && (
+            <>
+              <Warning size={14} className="flex-none text-warnink" />
+              <span className="ledger-memo-text text-warnink">{memo}</span>
+            </>
+          )}
+          {fixed && (
+            <>
+              <MagicWand size={14} className="flex-none text-okink" />
+              <span className="ledger-memo-text text-okink">{fixedMemo}</span>
+            </>
+          )}
+          {confirmed && (
+            <>
+              <Check size={14} className="flex-none text-ink3" />
+              <span className="ledger-memo-text text-ink2">{t.rowConfirmed}</span>
+              {hasOrig && <PencilSimple size={13} className="ledger-memo-extra flex-none text-ink3" />}
+            </>
+          )}
+          {state === "edited" && (
+            <>
+              <PencilSimple size={14} className="flex-none text-ink3" />
+              <span className="ledger-memo-text text-ink2">
+                {tx.dict_fixed?.length ? t.rowDictFixed : hasOrig ? t.rowEdited : t.rowInferred}
+              </span>
+            </>
+          )}
+        </div>
       </td>
       {/* Ghim sát mép phải: bảng rộng hơn khung thì phải cuộn ngang mới tới cột này, mà ✓ là nút
-          hay bấm nhất — không được để nó nằm ngoài tầm mắt. Nền đặc để chữ cuộn phía dưới không lòi ra. */}
-      <td
-        className={`sticky right-0 z-[1] w-[52px] whitespace-nowrap border-l border-rule2 px-0.5 text-right ${
-          n % 2 === 0 ? "bg-band" : "bg-card"
-        }`}
-      >
-        {/* ✓ Đã soát: luôn hiện ở dòng cần soát / đã soát; dòng khác chỉ hiện khi rê chuột.
-            Dòng ghi chú (繰越…) không có ✓ vì không bao giờ cần soát. */}
-        {!note && (
-          <button
-            data-act="confirm"
-            onClick={() => onToggleReviewed(ref_)}
-            title={confirmed ? t.rowUnconfirmTitle : `${t.rowConfirmTitle} (Ctrl+Enter)`}
-            aria-label={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
-            aria-pressed={confirmed}
-            className={`mr-0.5 inline-flex h-5 w-5 items-center justify-center rounded text-[length:calc(12px*var(--fs))] font-bold leading-none transition-opacity ${
-              confirmed
-                ? "bg-okbg text-okink"
-                : flag
-                  ? "border border-warnink/40 text-warnink hover:bg-okbg hover:text-okink"
-                  : "text-ink3 opacity-0 hover:bg-okbg hover:text-okink group-hover:opacity-100"
-            }`}
-          >
-            ✓
+          hay bấm nhất — không được để nó nằm ngoài tầm mắt. */}
+      <td className="ledger-act">
+        <div className="ledger-act-row">
+          {/* Dấu 検印 nằm trên đường chuỗi ở cột 行; nút này chỉ là chỗ bật / tắt nó. Dòng cần soát và dòng đã soát luôn hiện nút;
+              dòng khác chỉ hiện khi rê chuột hoặc đang chọn. Dòng ghi chú (繰越…) không có nút vì không bao giờ cần soát. */}
+          {!note && (
+            <button
+              data-act="confirm"
+              data-due={flag ? "" : undefined}
+              data-keep={flag || confirmed ? "" : undefined}
+              onClick={() => onToggleReviewed(ref_)}
+              title={confirmed ? t.rowUnconfirmTitle : `${t.rowConfirmTitle} (Ctrl+Enter)`}
+              aria-label={confirmed ? t.rowUnconfirmTitle : t.rowConfirmTitle}
+              aria-pressed={confirmed}
+              className="ledger-act-btn"
+            >
+              <Check size={15} weight="bold" />
+            </button>
+          )}
+          <button onClick={() => onDelete(ref_)} title={t.deleteRow} aria-label={t.deleteRow} className="ledger-act-btn">
+            <X size={14} />
           </button>
-        )}
-        <button
-          onClick={() => onDelete(ref_)}
-          title={t.deleteRow}
-          className="inline-flex h-5 w-5 items-center justify-center rounded text-[length:calc(13px*var(--fs))] leading-none text-ink3 opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
-        >
-          ×
-        </button>
+        </div>
       </td>
     </tr>
   );
@@ -666,7 +760,7 @@ function RowImpl({
    và dòng được chọn) thay vì cả bảng (task 3.5). */
 const Row = memo(RowImpl);
 
-/** Dải mảnh báo chỗ nối số dư với mặt sổ đứng ngay trước (task 1.6). CAO CỐ ĐỊNH (h-8): dải đổi từ
+/** Dải mảnh báo chỗ nối số dư với mặt sổ đứng ngay trước (task 1.6). CAO CỐ ĐỊNH: dải đổi từ
  *  «nối liền» sang «đứt» khi người dùng vừa sửa một số mà cao thấp khác nhau thì cả bảng bên dưới
  *  giật đúng lúc đang nhấn chuột. Trạng thái không kiểm được / khác sổ thì không hiện gì. */
 function LinkStrip({
@@ -683,23 +777,21 @@ function LinkStrip({
   onUndismiss: (to: string) => void;
 }) {
   if (link.status !== "ok" && link.status !== "break") return null;
-  const box =
-    "mx-2.5 mt-2.5 flex h-8 flex-none items-center gap-2 overflow-hidden whitespace-nowrap rounded-lg border px-3 text-[length:calc(11.5px*var(--fs))]";
-  const btn =
-    "flex-none rounded-md border border-rule bg-card px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-ink2 hover:border-accentmid hover:text-ink";
   if (link.status === "ok") {
     return (
-      <div data-link="ok" className={`${box} border-rule2 bg-card2 text-ink3`}>
-        <span className="truncate">{t.linkOk(fromName)}</span>
+      <div data-link="ok" className="ledger-link ledger-bleed">
+        <LinkSimple size={14} className="flex-none text-accent" />
+        <span className="truncate">{noGlyph(t.linkOk(fromName))}</span>
       </div>
     );
   }
   const diff = signedNum(link.diff ?? 0);
   if (link.dismissed) {
     return (
-      <div data-link="dismissed" className={`${box} border-rule2 bg-card2 text-ink3`}>
-        <span className="min-w-0 flex-1 truncate">{t.linkDismissed}</span>
-        <button className={btn} onClick={() => onUndismiss(link.to)}>
+      <div data-link="dismissed" className="ledger-link ledger-bleed">
+        <LinkSimple size={14} className="flex-none text-ink3" />
+        <span className="min-w-0 flex-1 truncate">{noGlyph(t.linkDismissed)}</span>
+        <button className="btn btn-ghost btn-sm flex-none" onClick={() => onUndismiss(link.to)}>
           {t.linkUndismiss}
         </button>
       </div>
@@ -707,18 +799,20 @@ function LinkStrip({
   }
   if (!link.sameBook) {
     // Ảnh chụp lẻ không có số tài khoản: lệch là chuyện thường, chỉ nói nhẹ nhàng
-    const text = t.linkWeak(diff);
+    const text = noGlyph(t.linkWeak(diff));
     return (
-      <div data-link="weak" title={text} className={`${box} border-rule2 bg-card2 text-ink3`}>
+      <div data-link="weak" title={text} className="ledger-link ledger-bleed">
+        <LinkBreak size={14} className="flex-none text-ink3" />
         <span className="truncate">{text}</span>
       </div>
     );
   }
-  const text = t.linkBreak(diff);
+  const text = noGlyph(t.linkBreak(diff));
   return (
-    <div data-link="break" title={text} className={`${box} border-warnedge bg-warnbg font-medium text-warnink`}>
+    <div data-link="break" title={text} className="ledger-link ledger-bleed">
+      <LinkBreak size={14} weight="bold" className="flex-none" />
       <span className="min-w-0 flex-1 truncate">{text}</span>
-      <button className={btn} onClick={() => onDismiss(link)}>
+      <button className="btn btn-quiet btn-sm flex-none" onClick={() => onDismiss(link)}>
         {t.linkNotError}
       </button>
     </div>
@@ -758,6 +852,7 @@ function AccountCardImpl({
   onSelectRow,
   rowBase,
   sel,
+  draw,
 }: {
   meta: AccountMeta;
   rows: Tx[];
@@ -793,6 +888,8 @@ function AccountCardImpl({
   rowBase: number;
   /** Vùng bôi đen, hoặc null nếu vùng đó KHÔNG chạm tới khối này (để các thẻ khác không vẽ lại khi kéo chuột). */
   sel: Rect | null;
+  /** Mặt sổ vừa quét xong: đường chuỗi tự vẽ từ trên xuống một lần. */
+  draw: boolean;
 }) {
   renderProbe("AccountCard");
   // Địa chỉ từng dòng: tạo MỘT lần cho mỗi (mặt sổ, khối, số dòng) để `Row` (memo) thấy cùng một tham chiếu
@@ -835,51 +932,49 @@ function AccountCardImpl({
   const lastBal = [...rows].reverse().find((r) => r.balance != null)?.balance;
 
   return (
-    <section className="m-2.5 overflow-hidden rounded-xl border border-rule bg-card shadow-[var(--shadow)]">
-      <header data-account-head className="flex flex-wrap items-center gap-2 border-b border-rule bg-card2 px-3 py-2">
+    <section className="bg-card">
+      <header
+        data-account-head
+        title={sourceLabel}
+        className="ledger-bleed flex h-[calc(36px*var(--fs))] items-center gap-2 overflow-hidden whitespace-nowrap pl-[22px] pr-2"
+      >
         {/* Chỉ đánh số khi MỘT mặt sổ chứa nhiều sổ khác nhau — nếu không, con
             số này nằm cạnh số thứ tự mặt sổ và gây nhầm hai thứ khác nhau. */}
-        {ofTotal > 1 && (
-          <span className="tnum flex flex-none items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[length:calc(10.5px*var(--fs))] font-bold text-accentink">
-            {t.accountNo(index + 1, ofTotal)}
-          </span>
-        )}
-        <div className="min-w-0">
-        <p className="truncate text-[length:calc(13.5px*var(--fs))] font-bold">
-          {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt sổ
-              thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang xem gì. */}
-          {meta.bank_name || fallbackTitle}
-          {meta.account_no && (
-            <span className="ml-1.5 font-normal text-ink3">· {meta.account_no}</span>
-          )}
-        </p>
-        {/* Tên file gốc + số trang — cho biết dòng này lấy từ đâu ra */}
-        <p className="truncate text-[length:calc(10.5px*var(--fs))] text-ink3">{sourceLabel}</p>
-        </div>
+        {ofTotal > 1 && <span className="tag tnum flex-none">{t.accountNo(index + 1, ofTotal)}</span>}
+        {/* Không có bìa sổ thì model không biết tên ngân hàng. Ghi tên mặt sổ
+            thay vì "(chưa rõ ngân hàng)" — vừa gọn vừa cho biết đang xem gì. */}
+        <span className="min-w-[4em] truncate text-t14 font-bold">{meta.bank_name || fallbackTitle}</span>
+        {meta.account_no && <span className="num flex-none text-t13 text-ink3">{meta.account_no}</span>}
         <button
           data-act="edit-meta"
           onClick={() => onEditMeta(refs[0].sheet, refs[0].block)}
           title={t.bookInfoEdit}
           aria-label={t.bookInfoEdit}
-          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border border-rule text-[length:calc(12px*var(--fs))] text-ink3 hover:border-accent hover:bg-accentpale hover:text-accent"
+          className="btn btn-ghost btn-sm btn-icon flex-none"
         >
-          ✎
+          <PencilSimple size={15} />
         </button>
         <span className="flex-1" />
-        {q && (
-          <span className="tnum rounded-md bg-accentpale px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-accent">
-            {t.matched(counted.length)}
-          </span>
-        )}
-        {needCheck > 0 && (
-          <span className="tnum rounded-md bg-warnbg px-2 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-warnink">
-            {t.stNeedCheck(needCheck)}
-          </span>
-        )}
+        {q && <span className="tag tnum flex-none">{t.matched(counted.length)}</span>}
+        <span className="tag tnum flex-none @max-[560px]/ledger:hidden">
+          {t.statusRows(real.length)}
+        </span>
+        {ofTotal > 1 && needCheck > 0 && <span className="tag tag-warn tnum flex-none">{t.stNeedCheck(needCheck)}</span>}
+        <button
+          data-act="confirm-all"
+          onClick={() => onConfirmAll(refs[0].sheet, refs[0].block)}
+          disabled={allConfirmed}
+          title={t.confirmAllHint}
+          aria-label={ofTotal > 1 ? t.confirmAllBook : t.confirmAll}
+          className="btn btn-quiet btn-sm flex-none"
+        >
+          <Check size={14} />
+          <span className="@max-[480px]/ledger:hidden">{ofTotal > 1 ? t.confirmAllBook : t.confirmAll}</span>
+        </button>
       </header>
 
-      <div className="thin-scroll overflow-x-auto">
-        <table className="w-full border-collapse text-[length:calc(13.5px*var(--fs))]">
+      <div className={draw ? "chain-draw" : undefined}>
+        <table className="ledger-table">
           <TableHead cols={cols} t={t} />
           <tbody>
             {rows.map((tx, i) => (
@@ -887,11 +982,14 @@ function AccountCardImpl({
                 key={`${refs[i].sheet}-${refs[i].block}-${refs[i].row}`}
                 tx={tx}
                 n={i + 1}
+                last={i === rows.length - 1}
+                gap={i + 1 < rows.length && infos[i + 1].need}
                 cols={cols}
                 info={infos[i]}
                 ref_={refs[i]}
                 dim={!!q && !matches(tx)}
                 sel={selectedRow === i}
+                fresh={draw}
                 rowIdx={rowBase + i}
                 pc0={sel && rowBase + i >= sel.r0 && rowBase + i <= sel.r1 ? sel.c0 : -1}
                 pc1={sel && rowBase + i >= sel.r0 && rowBase + i <= sel.r1 ? sel.c1 : -1}
@@ -908,58 +1006,103 @@ function AccountCardImpl({
               />
             ))}
           </tbody>
+          {/* Chân khối nằm TRONG bảng: tổng đứng đúng dưới cột của nó như trên sổ kế toán */}
+          <tfoot>
+            <tr>
+              <td colSpan={cols.kind ? 4 : 3}>
+                <div className="flex flex-wrap items-center gap-1">
+                  <button
+                    onClick={() => insertAfter && onAddRow(insertAfter)}
+                    title={t.addRowHint}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    <Plus size={14} />
+                    {t.addRow}
+                  </button>
+                  <button
+                    onClick={() => onAutoBalance(refs[0].sheet, refs[0].block)}
+                    title={t.autoBalanceHint}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    {t.autoBalance}
+                  </button>
+                </div>
+              </td>
+              <td className="ledger-sum text-outink">
+                <span className="ledger-sum-label">{plainLabel(t.totalOut)}</span>
+                {yen(totalOut)}
+              </td>
+              <td className="ledger-sum text-inink">
+                <span className="ledger-sum-label">{plainLabel(t.totalIn)}</span>
+                {yen(totalIn)}
+              </td>
+              <td className="ledger-sum text-ink">
+                {!q && (
+                  <>
+                    <span className="ledger-sum-label">{plainLabel(t.lastBalance)}</span>
+                    {yen(lastBal ?? null)}
+                  </>
+                )}
+              </td>
+              <td colSpan={3 + (cols.store ? 1 : 0) + (cols.extra ? 1 : 0)} />
+            </tr>
+          </tfoot>
         </table>
       </div>
-
-      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-card2 px-3 py-2">
-        <button
-          onClick={() => insertAfter && onAddRow(insertAfter)}
-          className="rounded-lg border border-dashed border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accent hover:text-accent"
-          title={t.addRowHint}
-        >
-          + {t.addRow}
-        </button>
-        <button
-          onClick={() => onAutoBalance(refs[0].sheet, refs[0].block)}
-          title={t.autoBalanceHint}
-          className="rounded-lg border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-        >
-          {t.autoBalance}
-        </button>
-        <button
-          data-act="confirm-all"
-          onClick={() => onConfirmAll(refs[0].sheet, refs[0].block)}
-          disabled={allConfirmed}
-          title={t.confirmAllHint}
-          className="rounded-lg border border-okink/40 px-2 py-1 text-[length:calc(11.5px*var(--fs))] font-medium text-okink hover:bg-okbg disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          ✓ {ofTotal > 1 ? t.confirmAllBook : t.confirmAll}
-        </button>
-        <span className="flex-1" />
-        <span className="tnum text-[length:calc(11.5px*var(--fs))] text-ink3">
-          {t.totalOut} <b className="text-outink">¥{yen(totalOut)}</b>
-        </span>
-        <span className="tnum text-[length:calc(11.5px*var(--fs))] text-ink3">
-          {t.totalIn} <b className="text-inink">¥{yen(totalIn)}</b>
-        </span>
-        {!q && (
-          <span className="tnum rounded-md bg-card3 px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] text-ink2">
-            {t.lastBalance} <b className="text-ink">¥{yen(lastBal ?? null)}</b>
-          </span>
-        )}
-      </footer>
     </section>
   );
 }
 
+
 const AccountCard = memo(AccountCardImpl);
+
+/** Sổ chưa có dòng nào: đúng đầu bảng thật và vài dòng kẻ trống mờ dần, nên màn hình trống cũng dạy luôn bố cục sẽ hiện. */
+function BlankLedger({ cols, t, text, active = false }: { cols: OptCols; t: Dict; text: string; active?: boolean }) {
+  const rest = 8 + (cols.kind ? 1 : 0) + (cols.store ? 1 : 0) + (cols.extra ? 1 : 0);
+  return (
+    <div>
+      <div className="relative">
+        <table className={`ledger-table ledger-blank ${active ? "ledger-blank-active" : ""}`}>
+          <TableHead cols={cols} t={t} />
+          <tbody aria-hidden>
+            {BLANK_ROWS.map((r) => (
+              <tr key={r} style={{ "--i": r } as CSSProperties}>
+                <td className="chain" />
+                {Array.from({ length: rest }, (_, c) => (
+                  <td key={c} />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div aria-hidden className="ledger-blank-fade" />
+      </div>
+      <p
+        role={active ? "status" : undefined}
+        className={`ledger-bleed z-[6] -mt-14 flex max-w-[36em] items-center gap-2 pl-[22px] pr-4 text-t15 leading-relaxed [overflow-wrap:anywhere] [text-wrap:balance] ${
+          active ? "font-bold text-ink" : "text-ink2"
+        }`}
+      >
+        {active && <CircleNotch size={16} className="flex-none animate-spin text-accent motion-reduce:animate-none" />}
+        {text}
+      </p>
+    </div>
+  );
+}
+
+/** Bề rộng chữ tính bằng nửa ô: chữ Nhật toàn góc 2, chữ Latin và kana nửa góc 1. */
+function halfCells(text: string | null | undefined): number {
+  let n = 0;
+  for (const ch of text ?? "") n += ch.charCodeAt(0) > 0xff && !(ch >= "\uff61" && ch <= "\uff9f") ? 2 : 1;
+  return n;
+}
 
 export default function ReviewPane({
   store,
   sheets,
   activeSheet,
   mode,
-  cols,
+  cols: colPrefs,
   onToggleCol,
   onModeChange,
   onEdit,
@@ -977,13 +1120,17 @@ export default function ReviewPane({
   onUndismissLink,
   selected,
   onSelectRow,
+  fixBar,
+  footer,
+  scanText,
 }: {
   store: ResultStore;
   sheets: Sheet[];
   activeSheet: string | null;
   mode: ViewMode;
-  cols: OptCols;
-  onToggleCol: (k: keyof OptCols) => void;
+  cols: ColPrefs;
+  /** `current`: cột đang hiện hay không (取扱店 tự động nên chỉ người vẽ mới biết). */
+  onToggleCol: (k: keyof OptCols, current: boolean) => void;
   onModeChange: (m: ViewMode) => void;
   onEdit: EditFn;
   onDeleteRow: RowActionFn;
@@ -1007,6 +1154,12 @@ export default function ReviewPane({
   /** Dòng đang chọn — khung giữa khoanh đúng dải ảnh của dòng này. */
   selected: TxRef | null;
   onSelectRow: (ref: TxRef) => void;
+  /** Thanh gợi ý sửa, đặt ngay dưới đầu sổ (không truyền thì không vẽ gì). */
+  fixBar?: ReactNode | null;
+  /** Tên sổ + nút xuất file: nằm cùng thanh chân sổ để bảng không mất thêm một thanh. */
+  footer?: ReactNode;
+  /** Đang quét: câu tiến độ thay cho câu chờ ở sổ trống. */
+  scanText?: string;
 }) {
   const { t, lang } = useT();
   const scroller = useRef<HTMLDivElement>(null);
@@ -1117,12 +1270,101 @@ export default function ReviewPane({
     const box = scroller.current;
     const target = box?.querySelector<HTMLElement>(`[data-sheet="${activeSheet}"]`);
     if (!box || !target) return;
-    const delta =
-      target.getBoundingClientRect().top - box.getBoundingClientRect().top;
-    box.scrollTop = box.scrollTop + delta;
+    const align = () => {
+      box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    };
+    align();
+    // Vừa sang dạng danh sách, các mặt phía trên còn cao tạm 900px (content-visibility): tới khung hình sau mới có chiều cao
+    // thật, không canh lại thì dừng lố xuống cuối mặt đang xem.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(align);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [activeSheet, mode, store]);
 
   const openMeta = useCallback((sheet: string, block: number) => setMetaTarget({ sheet, block }), []);
+
+  /* Lần quét mới của một mặt sổ (job_id / scanned_at đổi trong lúc đang mở): đường chuỗi tự vẽ đúng một lần. Hồ sơ nạp về thì
+     danh sách mặt sổ và kết quả tới cùng một lượt, còn kết quả quét luôn tới SAU khi đã có mặt sổ: lượt đầu có mặt sổ chỉ ghi
+     mốc, nên F5 ngay sau khi quét không vẽ lại. Đổi sang hồ sơ khác không qua lượt đầu đó, nên vẫn cần điều kiện vừa quét xong. */
+  const scanMarks = useRef<Record<string, string> | null>(null);
+  const freshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(NOT_FRESH);
+  const hasSheets = sheets.length > 0;
+  useEffect(() => {
+    if (!hasSheets) return;
+    const baseline = scanMarks.current === null;
+    const marks = (scanMarks.current ??= {});
+    const now = Date.now() / 1000;
+    const hit: string[] = [];
+    for (const [sid, r] of Object.entries(store)) {
+      const mark = `${r.job_id}:${r.scanned_at}`;
+      if (marks[sid] === mark) continue;
+      marks[sid] = mark;
+      if (!baseline && r.blocks?.length && now - r.scanned_at < FRESH_S) hit.push(sid);
+    }
+    if (hit.length === 0) return;
+    setFresh(new Set(hit));
+    if (freshTimer.current) clearTimeout(freshTimer.current);
+    freshTimer.current = setTimeout(() => setFresh(NOT_FRESH), CHAIN_MS);
+  }, [store, hasSheets]);
+  useEffect(
+    () => () => {
+      if (freshTimer.current) clearTimeout(freshTimer.current);
+    },
+    [],
+  );
+
+  /** Chuỗi dài nhất của cột ngày và các cột tiền, tính cả tổng ở chân khối: cột phải đủ rộng để không số nào bị cắt. */
+  const fit = useMemo(() => {
+    const ids = mode === "page" ? (activeSheet ? [activeSheet] : []) : scanned.map((s) => s.id);
+    let date = 10;
+    let out = 0;
+    let inn = 0;
+    let bal = 0;
+    let kind = 0;
+    let hasStore = false;
+    for (const sid of ids) {
+      for (const b of store[sid]?.blocks ?? []) {
+        let sumOut = 0;
+        let sumIn = 0;
+        for (const r of b.rows) {
+          date = Math.max(date, (r.date ?? r.date_raw ?? "").length);
+          kind = Math.max(kind, halfCells(r.kind));
+          hasStore = hasStore || !!r.store_code;
+          bal = Math.max(bal, Math.abs(r.balance ?? 0));
+          out = Math.max(out, r.amount_out ?? 0);
+          inn = Math.max(inn, r.amount_in ?? 0);
+          if (r.is_note) continue;
+          sumOut += r.amount_out ?? 0;
+          sumIn += r.amount_in ?? 0;
+        }
+        out = Math.max(out, sumOut);
+        inn = Math.max(inn, sumIn);
+      }
+    }
+    return { date: Math.min(date, 16), out: yen(out).length, inn: yen(inn).length, bal: yen(bal).length, kind, hasStore };
+  }, [mode, activeSheet, scanned, store]);
+  const cols = useMemo<OptCols>(
+    () => ({ ...colPrefs, store: colPrefs.store ?? fit.hasStore }),
+    [colPrefs, fit.hasStore],
+  );
+  const gridStyle = {
+    "--c-kind": fit.kind,
+    "--c-date": fit.date,
+    "--c-out": fit.out,
+    "--c-in": fit.inn,
+    "--c-bal": fit.bal,
+    "--on-kind": cols.kind ? 1 : 0,
+    "--on-store": cols.store ? 1 : 0,
+    "--on-extra": cols.extra ? 1 : 0,
+  } as CSSProperties;
+
+  const pageName = mode === "page" && activeSheet ? (sheetName[activeSheet] ?? "") : "";
+  const rowsHere =
+    mode === "page" && activeSheet
+      ? (store[activeSheet]?.blocks ?? []).reduce((n, b) => n + b.rows.filter((x) => !x.is_note).length, 0)
+      : totalRows;
 
   /** Dòng đầu tiên của mỗi khối đứng thứ mấy trong TOÀN lưới.
    *
@@ -1185,6 +1427,7 @@ export default function ReviewPane({
             ? sel
             : null
         }
+        draw={fresh.has(sheetId)}
       />
     ));
     return (
@@ -1205,114 +1448,106 @@ export default function ReviewPane({
 
   if (scanned.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-[length:calc(15px*var(--fs))] font-semibold text-ink2">{t.reviewEmpty}</p>
-        <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink3">{t.reviewEmptyHint}</p>
+      <div className="ledger-pane flex h-full min-h-0 flex-col bg-card">
+        <div className="flex h-11 flex-none items-center border-b border-rule2 px-3">
+          <h2 className="text-t14 font-bold">{t.reviewTitle}</h2>
+        </div>
+        <div className="ledger-grid thin-scroll min-h-0 flex-1 overflow-auto" style={gridStyle}>
+          <BlankLedger
+            cols={cols}
+            t={t}
+            active={!!scanText}
+            text={scanText ?? (sheets.length > 0 ? t.ledgerBlankNotScanned : t.ledgerBlankNoPages)}
+          />
+        </div>
+        <div className="flex h-11 flex-none items-center gap-2 border-t border-rule px-3">{footer}</div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Đầu cột */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-card px-3 py-2">
-        <div className="min-w-0">
-          <p className="text-[length:calc(13.5px*var(--fs))] font-bold">
-            {t.reviewTitle}
-            <span className="tnum ml-1.5 font-normal text-ink3">
-              ({totalRows} {t.rowsShort})
-            </span>
-          </p>
-          <p className="text-[length:calc(11px*var(--fs))] text-ink3">{t.reviewSubtitle}</p>
-        </div>
-
-        <span className="flex-1" />
-
-        <div className="flex overflow-hidden rounded-lg border border-rule">
-          <button
-            onClick={() => onModeChange("page")}
-            aria-pressed={mode === "page"}
-            className={`px-2.5 py-1.5 text-[length:calc(12px*var(--fs))] ${
-              mode === "page"
-                ? "bg-accent font-semibold text-accentink"
-                : "bg-card text-ink2 hover:bg-card2"
-            }`}
-          >
-            {t.viewCurrentPage}
-          </button>
-          <button
-            onClick={() => onModeChange("list")}
-            aria-pressed={mode === "list"}
-            className={`border-l border-rule px-2.5 py-1.5 text-[length:calc(12px*var(--fs))] ${
-              mode === "list"
-                ? "bg-accent font-semibold text-accentink"
-                : "bg-card text-ink2 hover:bg-card2"
-            }`}
-          >
-            {t.viewAsList} ({scanned.length})
-          </button>
-        </div>
-      </div>
-
-      {/* Bộ lọc theo nội dung — chỉ để XEM, không ảnh hưởng file xuất */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-rule2 bg-card2 px-3 py-1.5">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="flex-none text-ink3" aria-hidden>
-          <circle cx="10.5" cy="10.5" r="6.5" />
-          <path d="M15.5 15.5 21 21" />
-        </svg>
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder={t.filterPlaceholder}
-          className="min-w-0 flex-1 rounded-md border border-rule bg-card px-2 py-1 text-[length:calc(12.5px*var(--fs))] placeholder:text-ink3"
+    <div className="ledger-pane flex h-full min-h-0 flex-col bg-card">
+      {/* Đầu sổ: một dòng CAO CỐ ĐỊNH, chữ dài tự cắt. Bộ lọc chỉ để XEM, không ảnh hưởng file xuất */}
+      <div className="flex h-11 flex-none items-center gap-3 overflow-hidden whitespace-nowrap border-b border-rule2 px-3">
+        <h2 title={t.reviewSubtitle} className="flex min-w-0 flex-1 items-baseline gap-2 @max-[480px]/ledger:hidden">
+          <span className="flex-none text-t14 font-bold">{t.reviewTitle}</span>
+          {pageName && <span className="min-w-0 truncate text-t13 font-normal text-ink2">{pageName}</span>}
+          <span className="tnum flex-none text-t13 font-normal text-ink3">
+            {t.statusRows(rowsHere)}
+          </span>
+        </h2>
+        <Segmented
+          layoutId="ledger-view"
+          label={t.reviewTitle}
+          value={mode}
+          onChange={onModeChange}
+          className="flex-none"
+          options={[
+            { id: "page", label: t.viewCurrentPage },
+            { id: "list", label: `${t.viewAsList} (${scanned.length})` },
+          ]}
         />
-        {filter && (
-          <button
-            onClick={() => setFilter("")}
-            className="rounded-md border border-rule px-2 py-1 text-[length:calc(11.5px*var(--fs))] text-ink2 hover:text-ink"
-          >
-            {t.filterClear}
-          </button>
-        )}
-        <span className="text-[length:calc(10.5px*var(--fs))] text-ink3">{t.filterNote}</span>
+        <div title={t.filterNote} className="relative min-w-0 flex-[0_1_200px]">
+          <MagnifyingGlass size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink3" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={t.filterPlaceholder}
+            aria-label={t.filterPlaceholder}
+            className={`field min-h-[calc(30px*var(--fs))] truncate pl-7 text-t13 ${filter ? "pr-7" : "pr-2"}`}
+          />
+          {filter && (
+            <button
+              onClick={() => setFilter("")}
+              title={t.filterClear}
+              aria-label={t.filterClear}
+              className="btn btn-ghost absolute right-0.5 top-1/2 min-h-0 h-6 w-6 -translate-y-1/2 p-0"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Thân cột — CHÍNH khung này cuộn */}
+      {/* Thân cột — CHÍNH khung này cuộn, cả dọc lẫn ngang */}
       {/* data-grid: mốc để phím mũi tên tìm được mọi dòng, kể cả ở thẻ sổ khác */}
       <div
         ref={scroller}
         data-grid
+        data-mode={mode}
         onMouseDown={onDown}
         onMouseOver={onOver}
-        className={`thin-scroll min-h-0 flex-1 overflow-auto ${sel ? "select-none" : ""}`}
+        style={gridStyle}
+        className={`ledger-grid thin-scroll min-h-0 flex-1 overflow-auto ${sel ? "select-none" : ""}`}
       >
         {mode === "page" ? (
           !activeSheet ? (
-            <p className="p-4 text-[length:calc(12.5px*var(--fs))] text-ink3">{t.pickSheetForPage}</p>
+            <BlankLedger cols={cols} t={t} text={t.pickSheetForPage} />
           ) : !store[activeSheet]?.blocks?.length ? (
-            <p className="p-4 text-[length:calc(12.5px*var(--fs))] text-ink3">
-              {t.sheetNoResult(sheetName[activeSheet] ?? activeSheet)}
-            </p>
+            <BlankLedger
+              cols={cols}
+              t={t}
+              active={!!scanText}
+              text={scanText ?? t.sheetNoResult(sheetName[activeSheet] ?? activeSheet)}
+            />
           ) : (
             cardsOf(activeSheet)
           )
         ) : (
           <>
-            {scanned.map((s, si) => (
+            {scanned.map((s) => (
               <section key={s.id} data-sheet={s.id} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 900px" }}>
                 {/* content-visibility:auto (task 3.5): trình duyệt bỏ qua dàn trang + vẽ các mặt sổ nằm NGOÀI màn hình, nhưng DOM
                     vẫn còn nguyên nên phím mũi tên, focus, bôi đen và chép TSV vẫn chạy. `auto 900px` = cao tạm 900px cho tới
                     khi mặt đó từng được vẽ (sau đó nhớ chiều cao thật). */}
                 <h3
-                  className={`sticky top-0 z-20 flex items-center gap-2 border-y border-rule px-3 py-1.5 text-[length:calc(12px*var(--fs))] font-semibold ${
-                    activeSheet === s.id ? "bg-accentpale text-ink" : "bg-card3 text-ink2"
+                  className={`ledger-bleed top-0 z-[5] flex h-[calc(32px*var(--fs))] items-center gap-2 border-b border-rule pl-[22px] pr-3 text-t13 font-bold ${
+                    activeSheet === s.id ? "bg-accentpale text-ink" : "bg-card2 text-ink2"
                   }`}
                 >
-                  <span className="tnum text-ink3">{si + 1}.</span>
-                  {s.name}
-                  <span className="tnum font-normal text-ink3">
-                    {store[s.id].blocks.reduce((n, b) => n + b.rows.length, 0)}{" "}
-                    {t.rowsShort}
+                  <span className="truncate">{s.name}</span>
+                  <span className="tnum flex-none font-normal text-ink3">
+                    {t.statusRows(store[s.id].blocks.reduce((n, b) => n + b.rows.length, 0))}
                   </span>
                 </h3>
                 {cardsOf(s.id)}
@@ -1325,41 +1560,47 @@ export default function ReviewPane({
         )}
       </div>
 
-      {/* Chân cột: cột phụ + nhắc sửa được */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-rule bg-card px-3 py-1.5">
-        <span className="text-[length:calc(11px*var(--fs))] uppercase tracking-wider text-ink3">
-          {t.optionalCols}
-        </span>
-        {(
-          [
-            { key: "kind", label: "区分" },
-            { key: "store", label: "取扱店" },
-            { key: "extra", label: "備考" },
-          ] as { key: keyof OptCols; label: string }[]
-        ).map((c) => (
-          <button
-            key={c.key}
-            onClick={() => onToggleCol(c.key)}
-            aria-pressed={cols[c.key]}
-            className={`rounded-md border px-1.5 py-0.5 text-[length:calc(11.5px*var(--fs))] transition-colors ${
-              cols[c.key]
-                ? "border-accent bg-accentpale text-accent"
-                : "border-rule bg-card text-ink3 hover:text-ink"
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
-        <span className="flex-1" />
-        {pickedCount > 0 ? (
-          <span className="rounded-md bg-accentpale px-2 py-0.5 text-[length:calc(11.5px*var(--fs))] font-semibold text-accent">
-            {t.pickedCells(pickedCount)}
-          </span>
+      {/* Chân sổ: MỘT thanh CAO CỐ ĐỊNH, luôn có mặt, nên chọn dòng vàng không đẩy bảng đi đâu cả. Dòng cần soát đang chọn thì
+          hiện lý do + gợi ý sửa; còn lại hiện cột phụ, nhắc phím và tên sổ. `data-fixbar` nằm ở đây: thứ giữ cao cố định là khung
+          này, không phải nội dung. Đang bôi đen thì số ô đã chọn được ưu tiên vì người ta đang chờ nó để chép. */}
+      <div data-fixbar className="flex h-11 flex-none items-center gap-1 overflow-hidden whitespace-nowrap border-t border-rule px-3">
+        {fixBar && pickedCount === 0 ? (
+          fixBar
         ) : (
-          <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.dragCopyHint}</span>
+          <>
+            <span className="mr-1 flex-none text-t12 text-ink3 max-lg:hidden">{t.optionalCols}</span>
+            {(
+              [
+                { key: "kind", label: "区分" },
+                { key: "store", label: "取扱店" },
+                { key: "extra", label: "備考" },
+              ] as { key: keyof OptCols; label: string }[]
+            ).map((c) => (
+              <button
+                key={c.key}
+                onClick={() => onToggleCol(c.key, cols[c.key])}
+                aria-pressed={cols[c.key]}
+                className={`btn btn-sm flex-none max-lg:hidden ${
+                  cols[c.key] ? "bg-accentpale font-bold text-accent" : "btn-ghost text-ink3"
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+            <span className="min-w-2 flex-[1_1_0] overflow-hidden px-2 text-right max-lg:hidden">
+              {pickedCount > 0 ? (
+                <span className="tag text-accent">{t.pickedCells(pickedCount)}</span>
+              ) : (
+                <span className="block truncate text-t12 text-ink3" title={`${t.dragCopyHint} ${t.editableHint}`}>
+                  {t.inspectorHint}
+                </span>
+              )}
+            </span>
+            {footer}
+          </>
         )}
-        <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.editableHint}</span>
       </div>
+
 
       {metaTarget && store[metaTarget.sheet]?.blocks[metaTarget.block] && (
         <BookInfoDialog

@@ -8,7 +8,9 @@
  * thành 8 nút; hỏi một lần thì rõ ràng hơn.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import DialogFrame from "@/components/ui/DialogFrame";
+import { CaretRight, CheckCircle, CircleNotch, DownloadSimple, WarningCircle } from "@/components/ui/icons";
 import { hasIssues, type ExportSummary } from "@/lib/exportsummary";
 import { useT } from "@/lib/i18n";
 
@@ -20,6 +22,7 @@ export type ExportOpts = {
   name: string;
 };
 
+/** Một lựa chọn trong nhóm. Vẫn là nút có aria-pressed (E2E tìm theo vai trò nút), chỉ đổi hình cho giống ô radio. */
 function Choice({
   checked,
   onSelect,
@@ -39,24 +42,37 @@ function Choice({
       onClick={onSelect}
       disabled={disabled}
       aria-pressed={checked}
-      className={`flex flex-1 flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-40 ${
-        checked
-          ? "border-accent bg-accentpale"
-          : "border-rule bg-card hover:border-accentmid"
-      }`}
+      className="-mx-2 flex min-h-[calc(30px*var(--fs))] w-[calc(100%+16px)] max-sm:min-h-10 cursor-pointer items-start gap-2.5 rounded-[3px] px-2 py-1 text-left transition-colors duration-100 enabled:hover:bg-card2 enabled:active:bg-card3 disabled:cursor-not-allowed disabled:opacity-45"
     >
-      <span className="flex items-center gap-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold">
-        <span
-          className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border ${
-            checked ? "border-accent bg-accent" : "border-rule"
-          }`}
-        >
-          {checked && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-        </span>
-        {title}
+      <span
+        aria-hidden
+        className={`mt-[calc(3px*var(--fs))] flex size-4 flex-none items-center justify-center rounded-full border ${
+          checked ? "border-accent" : "border-ink3"
+        }`}
+      >
+        {checked && <span className="size-2 rounded-full bg-accent" />}
       </span>
-      {hint && <span className="pl-5 text-[length:calc(11.5px*var(--fs))] text-ink3">{hint}</span>}
+      <span className="min-w-0">
+        <span className={`block text-t14 ${checked ? "font-bold" : ""}`}>{title}</span>
+        {hint && <span className="block text-t12 leading-[1.5] text-pretty text-ink3">{hint}</span>}
+      </span>
     </button>
+  );
+}
+
+/** Một hàng của biểu mẫu: nhãn cột trái, điều khiển cột phải, ngăn bằng đường kẻ mảnh; màn hẹp thì xếp chồng. */
+function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-x-5 gap-y-1 border-t border-rule2 py-3 first:border-t-0 first:pt-0 last:pb-0 sm:grid-cols-[calc(120px*var(--fs))_minmax(0,1fr)]">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="text-t13 font-bold text-ink2 sm:pt-[calc(8px*var(--fs))]">
+          {label}
+        </label>
+      ) : (
+        <span className="text-t13 font-bold text-ink2 sm:pt-[calc(5px*var(--fs))]">{label}</span>
+      )}
+      <div className="min-w-0">{children}</div>
+    </div>
   );
 }
 
@@ -123,182 +139,151 @@ export default function ExportDialog({
   if (sum.dups > 0) items.push({ kind: "dup", label: t.sumDup(sum.dups), tip: t.expDupWarn(sum.dups) });
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
-      onClick={onCancel}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="exp-title"
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
-      >
-        <header className="flex-none border-b border-rule px-5 py-3">
-          <h2 id="exp-title" className="text-[length:calc(16px*var(--fs))] font-bold">
+    <DialogFrame labelledBy="exp-title" onClose={onCancel} maxWidth={640}>
+      <div className="dlg-head">
+        <div className="min-w-0">
+          <h2 id="exp-title" className="text-t16 font-bold">
             {t.exportTitle}
           </h2>
-          <p className="text-[length:calc(12.5px*var(--fs))] text-ink3">{t.exportSubtitle}</p>
-        </header>
+          <p className="mt-0.5 text-t13 font-normal leading-[1.5] text-ink2">{t.exportSubtitle}</p>
+        </div>
+      </div>
 
-        {/* Chỉ phần THÂN cuộn: nút Xuất ở chân luôn nằm trong tầm mắt dù hộp cao hơn màn hình (3 cách trình bày + tóm tắt) */}
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
-          {/* Tóm tắt: chỉ NHẮC, không chặn — mỗi mục là liên kết nhảy tới chỗ đó */}
-          <section
-            data-export-summary
-            data-issues={issues ? "yes" : "no"}
-            className={`rounded-lg border px-3 py-2 text-[length:calc(12.5px*var(--fs))] ${
-              issues ? "border-warnedge bg-warnbg text-warnink" : "border-okedge bg-okbg text-okink"
-            }`}
-          >
-            <h3 className="text-[length:calc(11px*var(--fs))] font-semibold uppercase tracking-wider opacity-80">{t.sumTitle}</h3>
+      {/* Chỉ phần THÂN cuộn: nút Xuất ở chân luôn nằm trong tầm mắt dù hộp cao hơn màn hình (3 cách trình bày + tóm tắt) */}
+      <div className="dlg-body">
+        {/* Tóm tắt: chỉ NHẮC, không chặn — mỗi mục là liên kết nhảy tới chỗ đó */}
+        <FormRow label={t.sumTitle}>
+          <div data-export-summary data-issues={issues ? "yes" : "no"}>
             {issues ? (
               <>
-                <ul className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                  {items.map((it, i) => (
-                    <li key={it.kind} className="flex items-center gap-2">
-                      {i > 0 && <span aria-hidden>·</span>}
+                <ul>
+                  {items.map((it) => (
+                    <li key={it.kind}>
                       <button
                         type="button"
                         data-sum={it.kind}
                         title={it.tip}
                         onClick={() => onJump(it.kind, sum)}
-                        className="font-semibold underline decoration-dotted underline-offset-2 hover:no-underline"
+                        className="-mx-2 flex min-h-[calc(30px*var(--fs))] w-[calc(100%+16px)] max-sm:min-h-10 cursor-pointer items-center gap-2 rounded-[3px] px-2 text-left text-t14 font-bold text-warnink transition-colors duration-100 hover:bg-warnbg"
                       >
-                        {it.label}
+                        <WarningCircle size={16} aria-hidden className="flex-none" />
+                        <span className="min-w-0 flex-1">{it.label}</span>
+                        <CaretRight size={12} aria-hidden className="flex-none" />
                       </button>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-1 text-[length:calc(11.5px*var(--fs))] opacity-80">{t.sumHint}</p>
+                <p className="mt-1 text-t12 leading-[1.6] text-ink3">{t.sumHint}</p>
               </>
             ) : (
-              <p data-sum-ok className="mt-1 font-medium">
-                ✓ {t.sumOk}
+              <p data-sum-ok className="flex min-h-[calc(30px*var(--fs))] items-center gap-2 text-t14 font-bold text-okink">
+                <CheckCircle size={16} weight="fill" aria-hidden className="flex-none" />
+                {t.sumOk}
               </p>
             )}
-          </section>
+          </div>
+        </FormRow>
 
-          {/* 1. Định dạng */}
-          <section className="flex flex-col gap-1.5">
-            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
-              1. {t.expFormat}
-            </h3>
-            <div className="flex gap-2">
-              <Choice
-                checked={opts.format === "xlsx"}
-                onSelect={() => set("format", "xlsx")}
-                title="Excel (.xlsx)"
-                hint={t.expXlsxHint}
-              />
-              <Choice
-                checked={opts.format === "csv"}
-                onSelect={() => set("format", "csv")}
-                title="CSV (.csv)"
-                hint={t.expCsvHint}
-              />
-            </div>
-          </section>
+        <FormRow label={t.expFormat}>
+          <div role="group" aria-label={t.expFormat}>
+            <Choice
+              checked={opts.format === "xlsx"}
+              onSelect={() => set("format", "xlsx")}
+              title="Excel (.xlsx)"
+              hint={t.expXlsxHint}
+            />
+            <Choice
+              checked={opts.format === "csv"}
+              onSelect={() => set("format", "csv")}
+              title="CSV (.csv)"
+              hint={t.expCsvHint}
+            />
+          </div>
+        </FormRow>
 
-          {/* 2. Phạm vi */}
-          <section className="flex flex-col gap-1.5">
-            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
-              2. {t.expScope}
-            </h3>
-            <div className="flex flex-col gap-1.5">
-              <Choice
-                checked={opts.scope === "current"}
-                onSelect={() => set("scope", "current")}
-                title={t.expScopeCurrent}
-                disabled={!hasCurrent}
-                hint={hasCurrent ? undefined : t.expScopeCurrentNone}
-              />
-              <Choice
-                checked={opts.scope === "ticked"}
-                onSelect={() => set("scope", "ticked")}
-                title={t.expScopeTicked(tickedCount)}
-                disabled={tickedCount === 0}
-              />
-              <Choice
-                checked={opts.scope === "all"}
-                onSelect={() => set("scope", "all")}
-                title={t.expScopeAll(totalCount)}
-              />
-            </div>
-          </section>
+        <FormRow label={t.expScope}>
+          <div role="group" aria-label={t.expScope}>
+            <Choice
+              checked={opts.scope === "current"}
+              onSelect={() => set("scope", "current")}
+              title={t.expScopeCurrent}
+              disabled={!hasCurrent}
+              hint={hasCurrent ? undefined : t.expScopeCurrentNone}
+            />
+            <Choice
+              checked={opts.scope === "ticked"}
+              onSelect={() => set("scope", "ticked")}
+              title={t.expScopeTicked(tickedCount)}
+              disabled={tickedCount === 0}
+            />
+            <Choice
+              checked={opts.scope === "all"}
+              onSelect={() => set("scope", "all")}
+              title={t.expScopeAll(totalCount)}
+            />
+          </div>
+        </FormRow>
 
-          {/* 3. Cấu trúc — CSV chỉ có một bảng nên khoá lại */}
-          <section className="flex flex-col gap-1.5">
-            <h3 className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
-              3. {t.expStructure}
-            </h3>
-            <div className="flex flex-col gap-1.5">
-              <Choice
-                checked={opts.structure === "per_sheet"}
-                onSelect={() => set("structure", "per_sheet")}
-                title={t.expPerSheet}
-                hint={opts.format === "csv" ? t.expPerSheetCsv : t.expPerSheetHint}
-              />
-              <Choice
-                checked={opts.structure === "per_account"}
-                onSelect={() => set("structure", "per_account")}
-                title={t.expPerAccount}
-                hint={opts.format === "csv" ? t.expPerAccountCsv : t.expPerAccountHint}
-              />
-              <Choice
-                checked={opts.structure === "merged"}
-                onSelect={() => set("structure", "merged")}
-                title={t.expMerged}
-                hint={t.expMergedHint}
-              />
-            </div>
+        {/* CSV chỉ có một bảng nên chữ gợi ý đổi theo định dạng */}
+        <FormRow label={t.expStructure}>
+          <div role="group" aria-label={t.expStructure}>
+            <Choice
+              checked={opts.structure === "per_sheet"}
+              onSelect={() => set("structure", "per_sheet")}
+              title={t.expPerSheet}
+              hint={opts.format === "csv" ? t.expPerSheetCsv : t.expPerSheetHint}
+            />
+            <Choice
+              checked={opts.structure === "per_account"}
+              onSelect={() => set("structure", "per_account")}
+              title={t.expPerAccount}
+              hint={opts.format === "csv" ? t.expPerAccountCsv : t.expPerAccountHint}
+            />
+            <Choice
+              checked={opts.structure === "merged"}
+              onSelect={() => set("structure", "merged")}
+              title={t.expMerged}
+              hint={t.expMergedHint}
+            />
+          </div>
+          <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-t14">
+            <input
+              type="checkbox"
+              checked={opts.add_total}
+              onChange={(e) => set("add_total", e.target.checked)}
+              className="size-4 flex-none accent-[var(--accent)]"
+            />
+            {t.expAddTotal}
+          </label>
+        </FormRow>
 
-            <label className="mt-1 flex cursor-pointer items-center gap-2 text-[length:calc(13px*var(--fs))] text-ink2">
-              <input
-                type="checkbox"
-                checked={opts.add_total}
-                onChange={(e) => set("add_total", e.target.checked)}
-                className="h-4 w-4 accent-[var(--accent)]"
-              />
-              {t.expAddTotal}
-            </label>
-          </section>
-
-          {/* Tên file */}
-          <section className="flex flex-col gap-1.5">
-            <label className="text-[length:calc(12px*var(--fs))] font-semibold uppercase tracking-wider text-ink3">
-              {t.expFileName}
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                value={opts.name}
-                onChange={(e) => set("name", e.target.value)}
-                placeholder={t.bookNamePlaceholder}
-                className="flex-1 rounded-lg border border-rule bg-card px-2.5 py-1.5 text-[length:calc(14px*var(--fs))]"
-              />
-              <span className="text-[length:calc(13px*var(--fs))] text-ink3">.{opts.format}</span>
-            </div>
-          </section>
-
-        </div>
-
-        <footer className="flex flex-none items-center justify-end gap-2 border-t border-rule px-5 py-3">
-          <button
-            onClick={onCancel}
-            className="rounded-lg border border-rule px-4 py-2 text-[length:calc(14px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-          >
-            {t.cancel}
-          </button>
-          <button
-            onClick={() => onExport(opts)}
-            disabled={busy}
-            className="rounded-lg border border-accent bg-accent px-4 py-2 text-[length:calc(14px*var(--fs))] font-semibold text-white hover:brightness-110 disabled:opacity-45"
-          >
-            {busy ? t.expWorking : issues ? t.expAnyway : t.expDownload}
-          </button>
-        </footer>
+        <FormRow label={t.expFileName} htmlFor="exp-name">
+          <div className="flex items-center gap-2">
+            <input
+              id="exp-name"
+              value={opts.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder={t.bookNamePlaceholder}
+              className="field min-w-0 flex-1"
+            />
+            <span className="num flex-none text-t13 text-ink2">.{opts.format}</span>
+          </div>
+        </FormRow>
       </div>
-    </div>
+
+      <div className="dlg-foot">
+        <button type="button" onClick={onCancel} className="btn btn-quiet btn-lg">
+          {t.cancel}
+        </button>
+        <button type="button" onClick={() => onExport(opts)} disabled={busy} className="btn btn-primary btn-lg">
+          {busy ? (
+            <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />
+          ) : (
+            <DownloadSimple size={18} aria-hidden />
+          )}
+          {busy ? t.expWorking : issues ? t.expAnyway : t.expDownload}
+        </button>
+      </div>
+    </DialogFrame>
   );
 }

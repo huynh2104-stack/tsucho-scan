@@ -27,6 +27,7 @@ type Box = { top: number; left: number; width: number; height: number };
 const PAD = 6;          // nới khung sáng ra ngoài phần tử một chút cho dễ nhìn
 const CARD_W = 330;
 const GAP = 12;         // khoảng cách giữa khung sáng và ô chú thích
+const SCRIM = "color-mix(in srgb, var(--shell) 68%, transparent)";   // tối theo màu mực của app, không phải đen
 
 /** Hai lần đo có ra cùng một chỗ không.
  *
@@ -171,53 +172,49 @@ export default function Tour({ onPane }: { onPane: (p: PaneId) => void }) {
           /* KHÔNG dùng transition cho top/left: lần vẽ đầu tiên `top` đi từ
              `auto` nên trình duyệt cho chạy từ 0, khung sáng bay từ góc màn
              hình vào. Nhảy thẳng tới nơi vừa chắc vừa đỡ hoa mắt. */
-          className="pointer-events-none absolute rounded-xl border-2 border-accent"
+          className="pointer-events-none absolute rounded-[3px]"
           style={{
             top: box.top,
             left: box.left,
             width: box.width,
             height: box.height,
-            boxShadow: "0 0 0 9999px rgb(3 10 18 / 0.62)",
+            // Viền trắng thay vì cobalt: khung sáng phải nổi được trên cả tờ sáng lẫn thanh mực
+            boxShadow: `0 0 0 2px var(--shell-ink), 0 0 0 9999px ${SCRIM}`,
           }}
         />
       ) : (
-        <div className="pointer-events-none absolute inset-0 bg-[rgb(3_10_18/0.62)]" />
+        <div className="pointer-events-none absolute inset-0" style={{ background: SCRIM }} />
       )}
 
       <div
-        className="pointer-events-auto absolute w-[330px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
+        className="pointer-events-auto absolute flex w-[330px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-[4px] bg-card shadow-lift"
         style={{ top: cardTop, left: cardLeft }}
       >
-        <div className="flex flex-col gap-1.5 px-5 py-4">
-          <span className="tnum text-[length:calc(11px*var(--fs))] font-semibold uppercase tracking-wider text-accent">
-            {t.tour.step(i + 1, steps.length)}
-          </span>
-          <h2 id="tour-title" className="text-[length:calc(15px*var(--fs))] font-bold">
-            {step.title}
-          </h2>
-          <p className="text-[length:calc(13px*var(--fs))] leading-relaxed text-ink2">{step.body}</p>
+        <div className="flex flex-col gap-2 px-5 pb-4 pt-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 id="tour-title" className="min-w-0 text-t16 font-bold">
+              {step.title}
+            </h2>
+            <span className="num flex-none text-t12 text-ink3">{t.tour.step(i + 1, steps.length)}</span>
+          </div>
+          <p className="text-t14 leading-[1.7] text-ink2">{step.body}</p>
         </div>
 
-        <div className="flex items-center gap-2 border-t border-rule bg-card2 px-5 py-3">
-          <button
-            onClick={stop}
-            className="rounded-lg px-2.5 py-1.5 text-[length:calc(13px*var(--fs))] text-ink3 hover:text-ink"
-          >
+        <div className="flex items-center gap-2 border-t border-rule2 bg-card2 py-2.5 pl-3 pr-4">
+          <button type="button" onClick={stop} className="btn btn-ghost btn-sm max-sm:min-h-10">
             {t.tour.skip}
           </button>
           <span className="flex-1" />
           {i > 0 && (
-            <button
-              onClick={() => setI((n) => n - 1)}
-              className="rounded-lg border border-rule px-3 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-            >
+            <button type="button" onClick={() => setI((n) => n - 1)} className="btn btn-quiet max-sm:min-h-10">
               {t.tour.back}
             </button>
           )}
           <button
             ref={nextRef}
+            type="button"
             onClick={() => (last ? stop() : setI((n) => n + 1))}
-            className="rounded-lg border border-accent bg-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accentink hover:brightness-110"
+            className="btn btn-primary max-sm:min-h-10"
           >
             {last ? t.tour.done : t.tour.next}
           </button>

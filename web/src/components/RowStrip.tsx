@@ -14,6 +14,7 @@
  * Toạ độ dải là của ảnh HIỆN TẠI: ảnh đã xoay/cắt/chỉnh sau khi quét thì dải sai, nên ẩn dải và cảnh báo «kết quả cũ».
  */
 
+import { Warning } from "@/components/ui/icons";
 import { sheetImage, type RowBands, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { stripRect, stripSegments } from "@/lib/quickreview";
@@ -25,6 +26,7 @@ export default function RowStrip({
   bandsState,
   index,
   stale,
+  live = true,
 }: {
   wsId: string;
   sheet: Sheet;
@@ -35,13 +37,21 @@ export default function RowStrip({
   index: number;
   /** Ảnh đã bị xoay/cắt/chỉnh sau khi quét. */
   stale: boolean;
+  /** Thẻ đang trượt đi thì chỉ còn là hình: không mang các mốc của thẻ thật. */
+  live?: boolean;
 }) {
   const { t } = useT();
 
   if (stale) {
     return (
-      <div data-testid="quick-strip-stale" className="rounded-lg border border-warnedge bg-warnbg px-3 py-2 text-[length:calc(13px*var(--fs))] text-warnink">
-        <b className="font-semibold">⚠ {t.staleTitle}</b> <span>{t.staleMsg}</span>
+      <div
+        data-testid={live ? "quick-strip-stale" : undefined}
+        className="flex items-start gap-2 bg-warnbg px-3 py-2 text-t13 text-warnink"
+      >
+        <Warning size={15} className="mt-0.5 flex-none" />
+        <p>
+          <b>{t.staleTitle}</b> <span>{t.staleMsg}</span>
+        </p>
       </div>
     );
   }
@@ -49,28 +59,37 @@ export default function RowStrip({
   if (!rect) {
     return (
       <div
-        data-testid="quick-strip-empty"
+        data-testid={live ? "quick-strip-empty" : undefined}
         role="status"
-        className="flex h-24 items-center justify-center rounded-lg border border-dashed border-rule bg-card2 px-3 text-center text-[length:calc(13px*var(--fs))] text-ink3"
+        className="flex h-24 items-center justify-center bg-card2 px-3 text-center text-t13 text-ink3"
       >
         {bandsState === "loading" ? t.rowLinkLoading : t.rowLinkUnavailable}
       </div>
     );
   }
 
-  const h = rect.cy1 - rect.cy0;
+  // Giữ nửa dòng kề mỗi phía: vẫn định vị được mà dải thấp hẳn đi, nên phép tính và ô nhập còn nằm trong một màn hình
+  const top = rect.cy0 + (rect.y0 - rect.cy0) / 2;
+  const h = rect.cy1 - (rect.cy1 - rect.y1) / 2 - top;
   const solid = rect.exact;
   // Tờ sổ rộng hơn cột kết quả: cắt thành 1–3 đoạn xếp chồng (xem `stripSegments`) để chữ thật sự được phóng to
   const segs = stripSegments(rect, sheet.width, sheet.height);
   return (
-    <div data-testid="quick-strip" data-exact={solid ? "1" : "0"} data-segments={segs.length} className="flex flex-col gap-1">
+    <div
+      data-testid={live ? "quick-strip" : undefined}
+      data-exact={solid ? "1" : "0"}
+      data-segments={segs.length}
+      className="flex flex-col gap-1 [@media(max-height:820px)_and_(min-width:1024px)]:mx-auto [@media(max-height:820px)_and_(min-width:1024px)]:w-[76%]"
+    >
       {segs.map((seg, i) => {
         const w = seg.x1 - seg.x0;
         return (
           <div
             key={i}
             data-seg={i}
-            className="relative w-full overflow-hidden rounded-lg border border-rule bg-white"
+            /* Khung vẽ bằng outline, KHÔNG dùng border: `top` của ảnh là phần trăm rất lớn (tới hơn 1000%) tính theo khung trong
+               của ô. Viền 1px làm khung trong hụt 2px, nhân lên thành hơn 20px: ảnh tụt nửa dòng so với dải, càng cuối trang càng lệch. */
+            className="relative w-full overflow-hidden rounded-md bg-white outline outline-1 -outline-offset-1 outline-rule"
             style={{ aspectRatio: `${w * sheet.width} / ${h * sheet.height}` }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -83,32 +102,30 @@ export default function RowStrip({
               style={{
                 width: `${100 / w}%`,
                 left: `${-(seg.x0 / w) * 100}%`,
-                top: `${-(rect.cy0 / h) * 100}%`,
+                top: `${-(top / h) * 100}%`,
                 transform: rect.skew ? `skewY(${-rect.skew}deg)` : undefined,
-                transformOrigin: `${((rect.cx0 + rect.cx1) / 2) * 100}% 50%`,
+                transformOrigin: `${rect.ox * 100}% 50%`,
               }}
             />
             {/* Dải của chính dòng này */}
             <div
               className="pointer-events-none absolute inset-x-0"
               style={{
-                top: `${((rect.y0 - rect.cy0) / h) * 100}%`,
+                top: `${((rect.y0 - top) / h) * 100}%`,
                 height: `${((rect.y1 - rect.y0) / h) * 100}%`,
                 border: `2px ${solid ? "solid" : "dashed"} var(--danger)`,
                 background: `color-mix(in srgb, var(--danger) ${solid ? 8 : 4}%, transparent)`,
               }}
             />
-            {!solid && i === 0 && (
-              <span
-                data-testid="quick-strip-estimated"
-                className="absolute right-1.5 top-1.5 rounded bg-card/90 px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-medium text-ink3"
-              >
-                {t.qrEstimated}
-              </span>
-            )}
           </div>
         );
       })}
+      {/* Ghi nhỏ dưới ảnh, không đè lên chữ của sổ: người soát đang đọc đúng chỗ đó */}
+      {!solid && (
+        <p data-testid={live ? "quick-strip-estimated" : undefined} className="text-right text-t12 text-ink3">
+          {t.qrEstimated}
+        </p>
+      )}
     </div>
   );
 }

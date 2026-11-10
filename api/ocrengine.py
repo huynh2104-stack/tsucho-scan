@@ -50,11 +50,12 @@ def text_lines(arr_rgb: np.ndarray) -> list[dict] | None:
     """Tìm các dòng chữ trong ảnh RGB và cho mỗi dòng biết chữ đang XUÔI hay LỘN NGƯỢC.
 
     Không đọc chữ (bỏ hẳn bước nhận dạng nên nhanh, ~0.2s cho ảnh 1200px).
-    Mỗi dòng: `{"tall": bool, "flipped": bool, "score": float, "length": float}`.
+    Mỗi dòng: `{"tall": bool, "flipped": bool, "score": float, "length": float, "box": (x0, y0, x1, y1)}`.
       • tall    — hộp cao hơn rộng (dòng chữ chạy dọc). RapidOCR tự xoay hộp kiểu này
                   về ngang trước khi phân loại, nên "flipped" của dòng dọc mang nghĩa
                   "đọc từ dưới lên" chứ không phải lộn ngược.
       • length  — cạnh dài của hộp (pixel), để người gọi tự đặt trọng số.
+      • box     — khung bao của hộp theo TỈ LỆ 0..1 của ảnh đưa vào (để biết chữ nằm ở đâu trong ảnh).
     Trả None khi không có bộ đọc; danh sách rỗng khi không thấy dòng chữ nào.
     """
     eng = engine()
@@ -69,10 +70,13 @@ def text_lines(arr_rgb: np.ndarray) -> list[dict] | None:
         crops = eng.get_crop_img_list(img, boxes)
         _, cls_res, _ = eng.text_cls(crops)
     out = []
+    high, wide = arr_rgb.shape[:2]
     for box, (label, score) in zip(boxes, cls_res):
         w = float(np.linalg.norm(box[1] - box[0]))
         h = float(np.linalg.norm(box[2] - box[1]))
+        xs, ys = [float(p[0]) / wide for p in box], [float(p[1]) / high for p in box]
         out.append({
+            "box": (min(xs), min(ys), max(xs), max(ys)),
             "tall": h > w,
             "flipped": int(label) == 180,
             "score": float(score),

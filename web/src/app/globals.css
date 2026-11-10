@@ -5,103 +5,134 @@
    light/dark cụ thể để chỉ có MỘT nguồn sự thật. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* ── Bảng màu.
-   Nền navy đậm + nhấn xanh ngọc cho nút hành động (theo bản thiết kế đã chốt).
-   Ba màu TRẠNG THÁI vẫn neo theo export.py để web và Excel cùng bộ mặt:
-   người dùng thấy ô vàng trên web, mở Excel ra thấy đúng ô vàng đó. */
-/* Hệ số cỡ chữ (task 3.4, tuỳ chọn ⚙): 1 / 1.15 / 1.3. Mọi `text-[Npx]` là `text-[length:calc(Npx*var(--fs))]`.
+/* Hệ số cỡ chữ (task 3.4, tuỳ chọn ⚙): 1 / 1.15 / 1.3. Mọi cỡ chữ nhân với --fs.
    Cố ý KHÔNG dùng CSS `zoom` cho cả trang: khung ảnh tính toạ độ chuột (cắt, nắn 4 góc, kéo ảnh) bằng
    getBoundingClientRect nên zoom làm lệch; nhân riêng cỡ chữ thì ảnh và toạ độ vẫn nguyên. */
 :root {
   --fs: 1;
 }
 
+/* ── Bảng màu ─────────────────────────────────────────────────────────
+   Mực xanh cobalt của biểu mẫu trên nền tờ 控え xanh nhạt. Ba vai trò, không chồng nhau:
+     • cobalt (--accent)  = thứ BẤM được, và chỉ thứ bấm được.
+     • 朱 (--shu)         = con dấu thương hiệu, dấu 検印, mắt xích đứt.
+     • vàng / xanh lá     = cần soát / máy đã sửa — neo đúng màu trong file Excel (export.py).
+   Thanh trên và khung ảnh luôn là mực đậm (--shell, --bench) ở cả hai chủ đề: tờ ảnh gốc nổi trên mực,
+   tờ sổ đọc được nằm trắng bên cạnh. */
 :root {
-  /* Giao diện sáng có SẮC CHỦ ĐẠO riêng: nền ngả xanh ngọc rất nhạt, không
-     phải trắng trơn — để bản sáng cũng có nhận diện, không chỉ là bản tối lộn
-     ngược. Chữ vẫn xanh đen nên độ tương phản không đổi. */
-  --page: #e6eeed;
-  --card: #fbfdfc;
-  --card-2: #f0f5f4;
-  --card-3: #e2eceb;
-  --ink: #12211f;
-  --ink-2: #4e6461;
-  --ink-3: #7d9290;
-  --rule: #cfdcda;
-  --rule-2: #e2eae9;
+  --page: #e6ecf5;
+  --card: #fbfcfe;
+  --card-2: #f1f4fa;
+  --card-3: #e4eaf4;
+  --ink: #131b30;
+  --ink-2: #414c67;
+  --ink-3: #5f6a84;
+  --rule: #c5d0e2;
+  --rule-2: #dee5f0;
 
-  /* Nền vùng XEM ẢNH — tối hơn nền chung một bậc để tờ giấy trắng nổi lên */
-  --canvas: #cfdbd9;
+  --band: #f0f4fb;
 
-  /* Dòng chẵn của bảng — đủ đậm để dò ngang không lệch dòng.
-     Chênh ~25 điểm độ sáng so với nền thẻ: thấy rõ mà không ồn. */
-  --band: #dbe8e5;
+  --shell: #131c36;
+  --shell-2: #1e2949;
+  --shell-3: #2a3760;
+  --shell-ink: #eef2fa;
+  --shell-ink-2: #b3bed6;
+  --shell-rule: #2f3b5e;
+  --bench: #182140;
+  --canvas: var(--bench);
 
-  /* Nhấn = hành động chính (quét, xuất file) */
-  --accent: #0f9d76;
-  --accent-mid: #14b88a;
-  --accent-pale: #dbf2ea;
+  --accent: #1f46bc;
+  --accent-hover: #17388f;
+  --accent-mid: #1f46bc;
+  --accent-pale: #e2e9fb;
   --accent-ink: #ffffff;
 
-  /* Đầu bảng — ngả xanh đen cùng họ với màu nhấn, không dùng xanh dương lạc điệu.
-     (Header trong file Excel vẫn là #2F5B7C theo form đã duyệt — chỗ đó không đổi.) */
-  --head: #234b46;
-  --head-ink: #eaf5f2;
+  --head: #1f3478;
+  --head-ink: #f1f4fc;
+
+  --shu: #bd392c;
+  --shu-hover: #a22f24;
+  --shu-pale: #fbe8e4;
+  --shu-ink: #ffffff;
+  --shu-on-ink: #f08b7d;    /* 朱 nằm trên mực đậm: --shu quá tối để đọc trên khung ảnh */
+  --mark: #c8321f;          /* vạch 朱 vẽ trên ẢNH sổ: ảnh không đổi theo chủ đề nên vạch cũng không đổi */
 
   --warn-bg: #fff2cc;       /* = UNCERTAIN  — ô cần soát */
-  --warn-ink: #7a5400;
-  --warn-edge: #e0bc66;
+  --warn-ink: #6b4a00;
+  --warn-edge: #dfba5c;
 
   --ok-bg: #c6efce;         /* = FIXED_FILL — máy đã tự sửa */
-  --ok-ink: #1b5e36;
+  --ok-ink: #17532f;
   --ok-edge: #8ccba0;
 
-  /* Hướng dòng tiền: đỏ = rút, xanh ngọc = gửi */
-  --out-ink: #c0392b;
-  --in-ink: #0f8f6c;
+  --out-ink: #7a2e22;       /* お支払 */
+  --in-ink: #1c2f6b;        /* お預り */
 
-  --danger: #c0392b;
-  --shadow: 0 1px 2px rgb(20 32 43 / 0.05), 0 10px 28px rgb(20 32 43 / 0.07);
-  --dots: rgb(20 32 43 / 0.05);
+  --danger: #bd392c;
+
+  --chain: #1f3478;
+  --chain-rail: #1f3478;
+
+  --scrim: rgb(19 27 48 / 0.46);
+  --shadow-ply: 0 1px 2px rgb(19 27 48 / 0.08);
+  --shadow-lift: 0 2px 6px rgb(19 27 48 / 0.1), 0 18px 44px -14px rgb(19 27 48 / 0.34);
+  --shadow: var(--shadow-ply);
 }
 
 [data-theme="dark"] {
-  --page: #081019;
-  --card: #0e1c28;
-  --card-2: #132532;
-  --card-3: #1a2f3f;
-  --ink: #e4eef6;
-  --ink-2: #94aabd;
-  --ink-3: #63798d;
-  --rule: #1d3242;
-  --rule-2: #162835;
+  --page: #131b2e;
+  --card: #182036;
+  --card-2: #1e2740;
+  --card-3: #222c45;
+  --ink: #e9edf6;
+  --ink-2: #b0bace;
+  --ink-3: #8b96b0;
+  --rule: #303c5a;
+  --rule-2: #232e49;
 
-  /* Bản tối: vùng xem ảnh tối hơn nữa để tờ giấy nổi hẳn lên */
-  --canvas: #050b12;
-  --band: #12222e;
+  --band: #1c253c;
 
-  --accent: #10b981;
-  --accent-mid: #34d3a0;
-  --accent-pale: #10382c;
-  --accent-ink: #04231a;
+  --shell: #0a0f1c;
+  --shell-2: #161f35;
+  --shell-3: #222d49;
+  --shell-ink: #e9edf6;
+  --shell-ink-2: #a9b4cb;
+  --shell-rule: #232e49;
+  --bench: #0a0f1c;
 
-  --head: #163831;
-  --head-ink: #d5eee6;
+  --accent: #7596f7;
+  --accent-hover: #8fabfa;
+  --accent-mid: #7596f7;
+  --accent-pale: #1f2d57;
+  --accent-ink: #0b1226;
 
-  --warn-bg: #46380f;
-  --warn-ink: #f4d88f;
-  --warn-edge: #806720;
+  --head: #1e2c58;
+  --head-ink: #dfe6f6;
 
-  --ok-bg: #12402a;
-  --ok-ink: #9fdcb6;
-  --ok-edge: #2c6b46;
+  --shu: #ea7566;
+  --shu-hover: #f08b7d;
+  --shu-pale: #3b1e1b;
+  --shu-ink: #1d0b09;
 
-  --out-ink: #f4796a;
-  --in-ink: #3fd6a4;
+  --warn-bg: #4a3b12;
+  --warn-ink: #f6dc95;
+  --warn-edge: #8a6f24;
 
-  --danger: #ef7365;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 34px rgb(0 0 0 / 0.5);
-  --dots: rgb(255 255 255 / 0.035);
+  --ok-bg: #143f2a;
+  --ok-ink: #a4e0bc;
+  --ok-edge: #2e6f49;
+
+  --out-ink: #e7b3a8;
+  --in-ink: #b7c9f8;
+
+  --danger: #ea7566;
+
+  --chain: #a9bcf0;
+  --chain-rail: #a9bcf0;
+
+  --scrim: rgb(4 7 15 / 0.62);
+  --shadow-ply: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-lift: 0 2px 6px rgb(0 0 0 / 0.5), 0 18px 44px -14px rgb(0 0 0 / 0.75);
 }
 
 @theme inline {
@@ -116,12 +147,25 @@
   --color-ink3: var(--ink-3);
   --color-rule: var(--rule);
   --color-rule2: var(--rule-2);
+  --color-shell: var(--shell);
+  --color-shell2: var(--shell-2);
+  --color-shell3: var(--shell-3);
+  --color-shellink: var(--shell-ink);
+  --color-shellink2: var(--shell-ink-2);
+  --color-shellrule: var(--shell-rule);
+  --color-bench: var(--bench);
   --color-accent: var(--accent);
+  --color-accenthover: var(--accent-hover);
   --color-accentmid: var(--accent-mid);
   --color-accentpale: var(--accent-pale);
   --color-accentink: var(--accent-ink);
   --color-head: var(--head);
   --color-headink: var(--head-ink);
+  --color-shu: var(--shu);
+  --color-shupale: var(--shu-pale);
+  --color-shuink: var(--shu-ink);
+  --color-shuonink: var(--shu-on-ink);
+  --color-mark: var(--mark);
   --color-warnbg: var(--warn-bg);
   --color-warnink: var(--warn-ink);
   --color-warnedge: var(--warn-edge);
@@ -132,13 +176,42 @@
   --color-outink: var(--out-ink);
   --color-danger: var(--danger);
 
-  --font-sans: "Segoe UI", "Yu Gothic UI", "Hiragino Kaku Gothic ProN",
-    "Noto Sans JP", system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, "MS Gothic", monospace;
+  /* Chữ giao diện: BIZ UDPGothic (phông thiết kế phổ quát của Morisawa, người Nhật lớn tuổi đọc dễ).
+     Dữ liệu: Noto Sans JP với số đều bề ngang — số thẳng cột, dấu phẩy sát số. Chữ Việt có dấu nằm
+     ngoài bộ chữ của BIZ nên tiếng Việt dùng Be Vietnam Pro đứng trước (xem html:lang(vi) bên dưới). */
+  --font-sans: var(--font-ui), "BIZ UDPGothic", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  --font-mono: var(--font-data), "Yu Gothic UI", "Hiragino Kaku Gothic ProN", Consolas, monospace;
+
+  /* Cắt góc vuông như tờ biểu mẫu: một thang bo góc duy nhất cho cả app. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
+
+  /* Thang cỡ chữ: `text-t14` … Chữ nhỏ nhất là 12px vì người dùng lớn tuổi. */
+  --text-t12: calc(12px * var(--fs));
+  --text-t13: calc(13px * var(--fs));
+  --text-t14: calc(14px * var(--fs));
+  --text-t15: calc(15px * var(--fs));
+  --text-t16: calc(16px * var(--fs));
+  --text-t18: calc(18px * var(--fs));
+  --text-t22: calc(22px * var(--fs));
+  --text-t28: calc(28px * var(--fs));
+  --text-t36: calc(36px * var(--fs));
+
+  --shadow-ply: var(--shadow-ply);
+  --shadow-lift: var(--shadow-lift);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html {
   color-scheme: light;
+  font-feature-settings: "palt" 0;
+  -webkit-text-size-adjust: 100%;
 }
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -148,25 +221,54 @@ body {
   background: var(--page);
   color: var(--ink);
   font-family: var(--font-sans);
+  font-size: var(--text-t14);
+  line-height: 1.6;
+  line-break: strict;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Nền vùng xem ảnh: tối hơn nền chung + chấm mờ — để mắt biết đâu là
-   "bàn làm việc", đâu là tờ giấy đang xem. */
-.canvas-bg {
-  background-color: var(--canvas);
-  background-image: radial-gradient(var(--dots) 1px, transparent 1px);
-  background-size: 18px 18px;
+/* Tiếng Nhật không có khoảng trắng: để trình duyệt xuống dòng theo cụm từ, tránh cắt giữa từ như お好/きな, 初め/ての */
+html:lang(ja) body {
+  word-break: auto-phrase;
 }
 
-/* Số tiền phải thẳng cột — bắt buộc với bảng tiền */
-.tnum {
-  font-variant-numeric: tabular-nums;
+html:lang(vi) body {
+  --font-sans: var(--font-vi), var(--font-ui), "Segoe UI", sans-serif;
+  font-family: var(--font-vi), var(--font-ui), "Segoe UI", sans-serif;
 }
 
+h1, h2, h3 {
+  text-wrap: balance;
+  font-feature-settings: "palt" 1;
+  letter-spacing: 0.01em;
+}
+
+/* Những phần trình duyệt tự vẽ cũng phải mang thiết kế */
+::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+input, textarea {
+  caret-color: var(--accent);
+}
+a {
+  text-underline-offset: 3px;
+}
 :focus-visible {
   outline: 2px solid var(--accent-mid);
-  outline-offset: 2px;
+  outline-offset: 1px;
+}
+/* Viền con trỏ nằm TRONG ô: ô không đổi cỡ, không đè sang ô bên */
+.ledger-cell:focus-visible {
+  outline: 2px solid var(--accent-mid);
+  outline-offset: -2px;
+}
+.on-ink :focus-visible {
+  outline-color: var(--shell-ink);
+}
+/* Ô nhập đã có viền cobalt của riêng nó (.field:focus); thêm viền chung nữa thành hai lớp dày */
+.field:focus-visible {
+  outline: none;
 }
 
 /* Thanh cuộn mảnh, không chiếm chỗ của bảng */
@@ -174,32 +276,994 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
 }
+.on-ink.thin-scroll,
+.on-ink .thin-scroll {
+  scrollbar-color: var(--shell-rule) transparent;
+}
 
-/* ── Hiệu ứng vạch quét trên trang đang xử lý ──────────────────────── */
+/* Số tiền phải thẳng cột — bắt buộc với bảng tiền */
+.tnum {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0;
+}
+
+/* Bàn đặt ảnh gốc: mực đậm phẳng, không chấm không vân — tờ ảnh là thứ duy nhất có chi tiết. */
+.canvas-bg {
+  background-color: var(--bench);
+}
+
+/* ── Linh kiện dùng chung ──────────────────────────────────────────── */
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: calc(34px * var(--fs));
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: var(--text-t14);
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 80ms ease-out;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  .btn-quiet {
+    background: var(--card);
+    border-color: var(--rule);
+    color: var(--ink);
+    font-weight: 400;
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--ink-3);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink-2);
+    font-weight: 400;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ink) 7%, transparent);
+    color: var(--ink);
+  }
+  .btn-danger {
+    background: transparent;
+    border-color: var(--rule);
+    color: var(--danger);
+    font-weight: 400;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--shu-pale);
+    border-color: var(--danger);
+  }
+  .btn-danger-solid {
+    background: var(--shu);
+    color: var(--shu-ink);
+  }
+  .btn-danger-solid:hover:not(:disabled) {
+    background: var(--shu-hover);
+  }
+  /* Nút đóng dấu: hành động xác nhận của người soát — màu con dấu, không phải màu nút thường */
+  .btn-seal {
+    background: var(--shu);
+    color: var(--shu-ink);
+  }
+  .btn-seal:hover:not(:disabled) {
+    background: var(--shu-hover);
+  }
+  .btn-sm {
+    min-height: calc(28px * var(--fs));
+    padding: 0 8px;
+    font-size: var(--text-t13);
+  }
+  .btn-lg {
+    min-height: calc(44px * var(--fs));
+    padding: 0 20px;
+    font-size: var(--text-t15);
+  }
+  .btn-icon {
+    width: calc(34px * var(--fs));
+    padding: 0;
+  }
+  .btn-sm.btn-icon {
+    width: calc(28px * var(--fs));
+  }
+
+  /* Nút nằm trên mực đậm (thanh trên, khung ảnh) */
+  .on-ink .btn-quiet {
+    background: var(--shell-2);
+    border-color: var(--shell-rule);
+    color: var(--shell-ink);
+  }
+  .on-ink .btn-quiet:hover:not(:disabled) {
+    background: var(--shell-3);
+    border-color: var(--shell-ink-2);
+  }
+  .on-ink .btn-ghost {
+    color: var(--shell-ink-2);
+  }
+  .on-ink .btn-ghost:hover:not(:disabled) {
+    background: var(--shell-3);
+    color: var(--shell-ink);
+  }
+  .on-ink .btn-danger {
+    border-color: var(--shell-rule);
+    color: var(--shu-on-ink);
+  }
+  .on-ink .btn-danger:hover:not(:disabled) {
+    background: var(--shell-3);
+    border-color: var(--shu-on-ink);
+  }
+
+  /* Khung bàn làm việc. Từ lg: cột trang | khung ảnh | vạch kéo | sổ. --split = phần của sổ (Splitter.tsx đặt).
+     Sổ không bao giờ dưới 620px (nhân cỡ chữ), khung ảnh luôn còn 220px. */
+  .workbench {
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .workbench {
+      --rail-w: 184px;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr);
+      grid-template-columns:
+        var(--rail-w) minmax(0, 1fr) 1px
+        minmax(
+          min(calc(620px * var(--fs)), calc(100% - var(--rail-w) - 220px)),
+          calc((100% - var(--rail-w)) * var(--split, 0.62))
+        );
+    }
+  }
+  @media (min-width: 1280px) {
+    .workbench {
+      --rail-w: 216px;
+    }
+  }
+
+  /* Vạch kéo: 1 sợi tóc, rê vào mới thành tay nắm 3px. Vùng bấm và tay nắm đều nằm đè, không chiếm chỗ nên không xô bảng. */
+  .splitter {
+    position: relative;
+    z-index: 20;
+    background: var(--rule);
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .splitter::before {
+    content: "";
+    position: absolute;
+    inset: 0 -4px;
+  }
+  .splitter::after {
+    content: "";
+    position: absolute;
+    inset: 0 -1px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+  .splitter:hover::after,
+  .splitter:focus-visible::after,
+  .splitter[data-drag]::after {
+    opacity: 1;
+  }
+  .splitter:focus-visible {
+    outline: none;
+  }
+
+  /* Thanh trượt trên mực đậm: trình duyệt tự vẽ thì lạc tông với khung ảnh */
+  .range-ink {
+    width: 100%;
+    height: 20px;
+    background: transparent;
+    cursor: pointer;
+    appearance: none;
+  }
+  .range-ink::-webkit-slider-runnable-track {
+    height: 2px;
+    background: var(--shell-ink-2);
+  }
+  .range-ink::-moz-range-track {
+    height: 2px;
+    background: var(--shell-ink-2);
+  }
+  .range-ink::-webkit-slider-thumb {
+    width: 10px;
+    height: 18px;
+    margin-top: -8px;
+    border-radius: 2px;
+    background: var(--shell-ink);
+    appearance: none;
+  }
+  .range-ink::-moz-range-thumb {
+    width: 10px;
+    height: 18px;
+    border: 0;
+    border-radius: 2px;
+    background: var(--shell-ink);
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    min-height: calc(36px * var(--fs));
+    padding: 0 10px;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    color: var(--ink);
+    font-size: var(--text-t14);
+    transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+  }
+  textarea.field {
+    padding: 8px 10px;
+  }
+  .field::placeholder {
+    color: var(--ink-3);
+  }
+  .field:hover:not(:disabled) {
+    border-color: var(--ink-3);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  /* Ô đánh dấu trạng thái: chữ nhỏ trên nền phẳng, không viền, không chấm tròn */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: calc(22px * var(--fs));
+    padding: 0 6px;
+    border-radius: 2px;
+    background: var(--card-3);
+    color: var(--ink-2);
+    font-size: var(--text-t12);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .tag-warn {
+    background: var(--warn-bg);
+    color: var(--warn-ink);
+  }
+  .tag-ok {
+    background: var(--ok-bg);
+    color: var(--ok-ink);
+  }
+  .tag-shu {
+    background: var(--shu-pale);
+    color: var(--shu);
+  }
+
+  /* Nút phụ của một dòng: ẩn đến khi rê chuột hoặc focus vào dòng. Máy cảm ứng không có rê chuột nên luôn hiện. */
+  @media (hover: hover) and (pointer: fine) {
+    .row-acts {
+      opacity: 0;
+      transition: opacity 120ms ease-out;
+    }
+    tr:hover .row-acts,
+    tr:focus-within .row-acts {
+      opacity: 1;
+    }
+  }
+
+  kbd,
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5em;
+    padding: 0 4px;
+    border: 1px solid var(--rule);
+    border-bottom-width: 2px;
+    border-radius: 2px;
+    background: var(--card);
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-t12);
+    line-height: 1.45;
+  }
+
+  /* Nhóm chọn một trong nhiều (dùng cùng components/ui/Segmented) */
+  .seg {
+    position: relative;
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 3px;
+    background: var(--card-3);
+  }
+  .seg-btn {
+    position: relative;
+    z-index: 1;
+    min-height: calc(28px * var(--fs));
+    padding: 0 10px;
+    border-radius: 2px;
+    color: var(--ink-2);
+    font-size: var(--text-t13);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 120ms ease-out;
+  }
+  .seg-btn:hover {
+    color: var(--ink);
+  }
+  .seg-btn[aria-pressed="true"],
+  .seg-btn[aria-selected="true"] {
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .seg-thumb {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: 2px;
+    background: var(--card);
+    box-shadow: var(--shadow-ply);
+  }
+
+  /* Tờ chồng lên tờ: hộp thoại */
+  .dlg-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: var(--scrim);
+    animation: fadeIn 140ms ease-out both;
+  }
+  .dlg {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: calc(100dvh - 32px);
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--card);
+    box-shadow: var(--shadow-lift);
+    animation: sheetIn 200ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  }
+  .dlg-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--rule-2);
+    font-size: var(--text-t16);
+    font-weight: 700;
+  }
+  .dlg-body {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+    padding: 16px 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+  }
+  .dlg-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--rule-2);
+    background: var(--card-2);
+  }
+  /* Điện thoại: nút trong hộp thoại đủ to cho ngón tay */
+  @media (max-width: 639.98px) {
+    .dlg .btn,
+    .dlg .seg-btn {
+      min-height: calc(40px * var(--fs));
+    }
+    .dlg .btn-icon {
+      width: calc(40px * var(--fs));
+    }
+  }
+
+  /* Đường chuỗi số dư: MỘT đường dọc chạy suốt sổ, mỗi dòng treo một mắt xích.
+     Gắn lên ô đầu dòng: <td class="chain" data-link="ok|open|sealed|note|first|last" style="--i: 3">.
+     Dùng chung cho bảng, cột mặt sổ, soát nhanh. */
+  .chain {
+    position: relative;
+    --chain-x: 10px;
+    padding-left: 20px;
+  }
+  .chain::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--chain-x) - 1px);
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--chain-rail);
+    transform-origin: top;
+  }
+  .chain::after {
+    content: "";
+    position: absolute;
+    left: calc(var(--chain-x) - 4.5px);
+    top: 50%;
+    width: 9px;
+    height: 9px;
+    margin-top: -4.5px;
+    border-radius: 50%;
+    background: var(--chain);
+  }
+  .chain[data-link="first"]::before {
+    top: 50%;
+  }
+  .chain[data-link="last"]::before {
+    bottom: 50%;
+  }
+  .chain[data-link="note"]::after {
+    width: 9px;
+    height: 2px;
+    left: calc(var(--chain-x) - 4.5px);
+    margin-top: -1px;
+    border-radius: 0;
+    background: var(--chain-rail);
+  }
+  /* Mắt xích đứt: đường hở phía trên, vòng 朱 rỗng chờ người khép lại */
+  .chain[data-link="open"]::before {
+    top: 50%;
+    background: linear-gradient(to bottom, var(--chain-rail) 0, var(--chain-rail) 100%);
+  }
+  .chain[data-link="open"]::after {
+    left: calc(var(--chain-x) - 5.5px);
+    width: 11px;
+    height: 11px;
+    margin-top: -5.5px;
+    background: var(--card);
+    box-shadow: inset 0 0 0 2.5px var(--shu);
+  }
+  /* Nhìn từ dòng trên: đường dừng hẳn trước mép dòng, thành một khoảng hở thật vắt qua ranh hai dòng */
+  .chain[data-gap]::before {
+    bottom: 10px;
+  }
+  .chain[data-link="sealed"]::after {
+    background: var(--shu);
+  }
+
+  .chain[data-end="first"]::before {
+    top: 50%;
+  }
+  .chain[data-end="last"]::before {
+    bottom: 50%;
+  }
+
+  /* ── Tờ sổ: một tờ trắng, cột cố định ─────────────────────────────────
+     Bề rộng đặt bằng biến trên .ledger-grid nên mọi bảng của mọi mặt sổ thẳng cột với nhau. Cột ngày và cột tiền rộng theo
+     chuỗi dài nhất thật sự có trong sổ (--c-*: số ký tự, ReviewPane đếm), nên con số không bao giờ bị cắt. Thiếu chỗ thì
+     cột tuỳ chọn co trước, 確認メモ thu còn biểu tượng; cùng lắm bảng cuộn ngang trong khung, 行 và cột nút ghim hai mép. */
+  .ledger-pane {
+    container: ledger / inline-size;
+  }
+  .ledger-grid {
+    --row-h: calc(36px * var(--fs));
+    --digit: calc(7.8px * var(--fs));
+    --w-row: calc(44px * var(--fs));
+    --w-date: max(calc(88px * var(--fs)), calc(var(--c-date, 10) * var(--digit) + 14px));
+    --w-out: max(calc(96px * var(--fs)), calc(var(--c-out, 9) * var(--digit) + 14px));
+    --w-in: max(calc(96px * var(--fs)), calc(var(--c-in, 9) * var(--digit) + 14px));
+    --w-bal: max(calc(104px * var(--fs)), calc(var(--c-bal, 9) * var(--digit) + 14px));
+    /* 区分 rộng theo chữ dài nhất trong sổ (--c-kind: số nửa ô), có trần để 摘要 còn chỗ */
+    --w-kind: clamp(calc(56px * var(--fs)), calc(var(--c-kind, 8) * var(--digit) + 14px), calc(112px * var(--fs)));
+    --w-store: calc(60px * var(--fs));
+    --w-extra: calc(104px * var(--fs));
+    --w-chk: calc(34px * var(--fs));
+    --w-memo: calc(180px * var(--fs));
+    --w-act: calc(60px * var(--fs));
+    --w-desc: calc(128px * var(--fs));
+    --ledger-min: calc(
+      var(--w-row) + var(--w-date) + var(--w-desc) + var(--w-out) + var(--w-in) + var(--w-bal) + var(--w-chk) + var(--w-memo) +
+        var(--w-act) + var(--on-kind, 1) * var(--w-kind) + var(--on-store, 0) * var(--w-store) + var(--on-extra, 0) * var(--w-extra)
+    );
+    /* Phím mũi tên kéo ô vào tầm nhìn: đừng để ô nằm khuất dưới đầu bảng hay dưới hai cột ghim */
+    scroll-padding: calc(32px * var(--fs)) var(--w-act) 0 var(--w-row);
+  }
+  .ledger-grid[data-mode="list"] {
+    --head-top: calc(32px * var(--fs));
+    scroll-padding-top: calc(64px * var(--fs));
+  }
+  @container ledger (max-width: 819px) {
+    .ledger-grid {
+      --w-out: max(calc(88px * var(--fs)), calc(var(--c-out, 9) * var(--digit) + 14px));
+      --w-in: max(calc(88px * var(--fs)), calc(var(--c-in, 9) * var(--digit) + 14px));
+      --w-bal: max(calc(96px * var(--fs)), calc(var(--c-bal, 9) * var(--digit) + 14px));
+      --w-kind: clamp(calc(52px * var(--fs)), calc(var(--c-kind, 8) * var(--digit) + 14px), calc(96px * var(--fs)));
+      --w-store: calc(44px * var(--fs));
+      --w-extra: calc(72px * var(--fs));
+      --w-chk: calc(30px * var(--fs));
+      --w-memo: calc(30px * var(--fs));
+      --w-act: calc(54px * var(--fs));
+      --w-desc: calc(96px * var(--fs));
+    }
+  }
+  @container ledger (max-width: 739px) {
+    .ledger-grid {
+      --w-row: calc(42px * var(--fs));
+      --w-date: max(calc(84px * var(--fs)), calc(var(--c-date, 10) * var(--digit) + 14px));
+      --w-out: max(calc(76px * var(--fs)), calc(var(--c-out, 9) * var(--digit) + 14px));
+      --w-in: max(calc(76px * var(--fs)), calc(var(--c-in, 9) * var(--digit) + 14px));
+      --w-bal: max(calc(84px * var(--fs)), calc(var(--c-bal, 9) * var(--digit) + 14px));
+      --w-kind: clamp(calc(48px * var(--fs)), calc(var(--c-kind, 8) * var(--digit) + 14px), calc(84px * var(--fs)));
+      --w-store: calc(40px * var(--fs));
+      --w-extra: calc(60px * var(--fs));
+      --w-chk: calc(28px * var(--fs));
+      --w-memo: calc(28px * var(--fs));
+      --w-act: calc(52px * var(--fs));
+      --w-desc: calc(80px * var(--fs));
+    }
+  }
+  @container ledger (max-width: 479px) {
+    /* Điện thoại: cột nút không ghim nữa, nếu không nó che mất số dư khi cuộn ngang */
+    .ledger-table th[data-pin="right"],
+    .ledger-table td:last-child {
+      position: static;
+    }
+    .ledger-grid {
+      --w-desc: calc(56px * var(--fs));
+    }
+  }
+
+  /* section[data-sheet] có content-visibility: phần tràn bị cắt và không cuộn được, nên nó phải tự rộng đủ */
+  .ledger-grid section[data-sheet] {
+    min-width: var(--ledger-min);
+  }
+  /* Dòng tên sổ, dải nối: đứng yên ở mép trái khi bảng cuộn ngang */
+  .ledger-bleed {
+    position: sticky;
+    left: 0;
+    max-width: 100cqw;
+  }
+
+  .ledger-table {
+    width: 100%;
+    min-width: var(--ledger-min);
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--card);
+  }
+  .ledger-table .c-row { width: var(--w-row); }
+  .ledger-table .c-date { width: var(--w-date); }
+  .ledger-table .c-kind { width: var(--w-kind); }
+  .ledger-table .c-out { width: var(--w-out); }
+  .ledger-table .c-in { width: var(--w-in); }
+  .ledger-table .c-bal { width: var(--w-bal); }
+  .ledger-table .c-store { width: var(--w-store); }
+  .ledger-table .c-extra { width: var(--w-extra); }
+  .ledger-table .c-chk { width: var(--w-chk); }
+  .ledger-table .c-memo { width: var(--w-memo); }
+  .ledger-table .c-act { width: var(--w-act); }
+
+  .ledger-table th {
+    position: sticky;
+    top: var(--head-top, 0px);
+    z-index: 3;
+    height: calc(30px * var(--fs));
+    padding: 0 6px;
+    overflow: hidden;
+    background: var(--head);
+    color: var(--head-ink);
+    font-size: var(--text-t12);
+    font-weight: 700;
+    line-height: 1.2;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .ledger-table th[data-pin="left"] {
+    left: 0;
+    z-index: 4;
+    padding-left: 22px;
+  }
+  .ledger-table th[data-tight] {
+    padding: 0;
+  }
+  .ledger-table th[data-pin="right"] {
+    right: 0;
+    z-index: 4;
+  }
+  .ledger-th {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    line-height: 1.15;
+  }
+
+  .ledger-table tbody tr {
+    --row-bg: var(--card);
+  }
+  .ledger-table tbody tr:nth-child(even) {
+    --row-bg: var(--band);
+  }
+  .ledger-table tbody tr[data-state="note"] {
+    color: var(--ink-3);
+  }
+  .ledger-table tbody tr:hover {
+    --row-bg: color-mix(in srgb, var(--accent-pale) 55%, var(--card));
+  }
+  .ledger-table tbody tr[data-sel] {
+    --row-bg: var(--accent-pale);
+  }
+  .ledger-table tbody td {
+    height: var(--row-h);
+    padding: 0;
+    background: var(--row-bg);
+    font-size: var(--text-t14);
+  }
+  .ledger-table tbody td + td {
+    border-left: 1px solid var(--rule-2);
+  }
+  /* Vòng khoanh dòng đang chọn vẽ bằng bóng trong ô: không chiếm chỗ nên không đẩy gì, và đi theo cả hai cột ghim */
+  .ledger-table tbody tr[data-sel] > td {
+    box-shadow: inset 0 1.5px 0 var(--accent), inset 0 -1.5px 0 var(--accent);
+  }
+  .ledger-table tbody tr[data-sel] > td:first-child {
+    box-shadow: inset 0 1.5px 0 var(--accent), inset 0 -1.5px 0 var(--accent), inset 1.5px 0 0 var(--accent);
+  }
+  .ledger-table tbody tr[data-sel] > td:last-child {
+    box-shadow: inset 0 1.5px 0 var(--accent), inset 0 -1.5px 0 var(--accent), inset -1.5px 0 0 var(--accent);
+  }
+  .ledger-table td.chain {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    padding-left: 20px;
+  }
+  .ledger-table .chain[data-link="open"]::after {
+    background: var(--row-bg);
+  }
+  /* Vạch 朱 chặn ở đầu cắt: nền của ô nên đi theo cột ghim và không tốn thêm phần tử */
+  .ledger-table td.chain[data-gap] {
+    background-image: linear-gradient(var(--shu), var(--shu));
+    background-position: calc(var(--chain-x) - 4.5px) calc(100% - 9px);
+    background-repeat: no-repeat;
+    background-size: 9px 2px;
+  }
+  /* Dấu 検印 đóng thẳng lên mắt xích: nền đặc che đường chuỗi nên dấu là mắt xích, không phải thứ đè lên nó */
+  .ledger-table .chain[data-link="sealed"]::after {
+    display: none;
+  }
+  .ledger-chain-seal {
+    position: absolute;
+    top: 50%;
+    left: calc(var(--chain-x) - 9px);
+    z-index: 1;
+    display: flex;
+    width: 18px;
+    height: 18px;
+    margin-top: -9px;
+    border-radius: 50%;
+    background: var(--row-bg);
+    pointer-events: none;
+  }
+
+  /* Ô sửa được lấp đúng khung ô: bấm vào không đổi cỡ, không đổi chữ */
+  .ledger-cell {
+    display: block;
+    width: 100%;
+    height: var(--row-h);
+    padding: 0 6px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
+    line-height: 1;
+    text-overflow: ellipsis;
+  }
+  .ledger-cell:hover:not([readonly]):not(:focus) {
+    box-shadow: inset 0 0 0 1px var(--ink-3);
+  }
+  .ledger-cell:focus:not([readonly]) {
+    background: var(--card);
+  }
+  .ledger-cell[readonly] {
+    padding: 0 2px;
+    color: var(--ink-3);
+    font-size: var(--text-t12);
+    cursor: default;
+  }
+  .ledger-cell[data-invalid] {
+    background: var(--shu-pale);
+    box-shadow: inset 0 0 0 2px var(--danger);
+  }
+
+  /* Nút trả về giá trị máy đọc: nằm đè trong ô nên không đẩy gì, chỉ hiện khi rê vào đúng ô đã sửa */
+  .ledger-restore {
+    position: absolute;
+    top: 50%;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 28px;
+    margin-top: -14px;
+    border-radius: 2px;
+    background: var(--card);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--rule);
+    cursor: pointer;
+  }
+  .ledger-restore:hover {
+    background: var(--accent-pale);
+  }
+
+  .ledger-memo-cell {
+    position: relative;
+    overflow: hidden;
+  }
+  .ledger-memo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 0 6px;
+    font-family: var(--font-sans);
+    font-size: var(--text-t12);
+    line-height: 1.3;
+  }
+  .ledger-memo-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ledger-memo-short {
+    display: none;
+  }
+  /* Chữ vẫn nằm trong trang (đọc màn hình, tooltip ở ô), chỉ nhường chỗ cho cột số */
+  @container ledger (max-width: 819px) {
+    .ledger-memo {
+      justify-content: center;
+      padding: 0;
+    }
+    .ledger-memo-text {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      clip-path: inset(50%);
+    }
+    .ledger-memo-extra,
+    .ledger-memo-long {
+      display: none;
+    }
+    .ledger-memo-short {
+      display: inline;
+    }
+    .ledger-table th.ledger-memo-head {
+      padding: 0;
+    }
+  }
+
+  .ledger-act {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+  }
+  .ledger-act-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 1px;
+  }
+  /* Nút dòng luôn CHIẾM CHỖ, chỉ đổi độ mờ: hiện ra không đẩy gì, và bấm được cả ở dòng chưa chọn */
+  .ledger-act-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 25px;
+    height: 28px;
+    border-radius: 2px;
+    color: var(--ink-3);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+  }
+  .ledger-table tbody tr:hover .ledger-act-btn,
+  .ledger-table tbody tr[data-sel] .ledger-act-btn,
+  .ledger-act-btn[data-keep],
+  .ledger-act-btn:focus-visible {
+    opacity: 1;
+  }
+  .ledger-act-btn:hover {
+    background: var(--shu-pale);
+    color: var(--shu);
+  }
+  .ledger-act-btn[data-due] {
+    color: var(--warn-ink);
+    box-shadow: inset 0 0 0 1px var(--warn-edge);
+  }
+  .ledger-act-btn[data-due]:hover {
+    color: var(--shu);
+    box-shadow: inset 0 0 0 1px var(--shu);
+  }
+  .ledger-act-btn[aria-pressed="true"] {
+    color: var(--ink-2);
+  }
+  @media (hover: none) {
+    .ledger-act-btn:not([data-keep]) {
+      pointer-events: none;
+    }
+    .ledger-table tbody tr[data-sel] .ledger-act-btn {
+      pointer-events: auto;
+    }
+  }
+
+  /* Chân khối: kẻ đôi như sổ kế toán, số nằm đúng dưới cột của nó */
+  .ledger-table tfoot td {
+    padding: 8px 6px;
+    border-top: 3px double var(--ink-3);
+    vertical-align: top;
+  }
+  .ledger-sum {
+    font-family: var(--font-mono);
+    font-size: var(--text-t14);
+    font-variant-numeric: tabular-nums lining-nums;
+    font-weight: 700;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .ledger-sum-label {
+    display: block;
+    overflow: hidden;
+    color: var(--ink-3);
+    font-family: var(--font-sans);
+    font-size: var(--text-t12);
+    font-weight: 400;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+  }
+
+  /* Dải nối giữa hai mặt sổ: cao cố định, cùng trục với đường chuỗi của bảng */
+  .ledger-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: calc(32px * var(--fs));
+    padding: 0 8px 0 3px;
+    overflow: hidden;
+    background: var(--card);
+    color: var(--ink-3);
+    font-size: var(--text-t12);
+    white-space: nowrap;
+  }
+  .ledger-link[data-link="break"] {
+    color: var(--shu);
+    font-weight: 700;
+  }
+
+  /* Sổ chưa có gì: đúng đầu bảng thật và vài dòng kẻ trống mờ dần, để người mới thấy trước bố cục */
+  .ledger-blank tbody td {
+    border-bottom: 1px solid var(--rule-2);
+  }
+  .ledger-blank .chain::after {
+    display: none;
+  }
+  .ledger-blank .chain::before {
+    background: var(--rule);
+  }
+  /* Đang quét: đường chuỗi chạy lặp xuống sổ trống, nói rõ máy đang làm việc chứ không phải đang chờ */
+  .ledger-blank-active .chain::before {
+    background: var(--chain-rail);
+    animation: chainDraw 880ms linear infinite;
+    animation-delay: calc(var(--i, 0) * 110ms);
+  }
+  .ledger-blank-fade {
+    position: absolute;
+    z-index: 5;
+    inset: calc(30px * var(--fs)) 0 0;
+    background: linear-gradient(to bottom, transparent, var(--card) 88%);
+    pointer-events: none;
+  }
+}
+
+/* ── Chuyển động: mỗi cái nói lên một đổi trạng thái, không trang trí ── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheetIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Vạch quét trên ảnh gốc */
 @keyframes scanSweep {
   0% { transform: translateY(-14%); opacity: 0; }
-  14% { opacity: 1; }
-  86% { opacity: 1; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
   100% { transform: translateY(114%); opacity: 0; }
 }
 .scanline {
-  animation: scanSweep 1.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation: scanSweep 1.7s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 @keyframes pulseEdge {
   0%, 100% { box-shadow: 0 0 0 0 var(--accent-mid); }
-  50% { box-shadow: 0 0 0 5px transparent; }
+  50% { box-shadow: 0 0 0 4px transparent; }
 }
 .pulse-edge {
-  animation: pulseEdge 1.9s ease-in-out infinite;
+  animation: pulseEdge 1.7s ease-in-out infinite;
 }
 
+/* Dòng in vào sổ: chữ ngả màu mực than rồi đông lại, như nét in xuyên qua tờ phiếu */
 @keyframes rowIn {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; filter: blur(1.5px); transform: translateY(-3px); }
+  to { opacity: 1; filter: none; transform: none; }
 }
 .row-in {
-  animation: rowIn 0.3s ease-out both;
+  animation: rowIn 280ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  animation-delay: calc(var(--i, 0) * 16ms);
+}
+
+/* Đường chuỗi vẽ từ trên xuống sau khi quét xong */
+@keyframes chainDraw {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.chain-draw .chain::before {
+  animation: chainDraw 90ms linear both;
+  animation-delay: calc(var(--i, 0) * 16ms);
+}
+@keyframes linkIn {
+  from { opacity: 0; transform: scale(0.2); }
+  to { opacity: 1; transform: none; }
+}
+.chain-draw .chain::after {
+  animation: linkIn 160ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  animation-delay: calc(var(--i, 0) * 16ms + 60ms);
+}
+
+/* Dòng hở được đóng dấu: nền vàng tan đi đúng lúc dấu ấn xuống */
+@keyframes warnClear {
+  from { background-color: var(--warn-bg); }
+  to { background-color: transparent; }
+}
+.row-closed {
+  animation: rowIn 280ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both, warnClear 320ms ease-out 760ms both;
+  animation-delay: calc(var(--i, 0) * 16ms), 760ms;
+}
+
+/* Đóng dấu 検印: rơi xuống, ấn lún một chút, nhả ra */
+@keyframes sealPress {
+  0% { opacity: 0; transform: scale(1.9) rotate(var(--seal-tilt, -9deg)); }
+  58% { opacity: 1; transform: scale(0.9) rotate(var(--seal-tilt, -9deg)); }
+  100% { opacity: 1; transform: scale(1) rotate(var(--seal-tilt, -9deg)); }
+}
+.seal-press {
+  animation: sealPress 240ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
 }
 
 @keyframes shimmer {
@@ -207,13 +1271,17 @@ body {
   to { background-position: 180% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, var(--rule-2) 25%, var(--rule) 50%, var(--rule-2) 75%);
+  background: linear-gradient(90deg, var(--rule-2) 25%, var(--card-3) 50%, var(--rule-2) 75%);
   background-size: 180% 100%;
   animation: shimmer 1.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scanline, .pulse-edge, .row-in, .skeleton {
+  .scanline, .pulse-edge, .row-in, .row-closed, .skeleton, .seal-press, .dlg, .dlg-scrim,
+  .chain-draw .chain::before, .chain-draw .chain::after, .ledger-blank-active .chain::before {
     animation: none !important;
+  }
+  .btn {
+    transition: none;
   }
 }

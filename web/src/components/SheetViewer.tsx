@@ -11,13 +11,36 @@
  *   • Thanh trượt = xem trước bằng CSS, tức thì, không tốn gì.
  *   • 「Áp dụng」 mới ghi thật vào ảnh — vì ảnh đổi = mất cache = tốn tiền quét lại.
  *
- * Ảnh hiện ở ~70% chiều rộng khung: file 4000px hay 500px đều cùng cỡ, và cân
- * với cột kết quả bên phải.
+ * Khung này nằm trên mực đậm (`.on-ink` ở page.tsx): tấm ảnh là chi tiết duy nhất, nên công cụ chỉ một hàng,
+ * thanh trượt gom sau nút 補正.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { sheetImage, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import {
+  ArrowClockwise,
+  ArrowCounterClockwise,
+  ArrowUUpLeft,
+  ArrowsClockwise,
+  Check,
+  CircleNotch,
+  CornersOut,
+  Eye,
+  EyeSlash,
+  Crop,
+  DotsThree,
+  ImageIcon,
+  Lightbulb,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
+  Perspective,
+  Scan,
+  SlidersHorizontal,
+  Trash,
+  Warning,
+  X,
+} from "@/components/ui/icons";
 
 type Box = { left: number; top: number; right: number; bottom: number };
 
@@ -64,7 +87,12 @@ function quadFromSliders(doc: number, ngang: number): Pt[] {
   ];
 }
 
-const BASE_WIDTH = 0.7; // 70% — chốt theo yêu cầu, để cân với cột review
+/* Phần ảnh chiếm trong khung. Khung ảnh giờ hẹp hơn sổ nên ảnh lấy gần hết bề ngang, chừa mép cho tay nắm khi cắt. */
+const BASE_WIDTH = 0.94;
+
+/** Cỡ chung của nút trên thanh công cụ: 28px trên máy tính, 40px trên điện thoại. */
+const TOOL = "btn btn-sm flex-none min-w-[calc(28px*var(--fs))] px-1.5 max-lg:min-h-10 max-lg:min-w-10";
+const TOOL_TONE = { ghost: "btn-ghost", quiet: "btn-quiet", primary: "btn-primary" };
 
 function Tool({
   onClick,
@@ -72,7 +100,10 @@ function Tool({
   title,
   children,
   icon,
-  tone = "normal",
+  tone = "ghost",
+  textAt = "hidden @[42em]:inline",
+  className = "",
+  expanded,
 }: {
   onClick: () => void;
   disabled?: boolean;
@@ -80,21 +111,21 @@ function Tool({
   /** Chữ trên nút — TỰ ẨN khi thanh công cụ hẹp, chỉ còn `icon`. */
   children?: React.ReactNode;
   icon?: React.ReactNode;
-  tone?: "normal" | "accent" | "ghost";
+  tone?: keyof typeof TOOL_TONE;
+  /** Từ bề rộng nào của thanh thì hiện chữ. Tính bằng em để cỡ chữ lớn tự co về biểu tượng sớm hơn. */
+  textAt?: string;
+  className?: string;
+  expanded?: boolean;
 }) {
-  const cls =
-    tone === "accent"
-      ? "border-accent bg-accent font-semibold text-accentink hover:brightness-110"
-      : tone === "ghost"
-        ? "border-transparent bg-transparent text-ink2 hover:bg-card2 hover:text-ink"
-        : "border-rule bg-card text-ink2 hover:border-accentmid hover:text-ink";
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`flex h-8 flex-none items-center gap-1.5 rounded-lg border px-2.5 text-[length:calc(12.5px*var(--fs))] transition-colors disabled:opacity-40 ${cls}`}
+      aria-expanded={expanded}
+      className={`${TOOL} ${TOOL_TONE[tone]} ${className}`}
     >
       {icon}
       {/* Thanh công cụ hẹp thì bỏ chữ, giữ biểu tượng — vẫn có `title` và
@@ -102,9 +133,7 @@ function Tool({
           ⚠ CHỈ giấu chữ khi nút CÓ biểu tượng. Nút không có biểu tượng mà
           giấu chữ thì thành ô trống, người dùng không đoán nổi nó là gì —
           đã ship nhầm đúng lỗi này với nút「↕ 180°」và「Quét trang này」. */}
-      {children != null && (
-        <span className={icon ? "hidden @[560px]:inline" : ""}>{children}</span>
-      )}
+      {children != null && <span className={icon ? textAt : ""}>{children}</span>}
     </button>
   );
 }
@@ -114,28 +143,34 @@ function MenuItem({
   onClick,
   disabled,
   danger,
+  icon,
+  className = "",
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
   danger?: boolean;
+  icon: React.ReactNode;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`block w-full px-3 py-2 text-left text-[length:calc(12.5px*var(--fs))] disabled:opacity-35 ${
-        danger ? "text-danger hover:bg-danger/10" : "text-ink2 hover:bg-card2"
-      }`}
+      className={`flex min-h-[calc(32px*var(--fs))] w-full items-center gap-2 whitespace-nowrap px-3 text-left text-t13 transition-colors hover:bg-shell3 disabled:opacity-40 disabled:hover:bg-transparent max-lg:min-h-10 ${
+        danger ? "text-shuonink" : "text-shellink"
+      } ${className}`}
     >
+      {icon}
       {children}
     </button>
   );
 }
 
+/** Một hàng thanh trượt. Ba ô `contents` để các hàng dùng chung lưới của khung chứa: nhãn và số thẳng cột. */
 function Slider({
-  icon,
   label,
   value,
   min,
@@ -145,7 +180,6 @@ function Slider({
   onChange,
   onReset,
 }: {
-  icon: React.ReactNode;
   label: string;
   value: number;
   min: number;
@@ -156,8 +190,8 @@ function Slider({
   onReset: () => void;
 }) {
   return (
-    <div className="flex min-w-[150px] flex-1 items-center gap-2" title={label}>
-      <span className="flex-none text-ink3">{icon}</span>
+    <div className="contents" title={label}>
+      <span className="truncate text-t12 text-shellink2">{label}</span>
       <input
         type="range"
         min={min}
@@ -166,11 +200,12 @@ function Slider({
         value={value}
         aria-label={label}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1.5 w-full flex-1 accent-[var(--accent)]"
+        className="range-ink"
       />
       <button
+        type="button"
         onClick={onReset}
-        className="tnum w-[46px] flex-none rounded px-1 text-right text-[length:calc(11px*var(--fs))] text-ink3 hover:bg-card2 hover:text-ink"
+        className="tnum min-h-7 min-w-[3.6em] rounded-sm px-1 text-right text-t12 text-shellink2 transition-colors hover:bg-shell3 hover:text-shellink"
         title={label}
       >
         {value > 0 && unit === "°" ? "+" : ""}
@@ -186,6 +221,7 @@ export default function SheetViewer({
   sheet,
   busy,
   scanning,
+  scanBeam,
   onRotate,
   onAdjust,
   onCrop,
@@ -195,7 +231,7 @@ export default function SheetViewer({
   onScanThis,
   onDelete,
   highlight,
-  highlightExact,
+  highlightKind,
   highlightSkew,
   highlightSpan,
   stale,
@@ -204,6 +240,8 @@ export default function SheetViewer({
   sheet: Sheet | null;
   busy: boolean;
   scanning: boolean;
+  /** Mặt đang xem chính là mặt máy đang đọc: tia quét lướt trên ảnh. */
+  scanBeam: boolean;
   onRotate: (deg: number) => void;
   onAdjust: (a: {
     fine_deg: number;
@@ -218,7 +256,8 @@ export default function SheetViewer({
   onDelete: () => void;
   /** Dải ảnh của dòng đang chọn ở bảng kết quả — để khoanh đúng chỗ. */
   highlight: { y0: number; y1: number } | null;
-  highlightExact: boolean;
+  /** Cách tìm ra dải đó: khớp nội dung / suy từ các dòng đã khớp (khung liền) hay chỉ ước lượng (khung nét đứt). */
+  highlightKind: "content" | "inferred" | "estimated";
   /** Bề ngang TỜ GIẤY trong ảnh (0..1) — vệt chỉ kéo trong khoảng này. */
   highlightSpan: { x0: number; x1: number } | null;
   /** Trang chụp nghiêng bao nhiêu độ — vệt nghiêng theo cho khớp dòng chữ. */
@@ -234,6 +273,7 @@ export default function SheetViewer({
   const [contrast, setContrast] = useState(100);
   const [cropping, setCropping] = useState(false);
   const [menu, setMenu] = useState(false);      // menu ⋯ (việc ít dùng)
+  const [adjust, setAdjust] = useState(false);   // bảng 補正
   const [box, setBox] = useState<Box | null>(null);
 
   /* ── Nắn phối cảnh ────────────────────────────────────────────────
@@ -255,6 +295,49 @@ export default function SheetViewer({
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const imgBox = useRef<HTMLDivElement>(null);
   const scrollBox = useRef<HTMLDivElement>(null);
+  const zoomNow = useRef(1);
+  zoomNow.current = zoom;
+  /* Khung đỏ của dòng đang chọn: có người thấy rối mắt, nên cho tắt; nhớ trên máy này */
+  const [showMark, setShowMark] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("tsucho.rowmark") === "0") setShowMark(false);
+    } catch {
+      /* không đọc được thì cứ hiện */
+    }
+  }, []);
+  const toggleMark = () =>
+    setShowMark((v) => {
+      try {
+        localStorage.setItem("tsucho.rowmark", v ? "0" : "1");
+      } catch {
+        /* không nhớ được cũng không sao */
+      }
+      return !v;
+    });
+
+  /* Lăn chuột = phóng to / thu nhỏ quanh con trỏ (không cần giữ Ctrl). Mỗi nấc chuột (deltaY ≈ 100) chỉ ~10%, bàn di chuột
+     thì mượt theo độ lăn. Phải gắn listener thường với passive:false: onWheel của React là passive nên không chặn được trang. */
+  useEffect(() => {
+    const box = scrollBox.current;
+    if (!box) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      // Vị trí con trỏ so với TÂM khung — giữ điểm đang trỏ đứng yên
+      const mx = e.clientX - r.left - r.width / 2;
+      const my = e.clientY - r.top - r.height / 2;
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      const z = zoomNow.current;
+      const next = Math.max(0.3, Math.min(6, z * Math.exp(-Math.max(-200, Math.min(200, dy)) * 0.001)));
+      const k = next / z;
+      zoomNow.current = next;
+      setZoom(next);
+      setOffset((o) => ({ x: mx - (mx - o.x) * k, y: my - (my - o.y) * k }));
+    };
+    box.addEventListener("wheel", onWheel, { passive: false });
+    return () => box.removeEventListener("wheel", onWheel);
+  }, []);
   /* Di ảnh bằng transform translate, KHÔNG bằng scrollLeft/scrollTop: ảnh nhỏ
      hơn khung thì không có gì để cuộn, kéo sẽ chẳng nhúc nhích — đúng lỗi
      người dùng gặp. translate thì di được mọi lúc, kể cả ra ngoài khung. */
@@ -293,7 +376,7 @@ export default function SheetViewer({
     if (!box || !aw || !ah) return;
     const r = box.getBoundingClientRect();
     if (!r.width || !r.height) return;
-    // Chừa 4% mép để tay nắm ở sát biên vẫn bấm được
+    // Chừa mép để tay nắm ở sát biên vẫn bấm được
     const k = Math.min((r.width * BASE_WIDTH) / aw, (r.height * 0.96) / ah);
     const w = aw * k;
     const h = ah * k;
@@ -307,6 +390,31 @@ export default function SheetViewer({
     window.addEventListener("resize", doLai);
     return () => window.removeEventListener("resize", doLai);
   }, []);
+
+  /* Kéo vạch chia giữa ảnh và sổ không làm trang vẽ lại (xem Splitter) nên phải tự nghe đổi cỡ. Cách đo sau mỗi lần vẽ ở
+     trên vẫn giữ: observer không bắn khi khung đi từ ẩn sang hiện. */
+  const hasSheet = !!sheet;
+  useEffect(() => {
+    const box = scrollBox.current;
+    if (!box || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setFit(null));
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [hasSheet]);
+
+  /* Chọn một dòng ở bảng mà dải của nó đang nằm NGOÀI khung nhìn (ảnh đang phóng to, hoặc đã bị kéo đi) thì đưa dải về
+     giữa khung theo chiều dọc. Chỉ chạy khi DÒNG đổi, không chạy khi người dùng kéo/zoom: nếu không ảnh cứ giật về chỗ
+     cũ mỗi lần họ muốn nhìn chỗ khác. Dải còn nhìn thấy thì để yên — ảnh tự nhảy khi không cần là rối mắt. */
+  const markY = highlight ? (highlight.y0 + highlight.y1) / 2 : null;
+  const fitH = fit?.h ?? 0;
+  useEffect(() => {
+    const box = scrollBox.current;
+    if (markY == null || !fitH || !box) return;
+    const half = box.getBoundingClientRect().height / 2;
+    const dy = (markY - 0.5) * fitH * zoomNow.current;
+    setOffset((o) => (Math.abs(o.y + dy) <= Math.max(0, half - 28) ? o : { x: o.x, y: -dy }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markY]);
 
   const dirty = fine !== 0 || bright !== 100 || contrast !== 100;
 
@@ -328,6 +436,7 @@ export default function SheetViewer({
     // 4 góc là của ẢNH NÀY — đổi sang mặt sổ khác mà giữ lại là nắn nhầm chỗ
     setWarping(false);
     setMenu(false);
+    setAdjust(false);
     setQuad(FULL_QUAD);
     setMids(midsOf(FULL_QUAD));
     setVert(0);
@@ -339,9 +448,12 @@ export default function SheetViewer({
 
   if (!sheet) {
     return (
-      <div className="canvas-bg flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-[length:calc(15px*var(--fs))] font-semibold text-ink2">{t.viewerEmpty}</p>
-        <p className="max-w-xs text-[length:calc(12.5px*var(--fs))] text-ink3">{t.viewerEmptyHint}</p>
+      <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+        <div className="flex w-full max-w-[440px] flex-col items-center gap-3 rounded-md border border-dashed border-shellrule px-6 py-10">
+          <ImageIcon size={32} className="text-shellink2" />
+          <p className="text-t16 font-bold leading-normal text-shellink">{t.viewerEmpty}</p>
+          <p className="text-t13 leading-normal text-balance text-shellink2 [word-break:auto-phrase]">{t.viewerEmptyHint}</p>
+        </div>
       </div>
     );
   }
@@ -354,78 +466,72 @@ export default function SheetViewer({
     };
   };
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* ── Thanh công cụ ─────────────────────────────────────── */}
-      <div className="@container flex flex-wrap items-center gap-1.5 border-b border-rule bg-card px-3 py-2">
-        <Tool onClick={() => onRotate(-90)} disabled={busy} title={t.rotateLeft}
-          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M3 8h11a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5H8" /> <path d="M6.5 4.5 3 8l3.5 3.5" /> </svg>}
-        >
-          −90°
-        </Tool>
-        <Tool onClick={() => onRotate(90)} disabled={busy} title={t.rotateRight}
-          icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M21 8H10a5 5 0 0 0-5 5v1a5 5 0 0 0 5 5h6" /> <path d="M17.5 4.5 21 8l-3.5 3.5" /> </svg>}
-        >
-          +90°
-        </Tool>
-        <span className="mx-0.5 h-5 w-px flex-none bg-rule" />
+  const startWarp = () => {
+    setWarping(true);
+    setCropping(false);
+    setAdjust(false);    // bảng 補正 che đúng góc có tay nắm
+    vuaKhung();          // đang phóng to mà vào nắn thì tay nắm nằm ngoài màn hình
+    setQuad(FULL_QUAD);
+    setMids(midsOf(FULL_QUAD));
+    setVert(0);
+    setHorz(0);
+  };
 
-        {/* Nắn phối cảnh — ảnh chụp chếch thì trang ra hình thang, xoay không cứu được */}
-        {!warping ? (
-          <Tool
-            onClick={() => {
-              setWarping(true);
-              setCropping(false);
-              vuaKhung();          // đang phóng to mà vào nắn thì tay nắm nằm ngoài màn hình
-              setQuad(FULL_QUAD);
-              setMids(midsOf(FULL_QUAD));
-              setVert(0);
-              setHorz(0);
-            }}
-            disabled={busy}
-            title={t.warp}
-            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden> <path d="M7 4h10l3 16H4Z" /> </svg>}
-          >
-            {t.warp}
-          </Tool>
-        ) : (
-          <>
-            <Tool
-              tone="accent"
-              onClick={() => {
-                onWarp(quad, mids);
-                setWarping(false);
-              }}
-              disabled={busy}
-              title={t.warpApply}
-            >
-              ✓ {t.warpApply}
-            </Tool>
-            <Tool onClick={() => setWarping(false)} title={t.cancel}>
-              {t.cancel}
-            </Tool>
-          </>
-        )}
+  // Đang cắt/nắn mà thanh hẹp: chỗ dành cho Áp dụng/Huỷ, các nút còn lại tạm lui (huỷ là có lại)
+  const editing = cropping || warping;
+  const yields = editing ? "hidden @[38em]:inline-flex" : "";
+
+  const adjustFields = (
+    <>
+      <Slider label={t.fineTilt} value={fine} min={-15} max={15} step={0.5} unit="°" onChange={setFine} onReset={() => setFine(0)} />
+      <Slider label={t.brightness} value={bright} min={40} max={200} step={5} unit="%" onChange={setBright} onReset={() => setBright(100)} />
+      <Slider label={t.contrast} value={contrast} min={40} max={220} step={5} unit="%" onChange={setContrast} onReset={() => setContrast(100)} />
+    </>
+  );
+
+  const autoLabel =
+    sheet.auto && (sheet.auto.rotate !== 0 || sheet.auto.cropped)
+      ? [
+          sheet.auto.rotate
+            ? t.autoRotated(sheet.auto.rotate > 180 ? sheet.auto.rotate - 360 : sheet.auto.rotate)
+            : "",
+          sheet.auto.cropped ? t.autoCropped : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
+
+  return (
+    <div className="relative flex h-full min-h-0 flex-col">
+      {/* ── Thanh công cụ: MỘT hàng cao cố định, không bao giờ xuống dòng ── */}
+      <div className="@container flex h-11 flex-none items-center gap-0.5 border-b border-shellrule px-2">
+        <Tool onClick={() => onRotate(-90)} disabled={busy} title={t.rotateLeft} className={yields}
+          icon={<ArrowCounterClockwise size={16} />}
+        />
+        <Tool onClick={() => onRotate(90)} disabled={busy} title={t.rotateRight} className={yields}
+          icon={<ArrowClockwise size={16} />}
+        />
+        <span aria-hidden className={`mx-1 hidden h-4 w-px flex-none bg-shellrule ${editing ? "" : "@[30em]:block"}`} />
 
         {!cropping ? (
           <Tool
             onClick={() => {
               setCropping(true);
               setWarping(false);
+              setAdjust(false);    // bảng 補正 che đúng góc có tay nắm
               vuaKhung();
               setBox({ left: 0.06, top: 0.06, right: 0.94, bottom: 0.94 });
             }}
             disabled={busy}
             title={t.crop}
-          
-            icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <path d="M6.5 2v15.5H22M2 6.5h15.5V22" /> </svg>}
+            icon={<Crop size={16} />}
           >
             {t.crop}
           </Tool>
         ) : (
           <>
             <Tool
-              tone="accent"
+              tone="primary"
               onClick={() => {
                 if (box) onCrop(box);
                 setCropping(false);
@@ -433,37 +539,84 @@ export default function SheetViewer({
               }}
               disabled={busy}
               title={t.cropApply}
+              textAt=""
+              className="px-2"
+              icon={<Check size={15} weight="bold" />}
             >
-              ✓ {t.cropApply}
+              {t.cropApply}
             </Tool>
             <Tool
+              tone="quiet"
               onClick={() => {
                 setCropping(false);
                 setBox(null);
               }}
               title={t.cancel}
+              className="px-2"
             >
               {t.cancel}
             </Tool>
           </>
         )}
 
-        <span className="flex-1" />
+        {/* Nắn phối cảnh — ảnh chụp chếch thì trang ra hình thang, xoay không cứu được */}
+        {!warping ? (
+          <Tool
+            onClick={startWarp}
+            disabled={busy}
+            title={t.warp}
+            className={editing ? yields : "hidden @[20em]:inline-flex"}
+            icon={<Perspective size={16} />}
+          >
+            {t.warp}
+          </Tool>
+        ) : (
+          <>
+            <Tool
+              tone="primary"
+              onClick={() => {
+                onWarp(quad, mids);
+                setWarping(false);
+              }}
+              disabled={busy}
+              title={t.warpApply}
+              textAt=""
+              className="px-2"
+              icon={<Check size={15} weight="bold" />}
+            >
+              {t.warpApply}
+            </Tool>
+            <Tool tone="quiet" onClick={() => setWarping(false)} title={t.cancel} className="px-2">
+              {t.cancel}
+            </Tool>
+          </>
+        )}
 
-        {/* Việc CHÍNH của khung này — luôn hiện đủ chữ, không bao giờ bị giấu
-            hay đẩy ra ngoài vùng nhìn thấy. */}
-        <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
-          {scanning ? t.scanning : t.scanThisPage}
+        <Tool
+          onClick={() => setAdjust((a) => !a)}
+          title={t.adjustPanel}
+          expanded={adjust}
+          className={`${yields} ${adjust || dirty ? "!bg-shell3 !text-shellink" : ""}`}
+          icon={<SlidersHorizontal size={16} />}
+        >
+          {t.adjustPanel}
         </Tool>
+        <span aria-hidden className={`mx-1 hidden h-4 w-px flex-none bg-shellrule ${editing ? "" : "@[30em]:block"}`} />
+        <Tool
+          onClick={() => {
+            clearPreview();
+            onUndo();
+          }}
+          disabled={busy || !sheet.undo}
+          title={t.undo}
+          className={editing ? yields : "hidden @[23em]:inline-flex"}
+          icon={<ArrowUUpLeft size={16} />}
+        />
 
         {/* Việc ít dùng gom vào đây: thanh công cụ có 12 nút thì cái nào cũng
             khó tìm, mà hẹp quá lại phải cuộn ngang mới thấy「Quét trang này」. */}
         <div className="relative flex-none">
-          <Tool
-            onClick={() => setMenu((m) => !m)}
-            title={t.moreTools}
-            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden> <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /> </svg>}
-          />
+          <Tool onClick={() => setMenu((m) => !m)} title={t.moreTools} expanded={menu} icon={<DotsThree size={18} weight="bold" />} />
           {menu && (
             <>
               {/* Bấm ra ngoài là đóng */}
@@ -472,15 +625,28 @@ export default function SheetViewer({
                 onClick={() => setMenu(false)}
                 aria-label={t.cancel}
               />
-              <div className="absolute right-0 top-9 z-30 w-56 overflow-hidden rounded-lg border border-rule bg-card py-1 shadow-[var(--shadow)]">
+              <div className="absolute right-0 top-full z-30 mt-1.5 min-w-[200px] rounded-md bg-shell2 py-1 shadow-lift">
                 <MenuItem
                   onClick={() => {
                     onRotate(180);
                     setMenu(false);
                   }}
                   disabled={busy}
+                  icon={<ArrowsClockwise size={16} />}
                 >
-                  ↕ {t.flip180}
+                  {t.flip180}
+                </MenuItem>
+                {/* Thanh hẹp đã giấu hai nút này thì menu phải có lối vào */}
+                <MenuItem
+                  onClick={() => {
+                    startWarp();
+                    setMenu(false);
+                  }}
+                  disabled={busy}
+                  className="@[20em]:hidden"
+                  icon={<Perspective size={16} />}
+                >
+                  {t.warp}
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -489,8 +655,10 @@ export default function SheetViewer({
                     setMenu(false);
                   }}
                   disabled={busy || !sheet.undo}
+                  className="@[23em]:hidden"
+                  icon={<ArrowUUpLeft size={16} />}
                 >
-                  ↶ {t.undo}
+                  {t.undo}
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -505,10 +673,11 @@ export default function SheetViewer({
                       !sheet.adjusted &&
                       !sheet.warped)
                   }
+                  icon={<ImageIcon size={16} />}
                 >
-                  ↺ {t.resetImage}
+                  {t.resetImage}
                 </MenuItem>
-                <span className="my-1 block h-px bg-rule" />
+                <span className="my-1 block h-px bg-shellrule" />
                 <MenuItem
                   onClick={() => {
                     onDelete();
@@ -516,52 +685,120 @@ export default function SheetViewer({
                   }}
                   disabled={busy}
                   danger
+                  icon={<Trash size={16} />}
                 >
-                  🗑 {t.deleteSheet}
+                  {t.deleteSheet}
                 </MenuItem>
               </div>
             </>
           )}
         </div>
+
+        <span className="min-w-0 flex-1" />
+
+        {/* Việc CHÍNH của khung này. Hẹp quá thì chỉ còn biểu tượng nhưng không bao giờ bị đẩy ra ngoài. */}
+        <Tool
+          tone="quiet"
+          onClick={onScanThis}
+          disabled={scanning}
+          title={t.scanThisPage}
+          textAt="hidden @[27.5em]:inline"
+          className="@[27.5em]:px-2"
+          icon={scanning ? <CircleNotch size={15} className="animate-spin motion-reduce:animate-none" /> : <Scan size={16} />}
+        >
+          {scanning ? t.scanning : t.scanThisPage}
+        </Tool>
       </div>
+
+      {/* Bảng 補正 nổi trên khung ảnh, không phải hộp thoại: phải nhìn được ảnh đổi theo thanh trượt, và kéo ảnh được.
+          Đóng lại mà còn bản xem thử thì nút 補正 vẫn sáng để không quên. */}
+      {adjust && (
+        <div
+          role="group"
+          aria-label={t.adjustPanel}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.stopPropagation();          // Esc ở đây là đóng bảng, không phải bỏ chọn mặt sổ
+            setAdjust(false);
+          }}
+          className="absolute left-2 top-[52px] z-30 w-[340px] max-w-[calc(100%-16px)] rounded-md bg-shell2 p-3 shadow-lift"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-t13 font-bold text-shellink">{t.adjustPanel}</span>
+            <Tool onClick={() => setAdjust(false)} title={t.cancel} icon={<X size={15} />} />
+          </div>
+          <div className="mt-1 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">{adjustFields}</div>
+          <div className="mt-2 flex min-h-[calc(28px*var(--fs))] flex-wrap items-center gap-2">
+            {dirty ? (
+              <>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await onAdjust({
+                      fine_deg: fine,
+                      brightness: bright / 100,
+                      contrast: contrast / 100,
+                    });
+                    // Xoá lớp xem trước CSS, nếu không hiệu ứng bị áp HAI LẦN
+                    if (ok) clearPreview();
+                  }}
+                  disabled={busy}
+                  title={t.applyAdjust}
+                  className="btn btn-primary btn-sm"
+                >
+                  {t.applyAdjust}
+                </button>
+                <button type="button" onClick={clearPreview} title={t.discardPreview} className="btn btn-quiet btn-sm">
+                  {t.discardPreview}
+                </button>
+                <span className="basis-full text-t12 leading-snug text-shellink">{t.previewOnly}</span>
+              </>
+            ) : (
+              <span className="text-t12 leading-snug text-shellink2">{t.adjustHint}</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Kết quả cũ không còn khớp ảnh — phải nói ra, nếu không người dùng xuất
+          file từ kết quả của một tấm ảnh khác mà không biết. */}
+      {stale && (
+        <div className="flex flex-none flex-wrap items-center gap-x-2 gap-y-1 bg-warnbg px-3 py-1.5 text-t12 text-warnink [&_:focus-visible]:outline-accent">
+          <Warning size={14} weight="bold" className="flex-none" />
+          <b className="font-bold">{t.staleTitle}</b>
+          <span>{t.staleMsg}</span>
+          <span className="flex-1" />
+          <button type="button" onClick={onScanThis} disabled={scanning} title={t.scanThisPage} className="btn btn-primary btn-sm">
+            {scanning ? t.scanning : t.rescanNow}
+          </button>
+        </div>
+      )}
+      {sheet.auto && !sheet.auto.sure && sheet.auto.detected !== 0 && sheet.auto.rotate === 0 && (
+        <div className="flex flex-none flex-wrap items-center gap-x-2 gap-y-0.5 bg-warnbg px-3 py-1.5 text-t12 text-warnink">
+          <Warning size={14} weight="bold" className="flex-none" />
+          <b className="font-bold">{t.autoUnsureBadge}</b>
+          <span>{t.autoUnsure}</span>
+        </div>
+      )}
 
       {/* Dòng nhắc cách dùng — đặt THÀNH MỘT DẢI RIÊNG dưới thanh công cụ,
           KHÔNG phủ lên ảnh. Trước đây nó nổi ở góc trên-trái tấm ảnh và che
           mất đúng phần đầu trang sổ, mà đó lại là chỗ người dùng cần nhìn để
           kéo khung cắt / kéo góc. */}
-      {(cropping || warping) && (
-        <p className="flex items-start gap-2 border-b border-accent/40 bg-accentpale px-3 py-1.5 text-[length:calc(11.5px*var(--fs))] text-accent">
-          <span aria-hidden>💡</span>
+      {editing && (
+        <p className="flex flex-none items-start gap-2 bg-shell2 px-3 py-1.5 text-t12 leading-snug text-shellink">
+          <Lightbulb size={14} className="mt-px flex-none text-shellink2" />
           <span>{warping ? t.warpHint : t.cropHint}</span>
         </p>
       )}
 
-      {/* ── Vùng ảnh: 70% chiều rộng khung ──────────────────────
-          Kéo chuột = di ảnh; Ctrl + cuộn = phóng to/thu nhỏ quanh con trỏ.
+      {/* ── Vùng ảnh ──────────────────────────────────────────
+          Kéo chuột = di ảnh; lăn chuột = phóng to/thu nhỏ quanh con trỏ.
           Không làm "bôi đen lấy chữ" được vì đây là ẢNH — muốn chọn chữ thì
           phải có toạ độ từng ký tự, mà cái đó phải hỏi model (mất cache, tốn
           tiền). Chữ đã đọc ra nằm ở cột kết quả bên phải và copy được. */}
       <div
         ref={scrollBox}
-        onWheel={(e) => {
-          if (!e.ctrlKey) return;
-          e.preventDefault();
-          const box = scrollBox.current;
-          if (!box) return;
-          const r = box.getBoundingClientRect();
-          // Vị trí con trỏ so với TÂM khung — dùng để giữ điểm đang trỏ đứng yên
-          const mx = e.clientX - r.left - r.width / 2;
-          const my = e.clientY - r.top - r.height / 2;
-          setZoom((z) => {
-            const next = Math.max(0.3, Math.min(6, z * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-            const k = next / z;
-            setOffset((o) => ({
-              x: mx - (mx - o.x) * k,
-              y: my - (my - o.y) * k,
-            }));
-            return next;
-          });
-        }}
         onMouseDown={(e) => {
           // Đang nắn thì chuột dành cho 4 tay nắm, không dùng để di ảnh
           if (cropping || warping || e.button !== 0) return;
@@ -586,7 +823,7 @@ export default function SheetViewer({
           setZoom(1);
           setOffset({ x: 0, y: 0 });
         }}
-        className={`canvas-bg relative flex min-h-0 flex-1 items-center justify-center overflow-hidden ${
+        className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden ${
           cropping || warping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
         }`}
       >
@@ -602,31 +839,29 @@ export default function SheetViewer({
             ở bốn góc, mà thanh này nằm đúng chỗ tay nắm góc dưới-phải. Lúc ấy
             ảnh cũng đã được kéo vừa khung sẵn (`vuaKhung`) nên không cần zoom. */}
         <div
-          className={`absolute right-2 top-1/2 z-10 -translate-y-1/2 flex-col items-center gap-0.5 rounded-lg border border-rule bg-card/90 px-0.5 py-1 backdrop-blur ${
+          className={`absolute bottom-2 right-2 z-10 flex-col items-center rounded-md bg-shell2 py-0.5 shadow-ply ${
             cropping || warping ? "hidden" : "flex"
           }`}
         >
           {/* Phóng to ở TRÊN, thu nhỏ ở DƯỚI — cùng chiều với trục dọc. */}
           <Tool
-            tone="ghost"
             onClick={() => setZoom((z) => Math.min(3, z + 0.2))}
             title={t.zoomIn}
-            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6" /> </svg>}
+            icon={<MagnifyingGlassPlus size={16} />}
           />
-          <span className="tnum text-[length:calc(10.5px*var(--fs))] leading-none text-ink3">
-            {Math.round(zoom * 100)}
+          <span className="tnum px-1 py-0.5 text-t12 leading-none text-shellink2">
+            {Math.round(zoom * 100)}%
           </span>
           <Tool
-            tone="ghost"
             onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
             title={t.zoomOut}
-            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden> <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7.5 10.5h6" /> </svg>}
+            icon={<MagnifyingGlassMinus size={16} />}
           />
+          <Tool onClick={vuaKhung} title={t.fitFrame} icon={<CornersOut size={16} />} />
           <Tool
-            tone="ghost"
-            onClick={vuaKhung}
-            title={t.fitFrame}
-            icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden> <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" /> </svg>}
+            onClick={toggleMark}
+            title={showMark ? t.rowMarkHide : t.rowMarkShow}
+            icon={showMark ? <Eye size={16} /> : <EyeSlash size={16} />}
           />
         </div>
 
@@ -666,7 +901,7 @@ export default function SheetViewer({
             crossOrigin="use-credentials"
             alt={sheet.name}
             draggable={false}
-            className="block h-full w-full rounded-lg bg-white shadow-[var(--shadow)] ring-1 ring-rule"
+            className="block h-full w-full rounded-sm bg-white shadow-lift"
             style={{
               transform: fine ? `rotate(${fine}deg)` : undefined,
               filter:
@@ -676,39 +911,47 @@ export default function SheetViewer({
             }}
           />
 
-          {/* Solid = amount AND balance matched in local OCR; dashed = geometry
-              only. No sliding animation across neighboring transactions. Hide
-              while editing geometry because the preview coordinate space differs. */}
-          {highlight && !cropping && !warping && fine === 0 && (
-            <div
-              className="pointer-events-none absolute"
-              style={{
-                top: `${highlight.y0 * 100}%`,
-                height: `${Math.max(0, highlight.y1 - highlight.y0) * 100}%`,
-                /* Chỉ kéo hết bề ngang TỜ GIẤY, không kéo hết bề ngang ẢNH.
-                   Hai lý do, lý do sau mới là lý do thật:
-                   1. Ảnh chụp còn cả mặt bàn hai bên — vệt quét qua đó thừa.
-                   2. `skewY` của CSS xoay quanh TÂM của chính vệt này. Góc
-                      nghiêng lại được api/rowmap.py đo quanh TÂM TỜ GIẤY. Tờ
-                      giấy nằm lệch trong khung hình thì hai tâm khác nhau, và
-                      cả vệt bị đẩy lệch đi (lệch tâm × tang góc). Cho vệt trùng
-                      đúng bề ngang tờ giấy là hai tâm trùng nhau, hết lệch. */
-                left: `${(highlightSpan?.x0 ?? 0) * 100}%`,
-                width: `${((highlightSpan?.x1 ?? 1) - (highlightSpan?.x0 ?? 0)) * 100}%`,
-                background: `color-mix(in srgb, var(--danger) ${
-                  highlightExact ? 8 : 4
-                }%, transparent)`,
-                border: `1px ${highlightExact ? "solid" : "dashed"} var(--danger)`,
-                // Sổ chụp nghiêng thì dòng chữ cũng nghiêng — vệt thẳng băng
-                // sẽ cắt ngang hai dòng khác nhau ở hai đầu trang.
-                transform: highlightSkew ? `skewY(${highlightSkew}deg)` : undefined,
-              }}
-              title={highlightExact ? t.rowMarkExact : t.rowMarkEstimated}
-            >
-              {/* Vạch mảnh ở mép trái để mắt bắt được vị trí mà không che chữ */}
+          {/* Vệt đọc: viền 朱 quanh đúng dải của dòng đang chọn, phần ảnh trên và dưới dải tối đi như thước kẻ đặt trên trang,
+              lướt theo khi chuyển dòng. Bóng đổ của chính dải làm lớp tối nên nghiêng theo dải; khung ngoài cắt nó trong
+              tấm ảnh. Solid = khớp số tiền và số dư theo OCR; dashed = chỉ ước lượng hình học. Ẩn khi đang chỉnh hình vì
+              toạ độ xem trước khác. */}
+          {highlight && showMark && !cropping && !warping && fine === 0 && (
+            <div className="pointer-events-none absolute inset-0 animate-[fadeIn_120ms_ease-out] overflow-hidden rounded-sm motion-reduce:animate-none">
+              <div
+                className="absolute transition-[top,height,left,width,transform] duration-[160ms] ease-out-expo motion-reduce:transition-none"
+                style={{
+                  top: `${highlight.y0 * 100}%`,
+                  height: `${Math.max(0, highlight.y1 - highlight.y0) * 100}%`,
+                  /* Chỉ kéo hết bề ngang TỜ GIẤY, không kéo hết bề ngang ẢNH.
+                     Hai lý do, lý do sau mới là lý do thật:
+                     1. Ảnh chụp còn cả mặt bàn hai bên — vệt quét qua đó thừa.
+                     2. `skewY` của CSS xoay quanh TÂM của chính vệt này. Góc
+                        nghiêng lại được api/rowmap.py đo quanh TÂM TỜ GIẤY. Tờ
+                        giấy nằm lệch trong khung hình thì hai tâm khác nhau, và
+                        cả vệt bị đẩy lệch đi (lệch tâm × tang góc). Cho vệt trùng
+                        đúng bề ngang tờ giấy là hai tâm trùng nhau, hết lệch. */
+                  left: `${(highlightSpan?.x0 ?? 0) * 100}%`,
+                  width: `${((highlightSpan?.x1 ?? 1) - (highlightSpan?.x0 ?? 0)) * 100}%`,
+                  border: `1.5px ${highlightKind === "estimated" ? "dashed" : "solid"} var(--mark)`,
+                  // Sổ chụp nghiêng thì dòng chữ cũng nghiêng — vệt thẳng băng
+                  // sẽ cắt ngang hai dòng khác nhau ở hai đầu trang.
+                  transform: highlightSkew ? `skewY(${highlightSkew}deg)` : "skewY(0deg)",
+                }}
+                title={highlightKind === "content" ? t.rowMarkExact : highlightKind === "inferred" ? t.rowMarkInferred : t.rowMarkEstimated}
+              />
+            </div>
+          )}
+
+          {/* Tia quét lướt qua ảnh của mặt đang quét. `scanSweep` dời -14%..114% theo chiều cao của CHÍNH lớp này, nên lớp cao
+              78% ảnh và tia nằm ở 14% của lớp thì tia đi đúng từ mép trên tới mép dưới, không chạy quá ra ngoài. */}
+          {scanBeam && (
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sm">
               <span
-                className="absolute inset-y-0 left-0 w-[3px] bg-danger"
-                style={{ opacity: highlightExact ? 0.85 : 0.4 }}
+                className="scanline absolute inset-x-0 top-0 h-[78%]"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent 8%, color-mix(in srgb, var(--accent) 10%, transparent) 12%, rgb(255 255 255 / 0.4) 13.7%, var(--accent) 13.8%, var(--accent) 14%, transparent 14.1%)",
+                }}
               />
             </div>
           )}
@@ -720,8 +963,8 @@ export default function SheetViewer({
               className="pointer-events-none absolute inset-0"
               style={{
                 backgroundImage:
-                  "repeating-linear-gradient(to bottom, color-mix(in srgb, var(--danger) 55%, transparent) 0 1px, transparent 1px 40px)," +
-                  "repeating-linear-gradient(to right, color-mix(in srgb, var(--danger) 30%, transparent) 0 1px, transparent 1px 40px)",
+                  "repeating-linear-gradient(to bottom, color-mix(in srgb, var(--accent) 55%, transparent) 0 1px, transparent 1px 40px)," +
+                  "repeating-linear-gradient(to right, color-mix(in srgb, var(--accent) 30%, transparent) 0 1px, transparent 1px 40px)",
               }}
             />
           )}
@@ -841,10 +1084,10 @@ export default function SheetViewer({
                     aria-label={
                       laGoc ? t.warpCorner(i + 1) : t.warpMid(i - 3)
                     }
-                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab border-2 border-white shadow active:cursor-grabbing ${
+                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab border-2 border-white shadow-ply before:absolute before:-inset-1.5 before:content-[''] active:cursor-grabbing max-lg:before:-inset-3 ${
                       laGoc
                         ? "h-5 w-5 rounded-full bg-accent"
-                        : "h-4 w-4 rounded-sm bg-accentmid"
+                        : "h-4 w-4 rounded-sm bg-accent"
                     }`}
                     style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
                   />
@@ -870,189 +1113,67 @@ export default function SheetViewer({
         </div>
       </div>
 
-      {/* Máy đã tự chỉnh ảnh lúc nhập file: nói rõ đã làm gì và cho hoàn tác ngay tại đây */}
-      {sheet.auto && (sheet.auto.rotate !== 0 || sheet.auto.cropped) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-rule bg-accentpale/60 px-3 py-1.5">
-          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-accent">
-            ✨{" "}
-            {[
-              sheet.auto.rotate
-                ? t.autoRotated(sheet.auto.rotate > 180 ? sheet.auto.rotate - 360 : sheet.auto.rotate)
-                : "",
-              sheet.auto.cropped ? t.autoCropped : "",
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+      {/* Hai thanh nắn phối cảnh — chỉ hiện khi đang ở chế độ nắn, vì
+          chúng ghi đè 4 góc nên bày ra lúc khác chỉ gây nhầm. */}
+      {warping && (
+        <div className="grid flex-none grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-x-3 bg-shell2 px-3 py-1">
+          <Slider
+            label={t.warpVert}
+            value={vert}
+            min={-100}
+            max={100}
+            step={2}
+            unit=""
+            onChange={(v) => {
+              setVert(v);
+              const q = quadFromSliders(v, horz);
+              setQuad(q);
+              setMids(midsOf(q));
+            }}
+            onReset={() => {
+              setVert(0);
+              const q = quadFromSliders(0, horz);
+              setQuad(q);
+              setMids(midsOf(q));
+            }}
+          />
+          <Slider
+            label={t.warpHorz}
+            value={horz}
+            min={-100}
+            max={100}
+            step={2}
+            unit=""
+            onChange={(v) => {
+              setHorz(v);
+              const q = quadFromSliders(vert, v);
+              setQuad(q);
+              setMids(midsOf(q));
+            }}
+            onReset={() => {
+              setHorz(0);
+              const q = quadFromSliders(vert, 0);
+              setQuad(q);
+              setMids(midsOf(q));
+            }}
+          />
+        </div>
+      )}
+
+      {/* Chú thích dưới ảnh. Việc máy đã tự làm lúc nhập ghi ở đây; nút hoàn tác ảnh ở thanh công cụ. */}
+      <div className="flex h-7 flex-none items-center gap-3 px-3 text-t12 text-shellink2">
+        <span className="min-w-0 flex-1 truncate">
+          {t.sheetLabel}: <b className="font-bold text-shellink">{sheet.name}</b>
+          <span className="tnum ml-2">
+            {sheet.width}×{sheet.height}px
           </span>
-          <span className="flex-1" />
-          <Tool onClick={() => { clearPreview(); onUndo(); }} disabled={busy || !sheet.undo} title={t.undo}>
-            ↶ {t.undo}
-          </Tool>
-        </div>
-      )}
-      {sheet.auto && !sheet.auto.sure && sheet.auto.detected !== 0 && sheet.auto.rotate === 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
-          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-warnink">⚠ {t.autoUnsureBadge}</span>
-          <span className="text-[length:calc(11.5px*var(--fs))] text-warnink/90">{t.autoUnsure}</span>
-        </div>
-      )}
-
-      {/* Kết quả cũ không còn khớp ảnh — phải nói ra, nếu không người dùng xuất
-          file từ kết quả của một tấm ảnh khác mà không biết. */}
-      {stale && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-warnedge bg-warnbg px-3 py-1.5">
-          <span className="text-[length:calc(12px*var(--fs))] font-semibold text-warnink">⚠ {t.staleTitle}</span>
-          <span className="text-[length:calc(11.5px*var(--fs))] text-warnink/90">{t.staleMsg}</span>
-          <span className="flex-1" />
-          <Tool tone="accent" onClick={onScanThis} disabled={scanning} title={t.scanThisPage}>
-            {scanning ? t.scanning : t.rescanNow}
-          </Tool>
-        </div>
-      )}
-
-      {/* ── Chân khung: thanh trượt chỉnh tinh ────────────────── */}
-      <div className="@container flex flex-col gap-1.5 border-t border-rule bg-card px-3 py-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <Slider
-            label={t.fineTilt}
-            icon={
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <path d="M4 19h16M6 19 14 5" />
-              </svg>
-            }
-            value={fine}
-            min={-15}
-            max={15}
-            step={0.5}
-            unit="°"
-            onChange={setFine}
-            onReset={() => setFine(0)}
-          />
-          {/* Hai thanh nắn phối cảnh — chỉ hiện khi đang ở chế độ nắn, vì
-              chúng ghi đè 4 góc nên bày ra lúc khác chỉ gây nhầm. */}
-          {warping && (
-            <>
-              <Slider
-                label={t.warpVert}
-                icon={
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
-                    <path d="M8 4h8l3 16H5Z" />
-                  </svg>
-                }
-                value={vert}
-                min={-100}
-                max={100}
-                step={2}
-                unit=""
-                onChange={(v) => {
-                  setVert(v);
-                  const q = quadFromSliders(v, horz);
-                  setQuad(q);
-                  setMids(midsOf(q));
-                }}
-                onReset={() => {
-                  setVert(0);
-                  const q = quadFromSliders(0, horz);
-                  setQuad(q);
-                  setMids(midsOf(q));
-                }}
-              />
-              <Slider
-                label={t.warpHorz}
-                icon={
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
-                    <path d="M4 8v8l16 3V5Z" />
-                  </svg>
-                }
-                value={horz}
-                min={-100}
-                max={100}
-                step={2}
-                unit=""
-                onChange={(v) => {
-                  setHorz(v);
-                  const q = quadFromSliders(vert, v);
-                  setQuad(q);
-                  setMids(midsOf(q));
-                }}
-                onReset={() => {
-                  setHorz(0);
-                  const q = quadFromSliders(vert, 0);
-                  setQuad(q);
-                  setMids(midsOf(q));
-                }}
-              />
-            </>
-          )}
-          <Slider
-            label={t.brightness}
-            icon={
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
-            }
-            value={bright}
-            min={40}
-            max={200}
-            step={5}
-            unit="%"
-            onChange={setBright}
-            onReset={() => setBright(100)}
-          />
-          <Slider
-            label={t.contrast}
-            icon={
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <circle cx="12" cy="12" r="8.5" />
-                <path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" />
-              </svg>
-            }
-            value={contrast}
-            min={40}
-            max={220}
-            step={5}
-            unit="%"
-            onChange={setContrast}
-            onReset={() => setContrast(100)}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {dirty ? (
-            <>
-              <Tool
-                tone="accent"
-                onClick={async () => {
-                  const ok = await onAdjust({
-                    fine_deg: fine,
-                    brightness: bright / 100,
-                    contrast: contrast / 100,
-                  });
-                  // Xoá lớp xem trước CSS, nếu không hiệu ứng bị áp HAI LẦN
-                  if (ok) clearPreview();
-                }}
-                disabled={busy}
-                title={t.applyAdjust}
-              >
-                {t.applyAdjust}
-              </Tool>
-              <Tool onClick={clearPreview} title={t.discardPreview}>
-                {t.discardPreview}
-              </Tool>
-              <span className="text-[length:calc(11px*var(--fs))] text-warnink">{t.previewOnly}</span>
-            </>
-          ) : (
-            <span className="text-[length:calc(11px*var(--fs))] text-ink3">{t.adjustHint}</span>
-          )}
-          <span className="flex-1" />
-          <span className="truncate text-[length:calc(11.5px*var(--fs))] text-ink3">
-            {t.sheetLabel}: <b className="font-semibold text-ink2">{sheet.name}</b>
-            <span className="tnum ml-2">
-              {sheet.width}×{sheet.height}px
-            </span>
+        </span>
+        {autoLabel && (
+          /* Hẹp thì ghi chú co trước, tên mặt sổ và cỡ ảnh giữ nguyên */
+          <span className="tnum min-w-0 shrink-[99] truncate" title={autoLabel}>
+            {autoLabel}
           </span>
-        </div>
+        )}
       </div>
     </div>
   );

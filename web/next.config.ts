@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
   // Mỗi route thành `<route>/index.html` — máy chủ tĩnh nào cũng phục vụ được
   trailingSlash: true,
   images: { unoptimized: true },
+  // Biểu tượng Next ở góc màn hình chỉ làm rối khi thử trên máy
+  devIndicators: false,
+  // Chỉ nạp đúng những biểu tượng được dùng, không nạp cả thư viện
+  experimental: { optimizePackageImports: ["@phosphor-icons/react"] },
 };
 
 export default nextConfig;

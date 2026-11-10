@@ -778,6 +778,133 @@ def _even_by_blocks(n_rows: int, blocks: list[tuple[int, int]], h: int) -> list[
 
 # ── API ─────────────────────────────────────────────────────────────
 
+# Số dòng in sẵn trên một mặt sổ khi chưa biết: các sổ đã gặp (福岡, ゆうちょ, 西日本…) đều 24 dòng / mặt
+PAGE_SLOTS = 24
+
+
+def slot_numbers(rows: list[dict]) -> list[int] | None:
+    """Số thứ tự dòng IN Ở LỀ sổ (01..24) cho từng dòng, hoặc None nếu không dùng được.
+
+    Dòng ghi chú không có số thì mượn số của dòng liền trước (hoặc liền sau nếu đứng đầu). Số phải không giảm và ≥ 1,
+    nếu không thì số đọc sai và cách cũ an toàn hơn.
+    """
+    raw = [r.get("row_no") if isinstance(r.get("row_no"), int) and not isinstance(r.get("row_no"), bool) else None for r in rows]
+    if not raw or all(n is None for n in raw):
+        return None
+    nos: list[int | None] = list(raw)
+    for i in range(len(nos)):
+        if nos[i] is None and i > 0:
+            nos[i] = nos[i - 1]
+    for i in range(len(nos) - 1, -1, -1):
+        if nos[i] is None:
+            nos[i] = nos[i + 1] if i + 1 < len(nos) else None
+    if any(n is None or n < 1 for n in nos):
+        return None
+    if any(b < a for a, b in zip(nos, nos[1:])):
+        return None
+    return [int(n) for n in nos]  # type: ignore[arg-type]
+
+
+def bands_for_rows(img: Image.Image, rows: list[dict]) -> dict:
+    """Dải ảnh cho TỪNG dòng kết quả, dùng số thứ tự in ở lề sổ khi có.
+
+    Vì sao: sổ in sẵn 24 dòng mỗi mặt, nhưng mặt cuối thường mới ghi được một phần (ví dụ 12 dòng ở nửa trên). Cách cũ chia
+    ảnh theo SỐ DÒNG CÓ CHỮ trên CẢ TRANG, mà sọc màu và số thứ tự in sẵn của các ô trống cũng tạo vệt mực, nên 12 dòng bị
+    trải ra cả trang: đo được lệch 8-12 dòng. Hai bước:
+      1. Dò lưới 24 ô của cả trang chỉ để biết VÙNG chứa các dòng đã ghi (lưới này hay lệch ~2 ô ở nửa trên vì lẫn dòng
+         tiêu đề, nên chỉ dùng làm vùng, không dùng làm toạ độ).
+      2. Cắt riêng vùng đó (nới 3 dòng mỗi phía) rồi dò đúng số dòng có chữ như cách cũ: trong vùng hẹp, cách cũ chuẩn.
+    Đo trên ảnh mẫu với nửa dưới để trống: 12 dòng lệch ~0.1 dòng, 6-9 dòng ~1 dòng, 1-3 dòng có thể lệch 1-2 dòng.
+    Trang đã ghi đầy thì giữ cách cũ (đã chuẩn).
+    """
+    nos = slot_numbers(rows)
+    if not nos:
+        return bands_for(img, len(rows))
+    slots = max(nos[-1], PAGE_SLOTS)
+    uniq = sorted(set(nos))
+    if len(uniq) >= slots or slots > 2 * PAGE_SLOTS:
+        return bands_for(img, len(rows))
+    grid = bands_for(img, slots)
+    gb = grid["bands"]
+    if len(gb) < slots:
+        return bands_for(img, len(rows))
+    centers = [(x["y0"] + x["y1"]) / 2 for x in gb]
+    pitch = float(np.median(np.diff(centers))) if len(centers) > 1 else 0.0
+    top = max(0.0, gb[uniq[0] - 1]["y0"] - 3 * pitch)
+    bot = min(1.0, gb[uniq[-1] - 1]["y1"] + 3 * pitch)
+    W, H = img.size
+    if bot - top <= 0 or int(bot * H) - int(top * H) < 20:
+        return bands_for(img, len(rows))
+    sub = bands_for(img.crop((0, int(top * H), W, int(bot * H))), len(uniq))
+    span = bot - top
+    by_no = {
+        n: {"y0": round(top + s["y0"] * span, 5), "y1": round(top + s["y1"] * span, 5)}
+        for n, s in zip(uniq, sub["bands"])
+    }
+    # Độ nghiêng và bề ngang tờ giấy đo trên CẢ TRANG đáng tin hơn trên mẩu cắt
+    return {**grid, "exact": sub["exact"], "bands": [dict(by_no[n]) for n in nos]}
+
+
+def peaks_at(img: Image.Image, n_rows: int, line: tuple[float, float, float, float],
+             x0: float = 0.0, x1: float = 1.0) -> list[float]:
+    """Các vệt chữ (đỉnh mực) khi độ dốc của dòng ĐỔI THEO chiều cao trang — toạ độ 0..1 của chiều cao ảnh gốc.
+
+    `bands_for` nắn cả trang bằng MỘT góc. Ảnh chụp bằng điện thoại có phối cảnh nên dòng đầu trang và dòng cuối trang
+    dốc khác nhau (đo trên sổ ゆうちょ chụp tay: +1.2° ở đầu, −3.4° ở cuối); nắn bằng một góc thì mực của một dòng trải ra
+    hơn nửa nhịp dòng và đỉnh lệch khỏi dòng thật. `rowanchors` đo được độ dốc của từng dòng từ hai con số nằm trên dòng
+    đó, rồi gọi hàm này để lấy lại các vệt chữ cho đúng.
+
+    `line` = (k, c, lo, hi): độ dốc tại chiều cao y là clip(k·y + c, lo, hi), đơn vị «tỉ lệ chiều cao / tỉ lệ bề ngang»
+    của ảnh gốc. `x0`/`x1` (tỉ lệ bề ngang ảnh gốc) giới hạn phần trang được xét — dùng khi ảnh có hai cuốn sổ đặt cạnh
+    nhau, mỗi cuốn một nhịp dòng riêng. Vị trí trả về là chỗ dòng cắt qua GIỮA khoảng [x0, x1] đó.
+    """
+    if n_rows <= 0:
+        return []
+    g = _work_image(img, n_rows)
+    H, W = g.height, g.width
+    if H < 20:
+        return []
+    r0, r1, c0, c1 = _page_box(g)
+    c0, c1 = max(c0, int(round(x0 * W))), min(c1, int(round(x1 * W)))
+    if c1 - c0 < 20:
+        return []
+    mask = _ink_mask(g.crop((c0, r0, c1, r1)))
+    h, w = mask.shape
+    ys, xs = np.nonzero(mask)
+    if len(ys) == 0:
+        return []
+    k, c, lo, hi = line
+    tan = np.clip(k * (r0 + ys) / H + c, lo, hi) * (H / W)
+    shifted = ys - np.round((xs - w / 2) * tan).astype(np.int64)
+    keep = (shifted >= 0) & (shifted < h)
+    profile = np.bincount(shifted[keep], minlength=h).astype(np.float32) / w
+    blocks = _blocks(profile, min_gap=max(6.0, h / max(1, n_rows) * 0.9))
+    if not blocks:
+        return []
+    return [round((r0 + p) / H, 5) for p in _peaks(profile, blocks, _pitch(profile, blocks, n_rows))]
+
+
+def gutter_between(img: Image.Image, xa: float, xb: float) -> float | None:
+    """Rãnh trắng giữa hai cuốn sổ đặt cạnh nhau: tâm của dải cột ít mực nhất trong khoảng [xa, xb] (tỉ lệ bề ngang).
+
+    Dùng để khung của dòng chỉ phủ cuốn sổ chứa nó. None nếu khoảng quá hẹp.
+    """
+    g = _work_image(img, PAGE_SLOTS)
+    W = g.width
+    a, b = max(0, int(xa * W)), min(W, int(xb * W))
+    if b - a < 8:
+        return None
+    col = _smooth(_ink_mask(g).mean(axis=0).astype(np.float32), max(3, W // 60))
+    i = a + int(np.argmin(col[a:b]))
+    low = float(col[i]) + 0.004
+    left = right = i
+    while left > a and col[left - 1] <= low:
+        left -= 1
+    while right < b - 1 and col[right + 1] <= low:
+        right += 1
+    return round((left + right) / 2 / W, 5)
+
+
 def bands_for(img: Image.Image, n_rows: int) -> dict:
     """`n_rows` dải, mỗi dải là {y0, y1} theo tỉ lệ 0..1 của chiều cao ẢNH GỐC.
 
@@ -795,14 +922,14 @@ def bands_for(img: Image.Image, n_rows: int) -> dict:
     cũng gọn hơn vì không quét cả mặt bàn.
     """
     if n_rows <= 0:
-        return {"bands": [], "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0}
+        return {"bands": [], "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0, "peaks": []}
 
     g = _work_image(img, n_rows)
     H, W = g.height, g.width
     if H < 20:
         return {
             "bands": [{"y0": i / n_rows, "y1": (i + 1) / n_rows} for i in range(n_rows)],
-            "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0,
+            "exact": False, "skew_deg": 0.0, "x0": 0.0, "x1": 1.0, "peaks": [],
         }
 
     r0, r1, c0, c1 = _page_box(g)
@@ -814,9 +941,14 @@ def bands_for(img: Image.Image, n_rows: int) -> dict:
     tan, profile = _skew(mask)
     ph = len(profile)
 
+    # Mọi đỉnh mực (ứng viên dòng chữ), kể cả đỉnh bị bước chọn loại. `rowanchors` dùng chúng để đặt các dòng nằm GIỮA hai
+    # dòng đã khớp theo nội dung vào đúng vệt chữ; xem `rowanchors.match_rows`.
+    all_peaks: list[int] = []
+
     def out(bands: list[dict], exact: bool) -> dict:
         """Đổi toạ độ: trong-vùng-giấy → tỉ lệ của TOÀN ảnh gốc."""
         return {
+            "peaks": [round((r0 + p) / H, 5) for p in all_peaks],
             "bands": [
                 {
                     "y0": round(max(0.0, (r0 + b["y0"]) / H), 5),
@@ -847,9 +979,8 @@ def bands_for(img: Image.Image, n_rows: int) -> dict:
     # `_drop_junk` cắt số đỉnh xuống VỪA KHÍT số dòng, nên `so-fukuoka(2)` còn
     # đúng 25 đỉnh cho 25 dòng và bước chọn hết đường xoay xở, buộc phải lấy cả
     # hàng tiêu đề. Bỏ chúng đi thì `so-fukuoka(1)` hết lệch.
-    peaks = _drop_footnotes(
-        _peaks(profile, blocks, pitch), rules, pitch, blocks[-1][1]
-    )
+    all_peaks = _peaks(profile, blocks, pitch)
+    peaks = _drop_footnotes(all_peaks, rules, pitch, blocks[-1][1])
     peaks = _drop_stray_runs(peaks, pitch, n_rows)
     if len(peaks) < n_rows:
         return out(_even_by_blocks(n_rows, blocks, ph), False)

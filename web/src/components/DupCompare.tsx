@@ -43,76 +43,59 @@ export default function DupCompare({
   }, [suspended, onLater]);
 
   const panel = (s: Sheet, label: string) => (
-    <figure className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <figcaption className="flex items-baseline gap-2 text-[length:calc(12.5px*var(--fs))]">
-        <span className="rounded bg-card3 px-1.5 py-0.5 text-[length:calc(11px*var(--fs))] font-semibold text-ink2">{label}</span>
-        <span className="truncate font-semibold" title={s.name}>
+    <figure className="flex min-w-0 flex-1 flex-col gap-2">
+      <figcaption className="flex items-center gap-2 text-t13">
+        <span className="tag flex-none">{label}</span>
+        <span className="truncate font-bold" title={s.name}>
           {s.name}
         </span>
       </figcaption>
-      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border border-rule bg-canvas p-1.5">
+      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-md bg-bench p-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={sheetImage(wsId, s)}
           crossOrigin="use-credentials"
           alt={s.name}
-          className="max-h-[56vh] w-auto max-w-full object-contain"
+          className="max-h-[56vh] w-auto max-w-full bg-white object-contain"
         />
       </div>
     </figure>
   );
 
   return (
-    <div
-      data-dup-compare
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onLater}
-      role="presentation"
-    >
+    /* z 50: hộp xác nhận xoá (z 60 của .dlg-scrim) phải nằm đè lên hộp này */
+    <div data-dup-compare className="dlg-scrim" style={{ zIndex: 50 }} onClick={onLater} role="presentation">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="dup-title"
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-rule bg-card shadow-2xl"
+        className="dlg"
+        style={{ maxWidth: 1024 }}
       >
-        <header className="flex flex-col gap-1 border-b border-rule px-5 py-3">
-          <h2 id="dup-title" className="text-[length:calc(16px*var(--fs))] font-bold">
-            {t.dupTitle}
-          </h2>
-          <p className="text-[length:calc(12.5px*var(--fs))] text-ink2">
-            <b data-dup-match className="rounded bg-warnbg px-1.5 py-0.5 text-warnink">
+        <header className="dlg-head flex-col items-start gap-1.5">
+          <h2 id="dup-title">{t.dupTitle}</h2>
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-t13 font-normal text-ink2">
+            <b data-dup-match className="tag tag-warn tnum">
               {t.dupMatch(pair.common, Math.min(pair.sizeA, pair.sizeB))}
-            </b>{" "}
+            </b>
             {t.dupWhy}
           </p>
         </header>
 
-        <div className="flex min-h-0 flex-1 gap-3 overflow-auto px-5 py-4">
+        <div className="thin-scroll flex min-h-0 flex-1 gap-3 overflow-auto px-5 py-4">
           {panel(left, t.dupKeep)}
           {panel(right, t.dupSuspect)}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-rule bg-card2 px-5 py-3">
-          <button
-            data-dup="later"
-            onClick={onLater}
-            className="rounded-lg border border-rule px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] text-ink2 hover:border-accentmid hover:text-ink"
-          >
+        <footer className="dlg-foot flex-wrap">
+          <button data-dup="later" onClick={onLater} className="btn btn-ghost">
             {t.dupLater}
           </button>
-          <button
-            data-dup="not"
-            onClick={onNotDup}
-            className="rounded-lg border border-accent px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-accent hover:bg-accentpale"
-          >
+          <button data-dup="not" onClick={onNotDup} className="btn btn-quiet">
             {t.dupNotDup}
           </button>
-          <button
-            data-dup="delete"
-            onClick={onDeleteRight}
-            className="rounded-lg border border-danger bg-danger px-3.5 py-1.5 text-[length:calc(13.5px*var(--fs))] font-semibold text-white hover:brightness-110"
-          >
+          <button data-dup="delete" onClick={onDeleteRight} className="btn btn-danger-solid">
             {t.dupDeleteRight}
           </button>
         </footer>

@@ -16,9 +16,11 @@ export type PendingUpload = { key: string; name: string; size: number; pct: numb
 
 function Bar({ pct, pulse = false }: { pct: number; pulse?: boolean }) {
   return (
-    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule2">
+    <div className="mt-1.5 h-0.5 overflow-hidden bg-rule">
       <div
-        className={`h-full rounded-full bg-accent transition-[width] duration-300 ${pulse ? "animate-pulse" : ""}`}
+        className={`h-full bg-accent transition-[width] duration-200 ease-out motion-reduce:transition-none ${
+          pulse ? "animate-pulse motion-reduce:animate-none" : ""
+        }`}
         style={{ width: `${Math.max(4, Math.min(100, pct))}%` }}
       />
     </div>
@@ -47,23 +49,24 @@ export default function ImportProgress({
     stage === "rendering" ? t.stRendering : stage === "analyzing" ? t.stAnalyzing : t.stQueued;
 
   return (
-    <div className="mx-2 mb-2 flex flex-col gap-1.5" role="status" aria-live="polite" data-import-progress>
+    <div className="mb-2 ml-3.5 flex flex-col gap-2 px-1.5" role="status" aria-live="polite" data-import-progress>
       {uploads.map((u) => (
-        <div key={u.key} className="rounded-lg border border-accent/40 bg-accentpale/40 px-2.5 py-2">
-          <div className="flex items-start gap-2 text-[length:calc(11.5px*var(--fs))]">
-            <span className="min-w-0 flex-1 break-all font-semibold leading-snug">{u.name}</span>
-            <span className="tnum flex-none text-ink2">
-              {u.pct >= 100 ? t.uploadPreparing : t.uploadingFile(u.pct)}
-            </span>
+        <div key={u.key}>
+          {/* Cột trang hẹp: tên và tiến độ mỗi thứ một dòng, đặt cạnh nhau thì tên chỉ còn vài chữ */}
+          <div className="text-t12 leading-snug">
+            <div className="truncate font-bold" title={u.name}>
+              {u.name}
+            </div>
+            <div className="tnum text-ink2">{u.pct >= 100 ? t.uploadPreparing : t.uploadingFile(u.pct)}</div>
           </div>
           <Bar pct={u.pct} pulse={u.pct >= 100} />
         </div>
       ))}
       {working && (
-        <div className="rounded-lg border border-accent/40 bg-accentpale/40 px-2.5 py-2">
-          <div className="text-[length:calc(11.5px*var(--fs))] leading-snug">
-            <div className="tnum font-semibold">{t.importProgress(done, total)}</div>
-            <div className="text-ink2">{stageLabel}</div>
+        <div>
+          <div className="text-t12 leading-snug">
+            <div className="tnum font-bold">{t.importProgress(done, total)}</div>
+            <div className="truncate text-ink2">{stageLabel}</div>
           </div>
           <Bar pct={(done / total) * 100} />
         </div>

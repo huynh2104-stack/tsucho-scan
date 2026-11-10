@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { X } from "@/components/ui/icons";
 import { useT } from "@/lib/i18n";
 
 export type ToastData = {
@@ -34,11 +35,12 @@ export default function Toast({ toast, onClose }: { toast: ToastData | null; onC
   if (!toast) return null;
   return (
     <div
+      key={toast.id}
       role="status"
       data-testid="toast"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="fixed bottom-16 left-1/2 z-[65] flex max-w-[min(92vw,640px)] -translate-x-1/2 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-rule bg-card px-4 py-2.5 text-[length:calc(13.5px*var(--fs))] shadow-2xl lg:bottom-6"
+      className="fixed bottom-16 left-1/2 z-[65] flex w-max max-w-[min(92vw,640px)] -translate-x-1/2 animate-[sheetIn_160ms_cubic-bezier(0.16,1,0.3,1)_both] flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-card py-2 pl-4 pr-2 text-t14 shadow-lift motion-reduce:animate-none lg:bottom-10"
     >
       <span className="min-w-0 flex-1 break-words">{toast.text}</span>
       {toast.actions?.map((a) => (
@@ -49,18 +51,13 @@ export default function Toast({ toast, onClose }: { toast: ToastData | null; onC
             a.onClick();
             onClose();
           }}
-          className="flex-none rounded-lg border border-accent bg-accentpale px-3 py-1 text-[length:calc(13px*var(--fs))] font-semibold text-accent hover:bg-accent hover:text-accentink"
+          className="btn btn-quiet btn-sm flex-none"
         >
           {a.label}
         </button>
       ))}
-      <button
-        onClick={onClose}
-        aria-label={t.toastClose}
-        title={t.toastClose}
-        className="flex-none rounded px-1.5 text-[length:calc(15px*var(--fs))] leading-none text-ink3 hover:text-ink"
-      >
-        ×
+      <button onClick={onClose} aria-label={t.toastClose} title={t.toastClose} className="btn btn-ghost btn-sm btn-icon flex-none">
+        <X size={14} />
       </button>
     </div>
   );

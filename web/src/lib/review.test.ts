@@ -542,7 +542,7 @@ test("explainReason: lý do cần soát được giải thích bằng ba thứ t
   const gap = parseReasons("行番号 6→8: 1行抜けの疑い")[0];
   assert.equal(explainReason(gap, "vi"), "Số dòng nhảy 06→08: có thể sót 1 dòng");
   assert.equal(explainReason(gap, "en"), "Row numbers jump 06→08: 1 row(s) may be missing");
-  assert.match(explainReason(gap, "ja"), /06→08.*1 行/);
+  assert.match(explainReason(gap, "ja"), /06→08.*1行/);
   assert.equal(explainReason(parseReasons("日付不明")[0], "vi"), "Không đọc được ngày");
   assert.equal(explainReason(parseReasons("低信頼度")[0], "vi"), "Máy đọc không chắc (chữ mờ)");
   assert.equal(explainReason(parseReasons("残高が読取れず検証不可")[0], "en"), "Balance unreadable, so this row cannot be verified");
@@ -590,6 +590,7 @@ test("gợi ý 1: đổi cột 出金↔入金 khi đảo cột làm chuỗi kh�
   // Thật ra rút 300 (700), máy đọc nhầm sang cột 入金
   const sai = [full({ balance: 1000 }), full({ amount_in: 300, balance: 700 })];
   assert.deepEqual(suggestFixes(sai, 1)[0], { kind: "swap" });
+  assert.equal(kinds(suggestFixes(sai, 1)).includes("note"), false, "dòng kế không nối từ số dư trước thì không phải dòng thông báo");
   const khong = [full({ balance: 1000 }), full({ amount_in: 300, balance: 650 })];
   assert.equal(kinds(suggestFixes(khong, 1)).includes("swap"), false);
   const haiBen = [full({ balance: 1000 }), full({ amount_in: 300, amount_out: 300, balance: 5 })];
@@ -874,4 +875,50 @@ test("balanceBefore: số dư kỳ vọng ngay trước từng dòng — null �
   assert.deepEqual(balanceBefore(rows), [null, 1000, 900, 850]);
   assert.deepEqual(balanceBefore([full({ balance: 5 })]), [null]);
   assert.deepEqual(balanceBefore([]), []);
+});
+
+// ── Dòng thông báo (vd của máy ATM) bị đọc thành giao dịch ──────────────
+
+/** Như sổ mẫu: dòng 2 là thông báo «nhập ¥60,000, còn ¥60,059» in xen vào; dòng 3 nối thẳng từ dòng 1. */
+const atmRows = (): Tx[] => [
+  { ...tx(), balance: 103609, amount_in: 100 },
+  { ...tx(), description: "オトリヒキ（ニュウキン", amount_in: 60000, balance: 60059, status: "check" },
+  { ...tx(), amount_out: 60000, balance: 43609 },
+];
+
+test("suggestFixes: bỏ qua dòng mà chuỗi nối tiếp thì «coi là dòng ghi chú» đứng ĐẦU, trước gợi ý thêm dòng sót", () => {
+  const f = suggestFixes(atmRows(), 1);
+  assert.equal(f[0].kind, "note");
+  assert.ok(f.length <= 3);
+});
+
+test("suggestFixes: dòng kế không nối được từ số dư trước thì không gợi ý dòng ghi chú", () => {
+  const rows = atmRows();
+  rows[2] = { ...rows[2], balance: 43000 };
+  assert.equal(suggestFixes(rows, 1).some((x) => x.kind === "note"), false);
+});
+
+test("suggestFixes: không có dòng phía sau để đối chứng thì không gợi ý dòng ghi chú", () => {
+  assert.equal(suggestFixes(atmRows().slice(0, 2), 1).some((x) => x.kind === "note"), false);
+});
+
+test("applyFix note: dòng thành ghi chú, xoá số, giữ chữ; CẢ dòng đó lẫn dòng kế hết cần soát", () => {
+  const before = atmRows();
+  assert.deepEqual(analyzeRows(before).map((r) => r.need), [false, true, true]);
+  const after = applyFix(before, 1, { kind: "note" });
+  const r = after[1];
+  assert.equal(r.is_note, true);
+  assert.deepEqual([r.amount_out, r.amount_in, r.balance], [null, null, null]);
+  assert.equal(r.description, "オトリヒキ（ニュウキン");
+  assert.deepEqual(analyzeRows(after).map((x) => x.need), [false, false, false]);
+  assert.equal(analyzeRows(after)[2].chk, "OK", "dòng kế nối thẳng từ dòng trước dòng ghi chú");
+});
+
+test("applyFix note: không còn số dư làm mốc, vẫn nhớ số máy đọc, không đụng mảng cũ", () => {
+  const before = atmRows();
+  const after = applyFix(before, 1, { kind: "note" });
+  assert.deepEqual(after[1].orig, { amount_in: 60000, balance: 60059 });
+  assert.equal(before[1].is_note, undefined, "Ctrl+Z trả về mảng cũ nên mảng cũ phải còn nguyên");
+  assert.equal(before[1].balance, 60059);
+  assert.equal(after.length, before.length);
 });
