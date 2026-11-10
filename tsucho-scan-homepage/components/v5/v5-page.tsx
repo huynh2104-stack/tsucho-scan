@@ -313,13 +313,16 @@ function Verify() {
 
 function ScreenBlock() {
   const c = useCopy().screen
+  /* Khung phóng to dùng <dialog> gốc: nằm ở lớp trên cùng của trình duyệt (không bị cha cắt hay đè), có sẵn phím Esc,
+   * giữ tiêu điểm trong khung và trả về nút bấm khi đóng. */
+  const lightbox = useRef<HTMLDialogElement>(null)
+  const closeBox = () => lightbox.current?.close()
   return (
     <div className="sc" id="screen">
       <h3 className="h2 h2-sm">{c.title[0]}</h3>
       <motion.figure className="sc-fig" initial="off" whileInView="on" viewport={{ once: true, amount: 0.35 }}>
         <div className="sc-shot">
-          {/* Bấm vào ảnh mở bản gốc 2200px ở tab mới: trên điện thoại để chụm hai ngón phóng to đọc chữ */}
-          <a className="sc-open" href="/shots/app-light.webp" target="_blank" rel="noopener" aria-label={c.zoom}>
+          <button type="button" className="sc-open" aria-label={c.zoom} onClick={() => lightbox.current?.showModal()}>
             <Image
               src="/shots/app-light.webp"
               alt={c.alt}
@@ -327,7 +330,13 @@ function ScreenBlock() {
               height={1375}
               sizes="(max-width: 1600px) 100vw, 1500px"
             />
-          </a>
+            <span className="sc-zoomchip" aria-hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="10.5" cy="10.5" r="6" />
+                <path d="M15 15l5 5M10.5 8v5M8 10.5h5" />
+              </svg>
+            </span>
+          </button>
           {c.marks.map((m, k) => (
             <motion.span
               key={k}
@@ -343,6 +352,25 @@ function ScreenBlock() {
           ))}
         </div>
         <p className="sc-hint">{c.zoom}</p>
+        {/* Bấm ra vùng tối quanh ảnh, bấm nút X hoặc phím Esc đều đóng; bấm vào chính ảnh thì không đóng (để kéo xem) */}
+        <dialog
+          ref={lightbox}
+          className="sc-lb"
+          aria-label={c.alt}
+          onClick={(e) => {
+            if (!(e.target instanceof HTMLImageElement)) closeBox()
+          }}
+        >
+          <button type="button" className="sc-lb-x" aria-label={c.close} autoFocus onClick={closeBox}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+          <div className="sc-lb-pane">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/shots/app-light.webp" alt={c.alt} width={2200} height={1375} loading="lazy" />
+          </div>
+        </dialog>
         <ol className="sc-legend">
           {c.marks.map((m, k) => (
             <li key={k}>

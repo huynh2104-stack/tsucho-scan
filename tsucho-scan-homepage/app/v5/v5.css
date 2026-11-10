@@ -1142,11 +1142,34 @@
   height: auto;
 }
 .v5 .sc-open {
+  position: relative;
   display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   cursor: zoom-in;
 }
+.v5 .sc-zoomchip {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 4px;
+  background: rgba(20, 20, 22, 0.78);
+  color: #fff;
+  transition: transform 160ms ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .v5 .sc-open:hover .sc-zoomchip {
+    transform: scale(1.12);
+  }
+}
 .v5 .sc-hint {
-  display: none;
   margin: 12px 0 0;
   font-size: 13px;
   color: var(--sumi-3);
@@ -1154,9 +1177,92 @@
 .v5 .film .sc-hint {
   color: rgba(230, 236, 239, 0.62);
 }
+
+/* Khung phóng to ảnh màn hình */
+.v5 .sc-lb {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(10, 10, 12, 0.94);
+  color: #fff;
+  overflow: hidden;
+}
+.v5 .sc-lb::backdrop {
+  background: rgba(10, 10, 12, 0.94);
+}
+.v5 .sc-lb[open] {
+  animation: v5-lb-in 180ms ease-out;
+}
+@keyframes v5-lb-in {
+  from {
+    opacity: 0;
+  }
+}
+.v5 .sc-lb-pane {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 72px 24px 28px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* margin:auto = giữa khung khi vừa màn hình, dính mép trái-trên (kéo xem được) khi ảnh lớn hơn màn hình */
+.v5 .sc-lb-pane img {
+  display: block;
+  flex: none;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8);
+  cursor: default;
+}
+.v5 .sc-lb-x {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(30, 30, 34, 0.9);
+  color: #fff;
+  cursor: pointer;
+}
+.v5 .sc-lb-x:hover {
+  background: #fff;
+  color: #111;
+}
+html:has(.sc-lb[open]) {
+  overflow: hidden;
+}
 @media (max-width: 680px) {
-  .v5 .sc-hint {
-    display: block;
+  .v5 .sc-lb-pane {
+    padding: 68px 0 20px;
+  }
+  /* Điện thoại: ảnh rộng 1100px, vuốt ngang/dọc để xem, chụm hai ngón để phóng thêm */
+  .v5 .sc-lb-pane img {
+    max-width: none;
+    max-height: none;
+    width: 1100px;
+    border-radius: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v5 .sc-lb[open] {
+    animation: none;
   }
 }
 .v5 .sc-mark {

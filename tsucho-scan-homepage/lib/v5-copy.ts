@@ -68,7 +68,8 @@ const jp = {
     title: ['実際の作業画面'],
     lead: '作った絵ではなく、動いている画面をそのまま写したものです。左に通帳の面、中央に写真、右に読み取り結果。行を選ぶと、写真の同じ行に赤い帯がつきます。',
     alt: '通帳スキャンの作業画面。左に読み取り済みの面の一覧、中央に通帳の写真、右に読み取り結果の表。',
-    zoom: '画像をタップすると拡大できます',
+    zoom: '画像を押すと拡大できます',
+    close: '閉じる',
     marks: [
       { x: 13.4, y: 35.1, t: '面ごとの読み取り状況' },
       { x: 44.6, y: 38.1, t: '写真の同じ行に赤い帯' },
@@ -335,7 +336,8 @@ const vn: Copy = {
     title: ['Màn hình làm việc thật'],
     lead: 'Đây không phải hình vẽ mà là ảnh chụp ứng dụng đang chạy. Bên trái là các mặt sổ, giữa là ảnh, bên phải là kết quả. Chọn một dòng, dòng đó trên ảnh có vệt đỏ.',
     alt: 'Màn hình làm việc của 通帳スキャン: trái là danh sách mặt sổ đã đọc, giữa là ảnh sổ, phải là bảng kết quả.',
-    zoom: 'Chạm vào ảnh để phóng to',
+    zoom: 'Bấm vào ảnh để phóng to',
+    close: 'Đóng',
     marks: [
       { x: 13.4, y: 35.1, t: 'Tình trạng đọc của từng mặt sổ' },
       { x: 44.6, y: 38.1, t: 'Vệt đỏ trên đúng dòng của ảnh' },
@@ -600,7 +602,8 @@ const en: Copy = {
     title: ['The real workspace'],
     lead: 'Not an illustration: a capture of the running app. Passbook pages on the left, the photo in the middle, extracted rows on the right. Pick a row and the same line on the photo gets a red band.',
     alt: 'The 通帳スキャン workspace: page list on the left, passbook photo in the middle, extracted table on the right.',
-    zoom: 'Tap the image to enlarge',
+    zoom: 'Click or tap the image to enlarge',
+    close: 'Close',
     marks: [
       { x: 13.4, y: 35.1, t: 'Reading status of each page' },
       { x: 44.6, y: 38.1, t: 'Red band on the same line of the photo' },
