@@ -17,7 +17,7 @@
 import { Warning } from "@/components/ui/icons";
 import { sheetImage, type RowBands, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
-import { stripRect, stripSegments } from "@/lib/quickreview";
+import { STRIP_COL_PX, STRIP_MAX_SEGMENTS, stripRect, stripSegments } from "@/lib/quickreview";
 
 export default function RowStrip({
   wsId,
@@ -27,6 +27,8 @@ export default function RowStrip({
   index,
   stale,
   live = true,
+  colPx = STRIP_COL_PX,
+  maxSegments = STRIP_MAX_SEGMENTS,
 }: {
   wsId: string;
   sheet: Sheet;
@@ -39,6 +41,10 @@ export default function RowStrip({
   stale: boolean;
   /** Thẻ đang trượt đi thì chỉ còn là hình: không mang các mốc của thẻ thật. */
   live?: boolean;
+  /** Bề ngang thật của cột chứa dải (px), để chia đoạn cho vừa; mặc định là cột kết quả. */
+  colPx?: number;
+  /** Số đoạn tối đa (kính lúp ở đáy khung ảnh chỉ cho 2 để khỏi quá cao). */
+  maxSegments?: number;
 }) {
   const { t } = useT();
 
@@ -73,7 +79,7 @@ export default function RowStrip({
   const h = rect.cy1 - (rect.cy1 - rect.y1) / 2 - top;
   const solid = rect.exact;
   // Tờ sổ rộng hơn cột kết quả: cắt thành 1–3 đoạn xếp chồng (xem `stripSegments`) để chữ thật sự được phóng to
-  const segs = stripSegments(rect, sheet.width, sheet.height);
+  const segs = stripSegments(rect, sheet.width, sheet.height, colPx, maxSegments);
   return (
     <div
       data-testid={live ? "quick-strip" : undefined}

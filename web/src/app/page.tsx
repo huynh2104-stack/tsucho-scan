@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
+  activeJob,
   addSampleBooks,
   addSheetsWithProgress,
   autoprepSheets,
@@ -39,6 +40,7 @@ import {
   rowMapEstimate,
   saveBlob,
   saveSheetResult,
+  scanEstimate,
   startScan,
   undoSheet,
   warpSheet,
@@ -46,6 +48,7 @@ import {
   type PerSheet,
   type ResultStore,
   type RowBands,
+  type ScanEstimate,
   type ScanEvent,
   type Tx,
   type Workspace,
@@ -54,6 +57,7 @@ import { useAuth } from "@/lib/auth";
 import { applyMetaEdit, type BlockRef, type MetaDraft } from "@/lib/bookinfo";
 import { caseKey, useCase } from "@/lib/case";
 import { useStable } from "@/lib/useStable";
+import { clearHover, getHover, setHover, subscribe } from "@/lib/hoverlink";
 import QuickReview from "@/components/QuickReview";
 import Toast, { type ToastData } from "@/components/Toast";
 import {
@@ -66,7 +70,7 @@ import {
   type DictField,
 } from "@/lib/corrections";
 import { useCorrections } from "@/lib/corrections-provider";
-import type { RowRef } from "@/lib/quickreview";
+import { rowAtSheetIndex, type RowRef } from "@/lib/quickreview";
 import { exportSummary, scopeIds, type ExportSummary } from "@/lib/exportsummary";
 import {
   analyzeRows,
@@ -91,6 +95,8 @@ import {
   type SheetLink,
 } from "@/lib/review";
 import { useT } from "@/lib/i18n";
+import { usePrefs } from "@/lib/prefs";
+import { formatUsd, needsScanConfirm, overDemoQuota, scanHint } from "@/lib/scanplan";
 import { useTour } from "@/lib/tour";
 import DropZone, { BenchDrop } from "@/components/DropZone";
 import Tour from "@/components/Tour";
@@ -173,6 +179,7 @@ export default function Workbench() {
     return e.text;
   }, [t]);
   const { user, ready } = useAuth();
+  const { prefs } = usePrefs();
   const { startIfFirstTime } = useTour();
   const { setCurrent: setCurrentCase } = useCase();
   const router = useRouter();
@@ -204,6 +211,8 @@ export default function Workbench() {
     ref: TxRef;
     field: FocusField;
   } | null>(null);
+  // Bấm dòng trên ảnh: bảng cuộn tới dòng đó và nháy nhẹ (không focus ô nào — focus làm bàn phím điện thoại bật lên)
+  const [pendingReveal, setPendingReveal] = useState<TxRef | null>(null);
   // Vừa áp một gợi ý sửa ở dòng này: sau khi bảng vẽ lại thì sang dòng cần soát kế (nếu dòng đã hết cờ)
   const [jumpNext, setJumpNext] = useState<TxRef | null>(null);
   // Cặp mặt sổ nghi cùng một trang đang mở hộp so sánh hai ảnh (task 1.7)
@@ -226,6 +235,10 @@ export default function Workbench() {
     run: () => void;
   } | null>(null);
   const [scanning, setScanning] = useState(false);
+  /** Ước tính cho các mặt đang tích chọn (chỉ để vẽ gợi ý dưới nút quét). */
+  const [estimate, setEstimate] = useState<{ key: string; data: ScanEstimate } | null>(null);
+  const scanningRef = useRef(false);                  // `scanning` mới nhất, cho hàm async đọc sau await
+  scanningRef.current = scanning;
   const [progress, setProgress] = useState<ScanEvent | null>(null);
   const [busy, setBusy] = useState(false);
   /* Nhập file: thẻ TẠM hiện ngay lúc thả (kèm % tải lên), và các mặt sổ của đợt nhập đang
@@ -259,6 +272,8 @@ export default function Workbench() {
   const [cols, setCols] = useState<ColPrefs>({ store: null, extra: false, kind: true });
 
   const stopSse = useRef<(() => void) | null>(null);
+  const followed = useRef<string | null>(null);       // job đang được nghe SSE
+  const scanGate = useRef(false);                     // đang hỏi ước tính / chờ xác nhận quét
   const booted = useRef<string | null>(null);   // đã mở workspace cho user nào
   const fileInput = useRef<HTMLInputElement>(null);   // MỘT ô chọn file cho cả nút 取込 lẫn khung ảnh trống
 
@@ -409,6 +424,13 @@ export default function Workbench() {
     return i >= 0 && i < bands.bands.length ? bands.bands[i] : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selRow, bands, active, store]);
+
+  /** Thứ tự phẳng của dòng đang chọn trong mặt đang xem (khung rê và kính lúp của SheetViewer cần); không thuộc mặt này → null. */
+  const pickedIndex = (() => {
+    if (!selRow || selRow.sheet !== active) return null;
+    const i = flatRowIndex(store, active, selRow);
+    return i >= 0 ? i : null;
+  })();
 
   /** Thống kê từng mặt sổ, tính lại từ kho — kể cả các ô người dùng vừa sửa.
    *  Huy hiệu cột trái, bộ đếm「Còn N dòng」và phím n đều đi qua `analyzeRows` (lib/review.ts),
@@ -605,6 +627,65 @@ export default function Workbench() {
     Object.keys(store).length > 0 &&
     sheets.filter((s) => ticked.has(s.id)).every((s) => s.scanned && store[s.id]?.blocks?.length);
 
+  /* Gợi ý dưới nút quét: hỏi ước tính cho các mặt đang tích. Chỉ là phần phụ nên lỗi thì im lặng.
+     `estKey` (danh sách id) và `estStamp` (sha256 — xoay/cắt đổi ảnh thì kết quả lưu sẵn không còn khớp)
+     là CHUỖI để effect không chạy lại vô ích; `scanning` để quét xong tính lại. */
+  const estSheets = sheets.filter((s) => ticked.has(s.id) && (s.status ?? "ready") === "ready");
+  const estKey = estSheets.map((s) => s.id).join(",");
+  const estStamp = estSheets.map((s) => s.sha256).join(",");
+  const estWs = ws?.id;
+  const estFull = `${estKey}|${estStamp}`;       // ước tính chỉ được vẽ khi khoá khớp lựa chọn HIỆN TẠI
+  useEffect(() => {
+    if (!estWs || !estKey || scanning) return;
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      scanEstimate(estWs, estKey.split(","), ac.signal)
+        .then((data) => setEstimate({ key: `${estKey}|${estStamp}`, data }))
+        .catch(() => {
+          if (!ac.signal.aborted) setEstimate(null);
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
+  }, [estWs, estKey, estStamp, scanning]);
+
+  /* F5 giữa lúc quét: hồ sơ vừa nạp xong mà máy chủ còn lần quét dở thì nghe tiếp (nó phát lại từ đầu). */
+  useEffect(() => {
+    if (!estWs) return;
+    let alive = true;
+    activeJob(estWs)
+      .then((job) => {
+        if (!alive || !job || stopSse.current) return;
+        // followJob trước: không nghe được (đã có ai nghe job này) thì không bật `scanning`, khỏi kẹt "đang quét"
+        if (!followJob(job.id, job.sheet_ids, estWs)) return;
+        setScanning(true);
+        setErr(null);
+        setProgress(null);
+        setStates(Object.fromEntries(job.sheet_ids.map((id) => [id, "wait" as ScanState])));
+      })
+      .catch(() => { /* không hỏi được thì thôi: chỉ mất việc theo dõi tiếp */ });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estWs]);
+
+  /** Dòng gợi ý dưới nút quét, đã dịch sẵn (null = không có gì để nói). */
+  const hintText = (() => {
+    if (scanning || !estKey || !estimate || estimate.key !== estFull) return null;
+    const est = estimate.data;
+    const h = scanHint(est);
+    if (h.kind === "none") return null;
+    if (h.kind === "allFree") return t.scanHintAllFree;
+    let txt = h.kind === "mixed" ? t.scanHintMixed(h.fresh, h.free) : t.scanHintAllNew(h.fresh);
+    if (est.demo_left != null) txt += t.scanHintLeft(est.demo_left);
+    const usd = prefs.showCost ? formatUsd(est.est_usd) : null;
+    if (usd) txt += t.scanHintCost(usd);
+    return txt;
+  })();
+
 
   /** Các dòng của mặt đang xem kèm「có cần soát không」và ô cần đặt con trỏ — dùng cho phím n/p.
    *
@@ -658,6 +739,26 @@ export default function Workbench() {
     el?.select();
     setPendingFocus(null);
   }, [pendingFocus]);
+
+  /* Lộ dòng vừa bấm trên ảnh: cuộn tới + nháy. Cũng chạy sau khi React vẽ (xem effect trên). Điện thoại: bảng đang ở thẻ
+     ẩn thì scrollIntoView không có tác dụng, dòng vẫn được chọn; người dùng sang thẻ bảng bằng nút «表で見る» của kính lúp. */
+  useEffect(() => {
+    if (!pendingReveal) return;
+    const tr = document.querySelector<HTMLElement>(
+      `[data-row="${pendingReveal.sheet}:${pendingReveal.block}:${pendingReveal.row}"]`,
+    );
+    if (!tr) return;
+    tr.scrollIntoView({ block: "nearest" });
+    tr.classList.remove("row-flash");
+    void tr.offsetWidth;      // khởi động lại animation nếu bấm lại đúng dòng đó
+    tr.classList.add("row-flash");
+    const timer = window.setTimeout(() => tr.classList.remove("row-flash"), 700);
+    // Không đặt lại state về null: mỗi lần bấm tạo object mới nên effect tự chạy lại, còn cleanup này không bị kích sớm
+    return () => {
+      window.clearTimeout(timer);
+      tr.classList.remove("row-flash");
+    };
+  }, [pendingReveal]);
 
   // Show the geometry band as soon as it is ready, then replace it with a
   // content-matched band. The latter never moves an old sheet's highlight.
@@ -760,6 +861,87 @@ export default function Workbench() {
   /** Chỉnh ảnh CHỈ tác động mặt đang xem. */
   const editTarget = () => (active ? [active] : []);
 
+  /** Nghe một lần quét đang chạy (SSE): dùng cho cả lần vừa bấm lẫn lần quét còn dở sau khi F5.
+   *  Máy chủ phát lại mọi sự kiện từ đầu nên trạng thái từng mặt tự dựng lại đúng. */
+  const followJob = (jobId: string, ids: string[], wsId: string): boolean => {
+    // Một job chỉ được nghe MỘT lần (StrictMode chạy effect hai lần; người dùng có thể bấm quét ngay lúc đang nạp lại)
+    if (followed.current === jobId) return false;
+    followed.current = jobId;
+    stopSse.current = listenEvents(
+      jobId,
+      (e) => {
+        setProgress(e);
+        if (e.stage === "page" && e.index) {
+          const cur = ids[e.index - 1];
+          setStates((prev) => {
+            const next = { ...prev };
+            if (cur) next[cur] = "scanning";
+            const before = ids[e.index! - 2];
+            if (before && next[before] === "scanning") next[before] = "done";
+            return next;
+          });
+        }
+        if (e.stage === "skip") {
+          setStates((prev) => {
+            const k = Object.keys(prev).find((x) => prev[x] === "scanning");
+            return k ? { ...prev, [k]: "skipped" } : prev;
+          });
+        }
+        if (e.stage === "validate" || e.stage === "finished") {
+          setStates((prev) => {
+            const next = { ...prev };
+            for (const k of Object.keys(next)) {
+              if (next[k] === "scanning") next[k] = "done";
+            }
+            return next;
+          });
+        }
+        if (e.stage === "error") {
+          setErr({ code: e.code, sheet: e.sheet, info: e.info, text: e.message });
+          // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
+          // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
+          setStates((prev) => {
+            const next = { ...prev };
+            for (const k of Object.keys(next)) {
+              if (next[k] === "scanning" || next[k] === "wait") next[k] = "failed";
+            }
+            return next;
+          });
+        }
+      },
+      async () => {
+        try {
+          const done = await getJob(jobId);
+          if (done.error) {
+            setErr({
+              code: done.error_code,
+              sheet: done.error_sheet,
+              info: done.error_info,
+              text: done.error,
+            });
+          }
+          // Nạp lại từ backend: kho đã được lưu theo TỪNG mặt sổ nên kết quả
+          // các mặt quét trước vẫn còn nguyên.
+          const w = await getWorkspace(wsId);
+          setWs(w);
+          // Chỉ những mặt VỪA QUÉT mới lấy bản mới; các mặt khác giữ nguyên
+          // bản người dùng đang sửa dở.
+          syncStore(w.results ?? {}, ids);
+          // Quét xong mà khung phải trống thì người dùng tưởng thất bại →
+          // tự mở mặt sổ đầu tiên vừa quét mà CÓ giao dịch
+          const first = ids.find((id) => w.results?.[id]?.blocks?.length);
+          if (first) setActive(first);
+        } catch (e) {
+          setErr({ text: e instanceof Error ? e.message : String(e) });
+        }
+        stopSse.current = null;
+        followed.current = null;
+        setScanning(false);
+      },
+    );
+    return true;
+  };
+
   const runScan = async (ids: string[]) => {
     // Mặt sổ còn đang xử lý nền chưa quét được (server cũng trả 409)
     ids = ids.filter((id) => (sheets.find((s) => s.id === id)?.status ?? "ready") === "ready");
@@ -772,84 +954,61 @@ export default function Workbench() {
 
     try {
       const job = await startScan(ws.id, ids);
-
-      stopSse.current = listenEvents(
-        job.id,
-        (e) => {
-          setProgress(e);
-          if (e.stage === "page" && e.index) {
-            const cur = ids[e.index - 1];
-            setStates((prev) => {
-              const next = { ...prev };
-              if (cur) next[cur] = "scanning";
-              const before = ids[e.index! - 2];
-              if (before && next[before] === "scanning") next[before] = "done";
-              return next;
-            });
-          }
-          if (e.stage === "skip") {
-            setStates((prev) => {
-              const k = Object.keys(prev).find((x) => prev[x] === "scanning");
-              return k ? { ...prev, [k]: "skipped" } : prev;
-            });
-          }
-          if (e.stage === "validate" || e.stage === "finished") {
-            setStates((prev) => {
-              const next = { ...prev };
-              for (const k of Object.keys(next)) {
-                if (next[k] === "scanning") next[k] = "done";
-              }
-              return next;
-            });
-          }
-          if (e.stage === "error") {
-            setErr({ code: e.code, sheet: e.sheet, info: e.info, text: e.message });
-            // Quét hỏng thì phải GỠ chữ "Đang quét" — trước đây nó nằm lại
-            // vĩnh viễn trên thẻ mặt sổ, người dùng tưởng máy vẫn đang chạy.
-            setStates((prev) => {
-              const next = { ...prev };
-              for (const k of Object.keys(next)) {
-                if (next[k] === "scanning" || next[k] === "wait") next[k] = "failed";
-              }
-              return next;
-            });
-          }
-        },
-        async () => {
-          try {
-            const done = await getJob(job.id);
-            if (done.error) {
-              setErr({
-                code: done.error_code,
-                sheet: done.error_sheet,
-                info: done.error_info,
-                text: done.error,
-              });
-            }
-            // Nạp lại từ backend: kho đã được lưu theo TỪNG mặt sổ nên kết quả
-            // các mặt quét trước vẫn còn nguyên.
-            const w = await getWorkspace(ws.id);
-            setWs(w);
-            // Chỉ những mặt VỪA QUÉT mới lấy bản mới; các mặt khác giữ nguyên
-            // bản người dùng đang sửa dở.
-            syncStore(w.results ?? {}, ids);
-            // Quét xong mà khung phải trống thì người dùng tưởng thất bại →
-            // tự mở mặt sổ đầu tiên vừa quét mà CÓ giao dịch
-            const first = ids.find((id) => w.results?.[id]?.blocks?.length);
-            if (first) setActive(first);
-          } catch (e) {
-            setErr({ text: e instanceof Error ? e.message : String(e) });
-          }
-          setScanning(false);
-        },
-      );
+      followJob(job.id, ids, ws.id);
     } catch (e) {
       setErr(
         e instanceof ApiError
           ? { code: e.code, info: e.info as NonNullable<ErrInfo>["info"], text: e.message }
           : { text: e instanceof Error ? e.message : String(e) },
       );
+      // Chưa quét được (mạng, hết lượt…): gỡ chữ «待機中» đã đặt trước đó. Về «chưa quét» chứ không «failed»,
+      // vì «không quét được» sai nghĩa với lỗi hết lượt / mất mạng — lỗi đã nằm trên thanh đỏ.
+      setStates((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
       setScanning(false);
+    }
+  };
+
+  /** MỘT cửa duy nhất cho mọi thao tác quét của người dùng: hỏi máy chủ ước tính MỚI (không dùng gợi ý
+   *  cũ, có thể đã lỗi thời) rồi mới quyết định quét luôn, hỏi lại, hay chặn vì hết lượt dùng thử. */
+  const requestScan = async (ids: string[]) => {
+    ids = ids.filter((id) => (sheets.find((s) => s.id === id)?.status ?? "ready") === "ready");
+    if (!ws || ids.length === 0 || scanning || scanGate.current) return;
+    scanGate.current = true;       // chặn bấm đúp trong lúc chờ ước tính
+    try {
+      let est: ScanEstimate | null = null;
+      try {
+        est = await scanEstimate(ws.id, ids);
+      } catch {
+        /* không ước tính được thì cứ quét như trước: máy chủ vẫn tự chặn hạn mức */
+      }
+      // Trong lúc chờ ước tính có thể đã có lần quét khác bắt đầu (`scanning` của closure đã cũ): bỏ qua lặng lẽ
+      if (scanningRef.current || stopSse.current) return;
+      if (est && overDemoQuota(est)) {
+        setErr({ code: "demo_quota", info: { limit: est.demo_limit ?? 0 }, text: "" });
+        return;
+      }
+      if (est && needsScanConfirm(est, prefs.showCost)) {
+        const usd = prefs.showCost && est.new > 0 ? formatUsd(est.est_usd) : null;
+        setConfirm({
+          title: t.scanAskTitle,
+          message: [
+            t.scanAskFresh(est.new),
+            est.free > 0 ? t.scanAskFree(est.free) : "",
+            usd ? t.scanAskCost(usd) : "",
+            est.demo_left != null ? t.scanAskLeft(est.demo_left) : "",
+          ].filter(Boolean).join(" "),
+          label: t.scanAskGo,
+          run: () => void runScan(ids),
+        });
+        return;
+      }
+      void runScan(ids);
+    } finally {
+      scanGate.current = false;
     }
   };
 
@@ -1245,6 +1404,8 @@ export default function Workbench() {
       // Bỏ chọn: Escape đơn. KHÔNG dùng Ctrl+Esc — trên Windows đó là phím mở
       // Start menu, trình duyệt không nhận được.
       if (e.key === "Escape") {
+        // Đang mở hộp thoại (cài đặt, xuất, xác nhận…) thì Esc chỉ đóng hộp, đừng bỏ chọn mặt sổ
+        if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
         setTicked(new Set());
         return;
       }
@@ -1309,6 +1470,37 @@ export default function Workbench() {
     setSelRow(ref);
     setActive(ref.sheet);
   });
+
+  /* Rê hai chiều ảnh ↔ bảng: trạng thái rê nằm ở `lib/hoverlink` (ngoài React) để rê không làm trang/bảng vẽ lại.
+     Bảng → ảnh: hàm ổn định này đổi địa chỉ dòng thành chỉ số phẳng rồi ghi vào kho. */
+  const sHoverRow = useStable((ref: TxRef | null) => {
+    const i = ref ? flatRowIndex(storeRef.current, ref.sheet, ref) : -1;
+    if (ref && i >= 0) setHover({ from: "table", sheet: ref.sheet, index: i });
+    else clearHover("table");
+  });
+  /* Ảnh → bảng: MỘT listener, chỉ đổi thuộc tính data-hot của <tr> (không setState, không cuộn bảng). */
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const hotRow = useRef<Element | null>(null);
+  useEffect(() => {
+    const off = subscribe(() => {
+      hotRow.current?.removeAttribute("data-hot");
+      hotRow.current = null;
+      const h = getHover();
+      if (!h || h.from !== "image" || h.sheet !== activeRef.current) return;
+      const ref = rowAtSheetIndex(storeRef.current, h.sheet, h.index);
+      if (!ref) return;
+      const el = document.querySelector(`tr[data-row="${ref.sheet}:${ref.block}:${ref.row}"]`);
+      if (!el || el.hasAttribute("data-sel")) return;      // dòng đang chọn không đổi nền vì rê
+      el.setAttribute("data-hot", "");
+      hotRow.current = el;
+    });
+    return () => {
+      off();
+      hotRow.current?.removeAttribute("data-hot");
+      hotRow.current = null;
+    };
+  }, []);
 
   // Chưa biết ai đang đăng nhập thì chưa vẽ bàn làm việc — nếu vẽ, người dùng
   // thấy giao diện rỗng loé lên một nhịp rồi mới bị đá sang /login.
@@ -1414,7 +1606,7 @@ export default function Workbench() {
             </div>
             <button
               data-tour="scan"
-              onClick={() => void runScan(tickedIds())}
+              onClick={() => void requestScan(tickedIds())}
               disabled={scanning || ticked.size === 0}
               className={`btn tnum w-full max-lg:min-h-10 ${scanDone ? "btn-quiet font-bold" : "btn-primary"}`}
             >
@@ -1429,6 +1621,12 @@ export default function Workbench() {
                   : t.scanning
                 : t.scanN(ticked.size)}
             </button>
+            {/* Chỉ chiếm chỗ khi có gì để nói */}
+            {hintText && (
+              <p data-testid="scan-hint" aria-live="polite" className="mt-1.5 text-t12 leading-snug text-ink2 [overflow-wrap:anywhere]">
+                {hintText}
+              </p>
+            )}
           </div>
 
           {/* Chừa sẵn chỗ thanh cuộn: có cuộn hay không thì hàng mặt sổ vẫn đứng nguyên */}
@@ -1554,6 +1752,11 @@ export default function Workbench() {
           <SheetViewer
             wsId={ws?.id ?? ""}
             sheet={activeSheet}
+            preload={(() => {
+              // Hai mặt liền kề mặt đang xem — để SheetViewer tải sẵn
+              const i = sheets.findIndex((s) => s.id === active);
+              return i < 0 ? [] : [sheets[i - 1], sheets[i + 1]].filter(Boolean);
+            })()}
             busy={busy}
             scanning={scanning}
             scanBeam={!!active && states[active] === "scanning"}
@@ -1581,7 +1784,7 @@ export default function Workbench() {
             onUndo={() =>
               ws && active && void guard(() => undoSheet(ws.id, editTarget()))
             }
-            onScanThis={() => active && void runScan([active])}
+            onScanThis={() => active && void requestScan([active])}
             onDelete={() => {
               if (!ws || !active) return;
               const hasResult = !!store[active]?.blocks?.length;
@@ -1607,6 +1810,18 @@ export default function Workbench() {
             highlightSkew={highlight?.skew_deg ?? bands?.skew_deg ?? 0}
             highlightSpan={bands ? { x0: highlight?.x0 ?? bands.x0, x1: highlight?.x1 ?? bands.x1 } : null}
             stale={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned}
+            rowBands={!!active && !!store[active]?.blocks?.length && !activeSheet?.scanned ? null : bands}
+            bandsState={bands ? "ready" : mappedRows?.key === rowMapKey ? "unavailable" : "loading"}
+            pickedIndex={quickOpen ? null : pickedIndex}
+            hasRows={!quickOpen && !!active && !!store[active]?.blocks?.some((b) => b.rows.length > 0)}
+            onPickRow={quickOpen ? undefined : (i) => {
+              if (!active) return;
+              const ref = rowAtSheetIndex(store, active, i);
+              if (!ref) return;
+              setSelRow(ref);
+              setPendingReveal({ ...ref });
+            }}
+            onOpenTable={() => setPane("result")}
           />
           )}
         </section>
@@ -1701,6 +1916,7 @@ export default function Workbench() {
               onUndismissLink={sUndismissLink}
               selected={selRow}
               onSelectRow={sSelectRow}
+              onHoverRow={sHoverRow}
               footer={
                 <input
                   value={ws?.book_name ?? ""}
@@ -1708,6 +1924,9 @@ export default function Workbench() {
                     setWs((p) => (p ? { ...p, book_name: e.target.value } : p))
                   }
                   onBlur={(e) => ws && void renameBook(ws.id, e.target.value)}
+                  /* Ô này có mặt từ lúc trang vừa dựng, TRƯỚC khi hồ sơ nạp xong: gõ lúc đó thì chữ bị bỏ âm thầm (không
+                     có hồ sơ để ghi vào) — mạng chậm là gặp. Khoá tới khi có hồ sơ. */
+                  disabled={!ws}
                   placeholder={t.bookNamePlaceholder}
                   aria-label={t.bookNamePlaceholder}
                   className="field min-h-[calc(34px*var(--fs))] w-auto min-w-0 flex-[0_1_220px] text-t13 max-lg:min-h-10 max-lg:flex-1"

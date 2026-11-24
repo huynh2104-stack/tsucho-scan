@@ -25,6 +25,7 @@ mỗi ngày (mặc định 6). Sổ MẪU không tính: nó không gọi mô hì
 from __future__ import annotations
 
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -117,6 +118,42 @@ def ghi_nhan(user_id: str, so_mat: int) -> None:
             "INSERT INTO demo_usage (user_id, day, faces) VALUES (?, ?, ?)"
             " ON CONFLICT(user_id, day) DO UPDATE SET faces = faces + excluded.faces",
             (user_id, _hom_nay(), so_mat),
+        )
+
+
+_khoa = threading.Lock()
+
+
+def giu_cho(user: auth.User, so_trang: int) -> bool:
+    """Giữ chỗ `so_trang` lượt NGUYÊN TỬ: đủ hạn mức thì cộng luôn và trả True, không đủ thì
+    không đổi gì, trả False.
+
+    Hai hồ sơ có khoá riêng nên "kiểm rồi ghi" tách đôi sẽ cho hai lần quét cùng thấy còn đủ
+    lượt (vượt hạn mức). Gộp thành MỘT câu UPDATE có điều kiện (kèm khoá mô-đun cho chắc).
+    """
+    if so_trang <= 0:
+        return True
+    with _khoa, auth._db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO demo_usage (user_id, day, faces) VALUES (?, ?, 0)",
+            (user.id, _hom_nay()),
+        )
+        cur = conn.execute(
+            "UPDATE demo_usage SET faces = faces + ? WHERE user_id = ? AND day = ?"
+            " AND faces + ? <= ?",
+            (so_trang, user.id, _hom_nay(), so_trang, han_muc()),
+        )
+        return cur.rowcount == 1
+
+
+def tra_lai(user_id: str, so_trang: int) -> None:
+    """Hoàn lượt đã giữ khi lần quét hỏng trước khi gọi mô hình. Không cho âm."""
+    if so_trang <= 0:
+        return
+    with _khoa, auth._db() as conn:
+        conn.execute(
+            "UPDATE demo_usage SET faces = MAX(0, faces - ?) WHERE user_id = ? AND day = ?",
+            (so_trang, user_id, _hom_nay()),
         )
 
 

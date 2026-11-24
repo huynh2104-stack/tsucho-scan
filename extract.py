@@ -6,7 +6,9 @@ import io
 import json
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import anthropic
@@ -482,6 +484,17 @@ def _call_gemini(model: str, prompt: str, files: list[tuple[str, bytes]],
     return text, usage
 
 
+def _resolve_model() -> str:
+    """Model đang cấu hình. Dùng chung cho quét thật và `cache_status` — hai nơi
+    mà lệch nhau thì báo "có sẵn" nhưng quét vẫn tốn tiền."""
+    load_dotenv()
+    return (
+        os.environ.get("EXTRACT_MODEL")
+        or os.environ.get("CLAUDE_MODEL")  # tên cũ, giữ để tương thích
+        or DEFAULT_MODEL
+    )
+
+
 def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True,
                          on_progress=None) -> dict:
     """Trích xuất giao dịch bằng model cấu hình trong .env, trả về:
@@ -498,12 +511,7 @@ def extract_transactions(file_paths, rotate: int = 0, use_cache: bool = True,
     """
     if isinstance(file_paths, (str, Path)):
         file_paths = [file_paths]
-    load_dotenv()
-    model = (
-        os.environ.get("EXTRACT_MODEL")
-        or os.environ.get("CLAUDE_MODEL")  # tên cũ, giữ để tương thích
-        or DEFAULT_MODEL
-    )
+    model = _resolve_model()
 
     is_gemini = model.startswith("gemini")
     if is_gemini and not os.environ.get("GEMINI_API_KEY"):
@@ -592,6 +600,81 @@ def is_sample_file(path) -> bool:
         return False
 
 
+def _cache_key(data: bytes, rotate: int, model: str, prompt: str) -> str:
+    """Khoá cache của một đơn vị. ĐỪNG đổi công thức: lệch một ký tự là cache của
+    mọi người dùng mất hiệu lực và họ phải trả tiền quét lại (có test đóng băng)."""
+    return hashlib.sha256(
+        data
+        + f"|v{_CACHE_VERSION}|{rotate}|{model}|".encode()
+        + prompt.encode()
+    ).hexdigest()
+
+
+# Nhớ đệm băm của từng đơn vị theo (đường dẫn, mtime, size, rotate): giao diện gọi ước tính
+# mỗi lần đổi lựa chọn, đọc + băm lại 100 mặt x 4MB mất ~0,8 giây. Lưu hasher đã update(data)
+# để ghép hậu tố khoá bằng .copy() — sha256 là băm dòng nên ra ĐÚNG khoá của `_cache_key`.
+_UNIT_CACHE_MAX = 512
+_unit_cache: OrderedDict = OrderedDict()
+_unit_lock = threading.Lock()
+
+
+def _unit_hashes(path: Path, rotate: int) -> list:
+    """[(sha256 hex của data, hasher đã update(data))] cho từng đơn vị của file."""
+    st = path.stat()
+    key = (str(path.resolve()), st.st_mtime_ns, st.st_size, rotate)
+    with _unit_lock:
+        hit = _unit_cache.get(key)
+        if hit is not None:
+            _unit_cache.move_to_end(key)
+            return hit
+    units = _prepare_units(path, rotate)       # lỗi thì ném ra, không nhớ đệm
+    val = []
+    for _label, _mt, data in units:
+        h = hashlib.sha256(data)
+        val.append((h.hexdigest(), h))
+    with _unit_lock:
+        _unit_cache[key] = val
+        while len(_unit_cache) > _UNIT_CACHE_MAX:
+            _unit_cache.popitem(last=False)    # bỏ mục cũ nhất
+    return val
+
+
+def cache_status(file_paths, rotate: int = 0, model: str | None = None) -> list[dict]:
+    """Với mỗi file: {"units", "free", "bad", "sample"}.
+
+    units = số đơn vị (trang); free = số đơn vị KHÔNG phải gọi model (ảnh mẫu hoặc đã có
+    file cache); sample = riêng số ảnh mẫu (đã nằm trong free); bad = file hỏng / quá lớn /
+    không đọc được — tính 1 đơn vị, không free, nhưng cũng KHÔNG gọi model (lúc quét thật
+    `extract_transactions` báo lỗi trước), nên đừng tính là trang tốn tiền.
+
+    Chỉ tính khoá và nhìn đĩa, không gọi API. "File cache có tồn tại không" kiểm mỗi lần.
+    """
+    if isinstance(file_paths, (str, Path)):
+        file_paths = [file_paths]
+    model = model or _resolve_model()
+    suffix = f"|v{_CACHE_VERSION}|{rotate}|{model}|".encode() + _load_system_prompt().encode()
+    seeds = _sample_seeds()
+    out = []
+    for p in file_paths:
+        try:
+            hashes = _unit_hashes(Path(p), rotate)
+        except (ExtractError, OSError):
+            out.append({"units": 1, "free": 0, "bad": 1, "sample": 0})
+            continue
+        free = sample = 0
+        for hexd, h in hashes:
+            if not rotate and hexd in seeds:
+                free += 1
+                sample += 1
+                continue
+            c = h.copy()
+            c.update(suffix)
+            if (CACHE_DIR / f"{c.hexdigest()}.json").is_file():
+                free += 1
+        out.append({"units": len(hashes), "free": free, "bad": 0, "sample": sample})
+    return out
+
+
 def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
                     model: str, prompt: str, caller, on_progress=None,
                     sample: bool = True) -> dict:
@@ -605,11 +688,7 @@ def _extract_single(unit: tuple[str, str, bytes], rotate: int, use_cache: bool,
         result["usage"] = {"input_tokens": 0, "output_tokens": 0}
         result["cached"] = True
         return result
-    key = hashlib.sha256(
-        data
-        + f"|v{_CACHE_VERSION}|{rotate}|{model}|".encode()
-        + prompt.encode()
-    ).hexdigest()
+    key = _cache_key(data, rotate, model, prompt)
     cache_file = CACHE_DIR / f"{key}.json"
     if use_cache and cache_file.is_file():
         result = json.loads(cache_file.read_text(encoding="utf-8"))

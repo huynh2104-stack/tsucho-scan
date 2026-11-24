@@ -219,6 +219,23 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           <p className="text-t12 leading-[1.7] text-ink3">{t.fontHint}</p>
         </section>
 
+        <section data-testid="scan-section" className="flex flex-col gap-3 border-t border-rule2 pt-5">
+          <h3 className="text-t14 font-bold">{t.scanSettingsTitle}</h3>
+          <SettingRow label={t.scanCostLabel}>
+            <Segmented<"off" | "on">
+              value={prefs.showCost ? "on" : "off"}
+              options={[
+                { id: "off", label: t.scanCostOff },
+                { id: "on", label: t.scanCostOn },
+              ]}
+              onChange={(v) => update({ showCost: v === "on" })}
+              layoutId="settings-cost"
+              label={t.scanCostLabel}
+            />
+          </SettingRow>
+          <p className="text-t12 leading-[1.7] text-ink3">{t.scanCostHint}</p>
+        </section>
+
         <DictionarySection />
       </div>
 

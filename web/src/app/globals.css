@@ -911,6 +911,14 @@ a {
   .ledger-table tbody tr:hover {
     --row-bg: color-mix(in srgb, var(--accent-pale) 55%, var(--card));
   }
+  /* Dòng đang bị rê trên ẢNH (page.tsx đặt data-hot, không qua React). Đổi --row-bg chứ không phủ background-image: ô
+     chain[data-gap] đã dùng background-image cho vạch 朱, và --row-bg là thứ mọi ô (kể cả ::after của mắt xích) đã đọc. */
+  .ledger-table tbody tr[data-hot]:not([data-sel]) {
+    --row-bg: color-mix(in srgb, var(--mark) 9%, var(--card));
+  }
+  .ledger-table tbody tr[data-hot]:not([data-sel]):nth-child(even) {
+    --row-bg: color-mix(in srgb, var(--mark) 9%, var(--band));
+  }
   .ledger-table tbody tr[data-sel] {
     --row-bg: var(--accent-pale);
   }
@@ -1276,7 +1284,17 @@ a {
   animation: shimmer 1.4s linear infinite;
 }
 
+/* Bấm dòng trên ảnh → dòng ở bảng nháy nhẹ cho mắt bắt được. Tô ở ô (td) vì ô có nền riêng che mất nền của <tr> */
+@keyframes rowFlash {
+  from { background-color: color-mix(in srgb, var(--mark) 22%, transparent); }
+  to { background-color: transparent; }
+}
+.row-flash > td, .row-flash > th {
+  animation: rowFlash 700ms ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .row-flash > td, .row-flash > th { animation: none !important; }
   .scanline, .pulse-edge, .row-in, .row-closed, .skeleton, .seal-press, .dlg, .dlg-scrim,
   .chain-draw .chain::before, .chain-draw .chain::after, .ledger-blank-active .chain::before {
     animation: none !important;

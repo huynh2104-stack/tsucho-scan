@@ -213,6 +213,9 @@ export type Job = {
   error_sheet?: string;
   error_info?: { size_mb?: number; limit_mb?: number };
   sheet_ids: string[];
+  /** Tên các mặt sổ (có ở GET /jobs/active). */
+  names?: string[];
+  created_at?: number;
   result: ScanPayload | null;
 };
 
@@ -620,6 +623,35 @@ export const resetSheets = (wsId: string, sheet_ids: string[]) =>
 
 export const startScan = (wsId: string, sheet_ids: string[], no_cache = false) =>
   jsonPost<Job>(`/api/ws/${wsId}/scan`, { sheet_ids, no_cache });
+
+/** Ước tính TRƯỚC khi quét (chỉ đọc, không gọi AI): bao nhiêu trang đã có sẵn, bao nhiêu sẽ gọi AI. */
+export type ScanEstimate = {
+  pages: number;
+  /** Trang KHÔNG gọi AI (ảnh mẫu hoặc đã có kết quả lưu sẵn). */
+  free: number;
+  /** Trang KHÔNG đọc được (hỏng/không giải mã) — không tính vào `free` lẫn `new`; `new = pages - free - bad`. */
+  bad?: number;
+  new: number;
+  /** null = không biết giá model; 0 khi không có trang mới. */
+  est_usd: number | null;
+  model: string;
+  /** Chỉ tài khoản dùng thử mới có. */
+  demo_left: number | null;
+  demo_limit: number | null;
+  per_sheet: { id: string; pages: number; free: number; bad?: number }[];
+};
+
+export const scanEstimate = async (wsId: string, sheet_ids: string[], signal?: AbortSignal, no_cache = false) =>
+  asJson<ScanEstimate>(
+    await fetch(`${API}/api/ws/${wsId}/scan/estimate`, {
+      ...CRED, method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sheet_ids, no_cache }), signal,
+    }),
+  );
+
+/** Lần quét đang chạy của hồ sơ (nếu có) — để F5 giữa lúc quét vẫn theo dõi tiếp. */
+export const activeJob = async (wsId: string) =>
+  (await asJson<{ job: Job | null }>(await fetch(`${API}/api/ws/${wsId}/jobs/active`, CRED))).job;
 
 export const getJob = async (id: string) =>
   asJson<Job>(await fetch(`${API}/api/jobs/${id}`, CRED));

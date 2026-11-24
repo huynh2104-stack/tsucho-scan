@@ -34,7 +34,23 @@ PRICES = {
     "gemini-3.1-flash-lite": (0.25, 1.50),
 }
 
+# Giá ƯỚC TÍNH mỗi trang (USD), lấy từ số ĐO THỰC TẾ ghi trong README — chỉ để báo
+# trước cho người dùng, không phải hoá đơn. Số thật vẫn tính từ token ở estimate_cost.
+# Cố ý KHÔNG có claude-sonnet-5: số 0,014 đo lúc còn giá khuyến mãi 2/10 (hết 31/08/2026,
+# sau đó 3/15 — xem PRICES), không đủ căn cứ để quy đổi nên để trống (ước tính = None).
+PAGE_USD = {
+    "gemini-2.5-flash": 0.006,
+    "gemini-3.1-flash-lite": 0.004,
+    "claude-haiku-4-5": 0.007,
+}
+
 ProgressFn = Callable[[dict], None]
+
+
+def estimate_pages_usd(model: str, pages: int) -> float | None:
+    """Ước tính chi phí quét `pages` trang mới. None nếu chưa biết giá model."""
+    per = PAGE_USD.get(model)
+    return None if per is None else per * pages
 
 
 def estimate_cost(model: str, usage: dict) -> float | None:

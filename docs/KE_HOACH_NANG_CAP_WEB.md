@@ -1032,7 +1032,7 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 
 **Mốc đo:** pytest **180 passed** (30/09, sau khi pull `66fa934`) · build **xanh** (`npm ci` 14 s, `npm run build` 11 s) · rowmap POST lần đầu **2.5 s**, lần sau **0.1 s** (cùng mặt sổ, đã cache; mặt sổ khác vẫn 2.5 s) · RSS đỉnh khi OCR **462 MB** (bản giống Render; lúc khởi động 117 MB). Bảng đầy đủ + các phát hiện: "Ghi chú khi làm" bên dưới.
 
-**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau 3.5 = hết giai đoạn 3 (10/10) — pytest **495 passed** · `npm test` **209 pass** · build xanh · E2E `smoke.py` **27/27 bước** (~70 s; cả kịch bản ở `--font-scale 1.3` cũng 27/27).
+**Mốc hiện tại (cập nhật sau mỗi task; task sau so với dòng này):** sau đợt 2 (16/11) — pytest **641 passed** · `npm test` **250 pass** · `tsc` sạch · E2E `smoke.py` **28/28 bước** (chạy bằng `--server-python .venv/Scripts/python.exe`). Mốc trước: đợt 1 (12/11) pytest 593 · npm test 236 · E2E 28/28; hết giai đoạn 3 (10/10) pytest 495 · npm test 209 · E2E 27/27.
 
 - [x] 0.1 Đồng bộ nhánh, đo mốc (xong 30/09/2026)
 - [x] 0.2 Lưới an toàn kiểm thử (xong 30/09/2026)
@@ -1054,8 +1054,8 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [x] 3.4 Cỡ chữ lớn (xong 10/10/2026)
 - [x] 3.5 Bảng mượt (xong 10/10/2026) — **hết giai đoạn 3**
 - [ ] 4.1 Quét song song
-- [ ] 4.2 F5 theo dõi tiếp
-- [ ] 4.3 Báo trước lượt/chi phí
+- [x] 4.2 F5 theo dõi tiếp (xong 12/11/2026)
+- [x] 4.3 Báo trước lượt/chi phí (xong 12/11/2026)
 - [ ] 4.4 Đọc lại một dòng
 - [ ] 4.5 Quét lại bằng model mạnh
 - [ ] 5.0 Nền chỉnh ảnh (OpenCV, hàng đợi nền, tải model)
@@ -1063,13 +1063,33 @@ Lý do có giai đoạn này: mọi đối thủ bán hàng bằng 仕訳 (STREA
 - [ ] 5.2 Tự tìm mép giấy
 - [ ] 5.3 Tự nhận hướng trang
 - [ ] 5.4 ✨ Tự căn chỉnh một chạm — **mốc demo C**
-- [ ] 5.5 Kính lúp + giữ để xem ảnh gốc
-- [ ] 5.6 Ảnh tải nhanh
+- [~] 5.5 Kính lúp + giữ để xem ảnh gốc — phần «kính lúp dòng» + bấm ảnh chọn dòng xong 12/11/2026; «giữ để xem ảnh gốc» chưa làm
+- [x] 5.6 Ảnh tải nhanh (xong 16/11/2026; KHÔNG dùng `immutable` — xem ghi chú đợt 2)
 - [ ] 5.7 Chụp bằng điện thoại
 - [ ] 6.0 Cổng kế toán → 6.1 → 6.2
 - [ ] 7.x Vận hành
 
 ### Ghi chú khi làm
+
+**Đợt 2 — 15–16/11/2026 (Fable chủ dự án, thợ + kiểm duyệt Sonnet 5.5): tốc độ, cảm ứng, chuyển động, rê hai chiều.**
+- **5.6 Ảnh nhẹ** (`workspace.view_path`, route ảnh): trình duyệt nhận `view.jpg` q85 / `thumb.jpg` q80 sinh lười từ `current.png` / `thumb.png` (giữ nguyên số điểm ảnh; PNG vẫn là nguồn cho mọi thuật toán). Đo trên 2 sổ mẫu: 4,88 MB → 0,66 MB và 4,47 → 0,64 MB (−86%); thumb 96 → 13 KB. «Tươi» = mtime JPEG BẰNG mtime PNG (đẳng thức; mã hoá xong mà nguồn đã đổi thì bỏ, làm lại) — bản đầu so `>=` có thể giữ ảnh cũ vĩnh viễn sau một cuộc đua xoay/cắt (kiểm duyệt bắt được). `current.png`/`thumb.png` nay ghi nguyên tử. **Khác kế hoạch:** `Cache-Control: private, no-cache` + ETag/304 thay cho `immutable` — ảnh sổ ngân hàng trên máy dùng chung không được hiện ra mà không kiểm phiên; Starlette không tự trả 304 cho `FileResponse` nên route tự so `If-None-Match` (chịu cả ETag yếu `W/`).
+- **Khung đỏ sẵn sàng sớm** (`rowanchors._gather`/`warm`, `words.json` cạnh ảnh, `WORDS_VERSION`): kết quả hai bộ đọc chữ lưu ra đĩa theo `v` + `rev`; sau mỗi lần quét xong, `Job.after` xếp việc đọc sẵn vào `imgjobs` ở mức ưu tiên THẤP (hàng đợi nay có ưu tiên — việc tải lên/tự chỉnh ảnh không phải chờ). `POST rowmap` sau khi máy chủ khởi động lại: ~5 s → **0,24 s**. Kết quả `locate` y hệt (đo lại 76 mặt sổ: 91,9% / 99,35% không đổi). Tắt `TSUCHO_LOCAL_OCR` thì không đường nào chạy.
+- **Khung ảnh dùng Pointer Events** (`SheetViewer`, `lib/viewgesture.ts`): kéo một ngón, chụm hai ngón (điểm giữa hai ngón giữ nguyên điểm ảnh, lệch 0,0 px), chạm đúp 2,2× ↔ 100%, vẽ khung cắt và kéo tay nắm nắn bằng ngón; `touch-none`. Giới hạn phóng thống nhất 0,3–6 (trước: nút 0,4–3, lăn 0,3–6). Sửa lỗi cũ: vào app lúc chưa chọn mặt sổ thì lăn chuột không bao giờ phóng (effect `wheel` deps rỗng).
+- **Chuyển động**: `glide` 180 ms cho nút phóng/vừa khung/nhấp đúp/tự trượt tới dòng; tắt khi thao tác trực tiếp; nắm giữa lúc lướt thì dừng đúng chỗ đang hiển thị (`freezeGlide`). Đổi mặt sổ: ảnh thu nhỏ làm mờ cho tới khi ảnh thật tải xong; tải sẵn 2 mặt hàng xóm (không khi `saveData`, tab ẩn, đang quét).
+- **Rê hai chiều** (`lib/hoverlink.ts` — kho ngoài React, `useSyncExternalStore`): rê dòng ở bảng → khung mờ trên ảnh; rê dải trên ảnh → `data-hot` trên `<tr>` (đặt bằng DOM, CSS `--row-bg`). Đo: `Row` vẽ lại **0** lần khi rê. **Kính lúp xem trước**: dừng chuột ≥ 90 ms trên một dải thì kính lúp phóng dòng đó (nhãn «ポインタ位置の行を拡大», viền nét đứt); bấm phím thật / đổi dòng chọn / rời vùng thì về dòng đang chọn. `bandAt` ưu tiên `content` > `inferred` > `estimated` khi dải chồng nhau (dòng ghi chú đặt chung dòng in).
+- **Chưa kiểm được:** điện thoại/máy tính bảng THẬT (mới giả lập Chromium + CDP; iOS Safari chưa biết); nhánh tải sẵn khi tab ẩn / đang quét; RAM mã hoá JPEG trên máy 512 MB (ước lượng ~100 MB đỉnh, tuần tự).
+- **Cách kiểm lại nhanh** (script trong scratchpad của phiên 8d075196, chạy với `PYTHONIOENCODING=utf-8` khi app đang chạy): `final_check.py` (bấm ảnh 8/8), `g_desktop.py`, `g_touch.py <rộng> <cao>`, `g_hover.py`, `d2_final.py`, `rm_time.py`, `measure4.py` (76 mặt sổ).
+
+**Đợt 12/11/2026 — cách làm mới: Fable làm chủ dự án, thợ Sonnet 5.5 viết code, kiểm duyệt Sonnet soát, Fable kiểm cuối.**
+Quy trình đã chạy: rà soát app bằng trình duyệt thật → bản giao việc chi tiết cho từng thợ (file được sửa, công thức, bẫy, test, cách tự kiểm) → hai thợ chạy song song trên hai vùng file rời nhau (giao diện / máy chủ) → thợ thứ ba nối giao diện → hai người kiểm duyệt (chỉ đọc) → vòng sửa → Fable chạy lại pytest, `npm test`, `tsc`, E2E và bấm thử. Thợ không commit, không build, không gọi API trả phí.
+- **Bấm ảnh chọn dòng + khung rê** (`web/src/lib/rowhit.ts` `bandAt`, `SheetViewer`): bấm một dòng trên ảnh → bảng chọn đúng dòng, cuộn tới và nháy; rê chuột thấy khung mờ. Phân biệt bấm với kéo (dời < 4px). Kiểm: 8/8 dòng đúng trên cả hai sổ mẫu, kể cả hai dòng sát nếp gấp.
+- **Kính lúp dòng** (`RowLoupe.tsx`, dùng lại `RowStrip`): dải phóng to của dòng đang chọn ở đáy cột ảnh, tối đa 2 khúc, nút bật/tắt nhớ theo máy (`localStorage["tsucho.loupe"]`, mặc định bật). Chỗ của nó cố định (hiện cả khi chưa chọn dòng) để ảnh không nhảy. `stripRect` nay bỏ qua «hàng xóm» ở bên kia nếp gấp (trước đây dải của dòng 12/13 ôm cả khoảng gấp).
+- **4.3** (`extract.cache_status`, `POST /api/ws/:id/scan/estimate`, `web/src/lib/scanplan.ts`): dòng gợi ý dưới nút quét (đã có sẵn/miễn phí, mấy mặt gọi AI, lượt dùng thử còn lại, chi phí ước tính nếu bật `showCost` trong ⚙); hỏi lại trước khi quét trang mới khi bật `showCost` hoặc là tài khoản dùng thử. Hạn mức dùng thử chỉ trừ cho trang THẬT SỰ gọi model, giữ chỗ nguyên tử bằng một câu SQL (`demo.giu_cho`), hoàn lại khi job lỗi trước trang đầu (`demo.tra_lai`). Khoá cache giữ nguyên từng byte (có test đóng băng). `claude-sonnet-5` bị bỏ khỏi bảng giá ước tính vì con số đo được là giá khuyến mãi đã hết hạn.
+- **4.2** (`api/jobs.py`): luồng sự kiện đọc theo con trỏ riêng trên `_log` + `threading.Condition` (trước là một `queue.Queue` chung — hai trình duyệt giành sự kiện của nhau); `GET /api/ws/:id/jobs/active`; giao diện tự nối lại sau F5 (`followJob`).
+- **Khung đỏ — sửa lỗi sổ ゆうちょ** (`api/rowanchors.py`): số thứ tự dòng in sát số dư bị đọc dính («2228901» = 22,289 + «01») nên cả trang chỉ khớp 2/24 dòng và phần suy đoán lệch tới 4 dòng quanh nếp gấp. Thêm `_unglue`; nhánh nếp gấp của `_between` đi từng bước bám vệt mực và tin số in ở lề (chỉ nhường vệt mực khi cách chia khác bám hơn hẳn — sổ không phải 24 dòng). Đo trên 76 mặt sổ thật: khớp nội dung 81,5% → **91,9%**, chỉ ước lượng 3,0% → 1,3%, giấu-từng-dòng trong nửa dòng 99,19% → 99,35% (7 dòng suy sai / 1389, không đổi). Sổ mẫu ゆうちょ: 2/24 → 24/24. Bài học: test viết bằng số giả «đều tăm tắp» đã qua cả trên bản code còn lỗi; test hiện dùng toạ độ đo từ sổ mẫu thật.
+- **Sửa lỗi có sẵn, phát hiện trong lúc làm:** ô tên hồ sơ nhận chữ trước khi hồ sơ nạp xong rồi bỏ âm thầm (nay khoá tới khi nạp xong — E2E bước 17 từng hỏng 1 lần vì đúng lỗi này); Esc bỏ tích mọi mặt sổ kể cả khi đang mở hộp thoại; thẻ mặt sổ kẹt «đang chờ» khi lời gọi quét lỗi mạng.
+- **Chưa kiểm được:** nhánh tài khoản dùng thử trên giao diện (máy phát triển không cấu hình tài khoản dùng thử — chỉ có test đơn vị và test API); chạm trên điện thoại thật.
+- **Còn nợ:** `PRICES["claude-sonnet-5"]` trong `core.py` vẫn là giá khuyến mãi đã hết hạn 31/08 theo chính chú thích của nó (chi phí hiển thị sau khi quét có thể thấp hơn thật).
 
 **Task 0.1 — xong 30/09/2026 (Sonnet 5.5).** Nhánh `nang-cap-10-2026`. `npm ci` 14 s (47 gói), `npm run build` 11 s, xanh, sinh 3 trang (`/`, `/login`, `/_not-found`).
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ResultStore, RowBands, Tx } from "./api.ts";
-import { calcOf, chainBreaks, flattenRows, pendingOf, progress, resolveCurrent, rowKey, sheetRowIndex, stepFrom, stripRect, stripSegments, STRIP_COL_PX, type QRow } from "./quickreview.ts";
+import { calcOf, chainBreaks, flattenRows, pendingOf, progress, resolveCurrent, rowAtSheetIndex, rowKey, sheetRowIndex, stepFrom, stripRect, stripSegments, STRIP_COL_PX, STRIP_MAX_SEGMENTS, type QRow } from "./quickreview.ts";
 
 const row = (over: Partial<Tx> = {}): Tx => ({
   date: "2025-04-25", date_raw: null, kind: null, description: "x", extra_text: null, store_code: null,
@@ -175,6 +175,15 @@ test("stripRect: dòng đầu/cuối không có hàng xóm thì nới bằng đ�
   assert.equal(cuoi.cy1, 1, "0.99 + 0.09 > 1 → kẹp về 1");
 });
 
+test("stripRect: dòng cạnh nếp gấp không kéo dải cắt qua khoảng gấp (hàng xóm ở xa thì coi như không có)", () => {
+  // Số đo của sổ mẫu ゆうちょ: dòng 12 kết thúc ở 0.411, dòng 13 bắt đầu ở 0.518 — giữa là nếp gấp
+  const b = bandsOf(4, { bands: [{ y0: 0.344, y1: 0.382 }, { y0: 0.374, y1: 0.411 }, { y0: 0.518, y1: 0.551 }, { y0: 0.545, y1: 0.582 }] });
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const tren = stripRect(b, 1)!;      // dòng 12: hàng xóm trên sát, hàng xóm dưới ở bên kia nếp gấp
+  assert.deepEqual([tren.cy0, r3(tren.cy1)], [0.344, 0.448], "dưới: chỉ nới đúng một chiều cao dòng (0.411 + 0.037)");
+  const duoi = stripRect(b, 2)!;      // dòng 13: ngược lại
+  assert.deepEqual([r3(duoi.cy0), duoi.cy1], [0.485, 0.582], "trên: 0.518 − 0.033");
+});
 test("stripRect: nét liền khi dải khớp theo nội dung, mang theo độ nghiêng; dải hỏng / ngoài phạm vi → null", () => {
   const b = bandsOf(3, { skew_deg: 1.5, bands: [{ y0: 0.1, y1: 0.2, method: "content" }, { y0: 0.2, y1: 0.3, method: "content" }, { y0: 0.3, y1: 0.4 }] });
   const r = stripRect(b, 1)!;
@@ -237,10 +246,46 @@ test("stripSegments: dải cao 0 hoặc ảnh không rõ kích thước không l
   assert.equal(STRIP_COL_PX > 0, true);
 });
 
+test("stripSegments: cột hẹp hơn thì số đoạn không giảm và vẫn ≤ tối đa; bỏ tham số = hành vi cũ", () => {
+  const rect = stripRect(bandsOf(5, { x0: 0, x1: 1 }), 2)!;
+  for (const [w, h] of [[400, 1000], [1500, 1000], [3000, 1000], [12000, 1000]]) {
+    const base = stripSegments(rect, w, h).length;
+    assert.equal(stripSegments(rect, w, h, STRIP_COL_PX).length, base);
+    const narrow = stripSegments(rect, w, h, 300).length;
+    assert.ok(narrow >= base && narrow <= STRIP_MAX_SEGMENTS, `${w}px: ${narrow} đoạn (cũ ${base})`);
+  }
+  assert.ok(stripSegments(rect, 1500, 1000, 300).length > stripSegments(rect, 1500, 1000).length);
+});
+
+test("rowAtSheetIndex: ngược của sheetRowIndex ở mọi dòng của dữ liệu 2 khối; ngoài phạm vi → null", () => {
+  const meta = { bank_name: null, store_no: null, account_no: null, holder: null };
+  const store: ResultStore = { s: { ...sheet("s", 2), blocks: [
+    { meta, rows: [row(), row(), row()] },
+    { meta, rows: [row(), row()] },
+  ] } };
+  for (let i = 0; i < 5; i++) {
+    const ref = rowAtSheetIndex(store, "s", i)!;
+    assert.ok(ref, `dòng ${i}`);
+    assert.equal(sheetRowIndex(store, ref), i);
+  }
+  assert.deepEqual(rowAtSheetIndex(store, "s", 3), { sheet: "s", block: 1, row: 0 });
+  assert.equal(rowAtSheetIndex(store, "s", 5), null);
+  assert.equal(rowAtSheetIndex(store, "s", -1), null);
+  assert.equal(rowAtSheetIndex(store, "khong-co", 0), null);
+});
+
 test("chainBreaks: đếm dòng chuỗi số dư vẫn lệch — kể cả dòng người đã ✓ (✓ thắng «cần soát», không thắng chuỗi lệch)", () => {
   const rows = flatOf({ s1: [2, 2], s2: [3, 0] });
   assert.equal(chainBreaks(rows), 2);
   const daXacNhan = rows.map((r) => (r.chk === "NG" ? { ...r, need: false } : r));
   assert.equal(chainBreaks(daXacNhan), 2, "người ✓ thì hết «cần soát» nhưng chuỗi vẫn lệch");
   assert.equal(chainBreaks(flatOf({ s1: [3, 0] })), 0);
+});
+
+test("stripSegments: tham số maxSegments giới hạn số đoạn; không truyền = tối đa mặc định", () => {
+  const rect = stripRect(bandsOf(5, { x0: 0, x1: 1 }), 2)!;
+  assert.equal(stripSegments(rect, 12000, 1000).length, STRIP_MAX_SEGMENTS);
+  assert.equal(stripSegments(rect, 12000, 1000, STRIP_COL_PX, 2).length, 2);
+  assert.equal(stripSegments(rect, 12000, 1000, STRIP_COL_PX, 1).length, 1);
+  assert.equal(stripSegments(rect, 400, 1000, STRIP_COL_PX, 2).length, 1);
 });

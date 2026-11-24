@@ -15,9 +15,13 @@
  * thanh trượt gom sau nút 補正.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { sheetImage, type Sheet } from "@/lib/api";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import RowLoupe from "@/components/RowLoupe";
+import { sheetImage, type RowBands, type Sheet } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { clearHover, getHover, setHover as publishHover, subscribe } from "@/lib/hoverlink";
+import { bandAt } from "@/lib/rowhit";
+import { pinch, zoomAbout, type View } from "@/lib/viewgesture";
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -35,6 +39,7 @@ import {
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
   Perspective,
+  Rows,
   Scan,
   SlidersHorizontal,
   Trash,
@@ -104,6 +109,7 @@ function Tool({
   textAt = "hidden @[42em]:inline",
   className = "",
   expanded,
+  pressed,
 }: {
   onClick: () => void;
   disabled?: boolean;
@@ -116,6 +122,8 @@ function Tool({
   textAt?: string;
   className?: string;
   expanded?: boolean;
+  /** Nút bật/tắt: trạng thái hiện tại. */
+  pressed?: boolean;
 }) {
   return (
     <button
@@ -125,6 +133,7 @@ function Tool({
       title={title}
       aria-label={title}
       aria-expanded={expanded}
+      aria-pressed={pressed}
       className={`${TOOL} ${TOOL_TONE[tone]} ${className}`}
     >
       {icon}
@@ -235,6 +244,13 @@ export default function SheetViewer({
   highlightSkew,
   highlightSpan,
   stale,
+  rowBands,
+  bandsState,
+  pickedIndex,
+  onPickRow,
+  hasRows,
+  onOpenTable,
+  preload,
 }: {
   wsId: string;
   sheet: Sheet | null;
@@ -264,6 +280,20 @@ export default function SheetViewer({
   highlightSkew: number;
   /** Có kết quả cũ nhưng ảnh đã bị chỉnh sau đó → kết quả không còn khớp. */
   stale: boolean;
+  /** Mọi dải (dòng) của mặt đang xem — để biết bấm / rê chuột trúng dòng nào. Null khi chưa có, hoặc ảnh đã đổi sau khi quét (toạ độ không còn đúng). */
+  rowBands: RowBands | null;
+  /** Tình trạng tải dải, cho kính lúp biết nên chờ hay báo không có. */
+  bandsState: "loading" | "unavailable" | "ready";
+  /** Thứ tự phẳng của dòng đang chọn ở bảng (thuộc mặt này) — để khung rê không trùng khung chọn, và kính lúp biết dòng nào. */
+  pickedIndex: number | null;
+  /** Bấm vào một dòng trên ảnh → báo thứ tự phẳng của dòng đó để trang chọn nó ở bảng. */
+  onPickRow?: (index: number) => void;
+  /** Mặt đang xem có kết quả (ít nhất một dòng): kính lúp chỉ hiện khi có, để chỗ của nó không nhảy theo việc chọn dòng / tải dải. */
+  hasRows: boolean;
+  /** Điện thoại: ảnh và bảng là hai thẻ riêng — kính lúp có nút chuyển sang bảng. */
+  onOpenTable?: () => void;
+  /** Hai mặt liền kề (trước/sau) — tải sẵn ảnh đầy đủ để đổi mặt không phải chờ. */
+  preload?: Sheet[];
 }) {
   const { t } = useT();
 
@@ -316,6 +346,135 @@ export default function SheetViewer({
       return !v;
     });
 
+  /* Kính lúp dòng đang chọn: bật sẵn, tắt được, nhớ trên máy này (cùng mẫu với khung đỏ ở trên) */
+  const [showLoupe, setShowLoupe] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("tsucho.loupe") === "0") setShowLoupe(false);
+    } catch {
+      /* không đọc được thì cứ hiện */
+    }
+  }, []);
+  const toggleLoupe = () =>
+    setShowLoupe((v) => {
+      try {
+        localStorage.setItem("tsucho.loupe", v ? "0" : "1");
+      } catch {
+        /* không nhớ được cũng không sao */
+      }
+      return !v;
+    });
+
+  /* Rê chuột trên ảnh: dải dưới con trỏ (khung mờ báo trước bấm sẽ chọn dòng nào). Gom bằng rAF để không tính lại mỗi
+     pixel; `downAt` phân biệt BẤM với KÉO (kéo là di ảnh) bằng quãng con trỏ dời giữa nhấn và nhả. */
+  const [hover, setHover] = useState<number | null>(null);
+  const hoverRaf = useRef(0);
+
+  /* Rê hai chiều ảnh ↔ bảng qua kho `lib/hoverlink` (ngoài React, để rê không làm trang/bảng vẽ lại).
+     Ảnh → bảng: đẩy dải đang rê lên kho; mọi chỗ xoá `hover` cục bộ (rời khung, đổi mặt, vào cắt/nắn, bắt đầu kéo) tự
+     xoá luôn bên kia vì chúng đều đi qua effect này. */
+  const sheetId = sheet?.id ?? null;
+  /* Mặt sổ lúc `hover` được tạo: đổi mặt giữa lúc chuột nằm trên ảnh thì hover cũ không được đẩy lên kèm `sheet` của mặt mới. */
+  const hoverSheet = useRef<string | null>(null);
+  useEffect(() => {
+    if (hover != null && sheetId && hoverSheet.current === sheetId) publishHover({ from: "image", sheet: sheetId, index: hover });
+    else clearHover("image");
+  }, [hover, sheetId]);
+  useEffect(() => () => clearHover("image"), []);
+  /* Bảng → ảnh: dòng đang rê ở bảng, nếu thuộc mặt này. */
+  /* Snapshot là SỐ (không phải đối tượng): chỉ vẽ lại khi dải rê ở bảng của mặt NÀY đổi; rê ảnh hay rê bảng ở mặt khác
+     không đánh thức. */
+  const tableSnap = useCallback(() => {
+    const h = getHover();
+    return h?.from === "table" && h.sheet === sheetId ? h.index : -1;
+  }, [sheetId]);
+  const tableIdx = useSyncExternalStore(subscribe, tableSnap, () => -1);
+  const tableHover = tableIdx >= 0 ? tableIdx : null;
+  const frameIdx = hover ?? tableHover;
+
+  /* «Xem trước» ở kính lúp: dải đang rê, nhưng chỉ khi con trỏ đã DỪNG ở đó ≥ 90ms (lia ngang qua không làm nháy).
+     Bị xoá khi: bấm phím bất kỳ (đang đi bằng phím thì kính lúp theo dòng ĐANG CHỌN), dòng chọn đổi, rời vùng, đổi mặt;
+     sau khi bị xoá, chỉ bật lại khi chuột sang một dải KHÁC (`peekBlocked`). */
+  const [peek, setPeek] = useState<number | null>(null);
+  const peekBlocked = useRef<number | null>(null);
+  const wantRef = useRef<number | null>(null);
+  wantRef.current = frameIdx;
+  /* setPeek(null) khi đã null vẫn có thể gây thêm một lần vẽ: chỉ gọi khi thật sự có gì để xoá. */
+  const peekRef = useRef<number | null>(null);
+  peekRef.current = peek;
+  const clearPeek = useCallback(() => {
+    if (peekRef.current != null) setPeek(null);
+  }, []);
+  useEffect(() => {
+    // Sang một dải KHÁC dải đang bị chặn (hoặc rời vùng) thì bỏ chặn
+    if (peekBlocked.current != null && frameIdx !== peekBlocked.current) peekBlocked.current = null;
+    // Sang một dải khác xem trước được: GIỮ dải cũ thêm 90ms rồi đổi thẳng sang dải mới. Xoá ngay rồi mới bật thì di chuột
+    // chậm dọc trang làm kính lúp nháy về dòng đang chọn giữa mỗi hai dòng. Chỉ xoá khi dải dưới con trỏ không xem trước được.
+    if (frameIdx == null || frameIdx === pickedIndex || peekBlocked.current === frameIdx) {
+      clearPeek();
+      return;
+    }
+    const id = window.setTimeout(() => {
+      if (peekBlocked.current !== frameIdx) setPeek(frameIdx);
+    }, 90);
+    return () => window.clearTimeout(id);
+  }, [frameIdx, pickedIndex, clearPeek]);
+  useEffect(() => {
+    clearPeek();
+    peekBlocked.current = wantRef.current;
+  }, [pickedIndex, sheetId, clearPeek]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Chỉ phím bổ trợ (giữ Ctrl để lăn phóng ảnh…) không phải là "đang đi bằng phím"
+      if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+      peekBlocked.current = wantRef.current;
+      clearPeek();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearPeek]);
+  const downAt = useRef<{ x: number; y: number; type: string } | null>(null);
+  useEffect(() => () => cancelAnimationFrame(hoverRaf.current), []);
+
+  /* Di ảnh bằng transform translate, KHÔNG bằng scrollLeft/scrollTop: ảnh nhỏ
+     hơn khung thì không có gì để cuộn, kéo sẽ chẳng nhúc nhích — đúng lỗi
+     người dùng gặp. translate thì di được mọi lúc, kể cả ra ngoài khung. */
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const offsetNow = useRef({ x: 0, y: 0 });
+  offsetNow.current = offset;
+  const pan = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  /* Lướt: chỉ BẬT cho thao tác một phát (nút, chạm đúp, tự trượt tới dòng). Thao tác trực tiếp (kéo, chụm, lăn) phải
+     bám tay tức thì — có transition là thấy trễ. Tắt/bật cùng lượt vẽ với đổi view nên transition áp đúng lúc. */
+  const [glide, setGlide] = useState(false);
+
+  /* Đặt view và cập nhật ref ngay: nhiều sự kiện tới trước khi React vẽ lại (lăn nhanh, chụm) vẫn đọc đúng giá trị mới. */
+  const setView = useCallback((v: View) => {
+    zoomNow.current = v.zoom;
+    offsetNow.current = { x: v.x, y: v.y };
+    setZoom(v.zoom);
+    setOffset({ x: v.x, y: v.y });
+  }, []);
+  /* Đang lướt (≤180ms) mà người dùng chạm/lăn: lấy vị trí THẬT đang hiển thị làm gốc, không để ảnh nhảy tới đích. */
+  const freezeGlide = useCallback(() => {
+    const el = imgBox.current;
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    if (!(parseFloat(cs.transitionDuration) > 0)) return;
+    const m = new DOMMatrix(cs.transform);
+    setView({ zoom: m.a, x: m.e, y: m.f });
+  }, [setView]);
+  const viewNow = (): View => ({ zoom: zoomNow.current, x: offsetNow.current.x, y: offsetNow.current.y });
+  /** Toạ độ so với TÂM khung xem — hệ toạ độ của viewgesture. */
+  const fromCenter = (cx: number, cy: number) => {
+    const r = scrollBox.current!.getBoundingClientRect();
+    return { x: cx - r.left - r.width / 2, y: cy - r.top - r.height / 2 };
+  };
+
+  /* Khung xem chỉ có khi đã có mặt sổ — effect gắn listener phải chạy lại lúc đó (mount với sheet=null thì scrollBox chưa có). */
+  const hasSheet = !!sheet;
+
   /* Lăn chuột = phóng to / thu nhỏ quanh con trỏ (không cần giữ Ctrl). Mỗi nấc chuột (deltaY ≈ 100) chỉ ~10%, bàn di chuột
      thì mượt theo độ lăn. Phải gắn listener thường với passive:false: onWheel của React là passive nên không chặn được trang. */
   useEffect(() => {
@@ -328,22 +487,62 @@ export default function SheetViewer({
       const mx = e.clientX - r.left - r.width / 2;
       const my = e.clientY - r.top - r.height / 2;
       const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-      const z = zoomNow.current;
-      const next = Math.max(0.3, Math.min(6, z * Math.exp(-Math.max(-200, Math.min(200, dy)) * 0.001)));
-      const k = next / z;
-      zoomNow.current = next;
-      setZoom(next);
-      setOffset((o) => ({ x: mx - (mx - o.x) * k, y: my - (my - o.y) * k }));
+      freezeGlide();
+      const v = { zoom: zoomNow.current, x: offsetNow.current.x, y: offsetNow.current.y };
+      setGlide(false);
+      setView(zoomAbout(v, mx, my, v.zoom * Math.exp(-Math.max(-200, Math.min(200, dy)) * 0.001)));
     };
     box.addEventListener("wheel", onWheel, { passive: false });
     return () => box.removeEventListener("wheel", onWheel);
-  }, []);
-  /* Di ảnh bằng transform translate, KHÔNG bằng scrollLeft/scrollTop: ảnh nhỏ
-     hơn khung thì không có gì để cuộn, kéo sẽ chẳng nhúc nhích — đúng lỗi
-     người dùng gặp. translate thì di được mọi lúc, kể cả ra ngoài khung. */
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const pan = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
-  const [panning, setPanning] = useState(false);
+  }, [setView, freezeGlide, hasSheet]);
+
+  /* Con trỏ đang chạm khung (chuột, ngón, bút). Ref chứ không state: pointermove tới dồn dập, và cử chỉ chỉ cần giá trị
+     mới nhất chứ không cần vẽ lại theo từng con trỏ. */
+  const ptrs = useRef(new Map<number, { x: number; y: number }>());
+  /* Đang chụm: view + trung điểm + khoảng cách lúc ngón thứ hai chạm xuống. */
+  const pinchStart = useRef<{ view: View; midX: number; midY: number; dist: number } | null>(null);
+  /* Cú chạm này đã qua chế độ chụm → nhả ra KHÔNG được coi là bấm chọn dòng. */
+  const wasPinch = useRef(false);
+  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  const lastType = useRef("mouse");
+
+  /* Ảnh chính: theo dõi "đã tải" bằng chính `src` (không dùng cờ boolean — đổi src nhanh hai lần sẽ lệch). */
+  const imgSrc = sheet ? sheetImage(wsId, sheet) : "";
+  const [loadedSrc, setLoadedSrc] = useState("");
+  const loaded = loadedSrc === imgSrc;
+  const imgRef = useRef<HTMLImageElement>(null);
+  /* Ảnh đã nằm trong bộ nhớ đệm thì `complete` đúng ngay khi gắn: đừng nháy lớp mờ. */
+  useLayoutEffect(() => {
+    const el = imgRef.current;
+    if (imgSrc && el && el.complete && el.naturalWidth > 0 && el.getAttribute("src") === imgSrc) setLoadedSrc(imgSrc);
+  }, [imgSrc]);
+
+  /* Tải sẵn hai mặt liền kề sau khi ảnh hiện tại xong. `crossOrigin` PHẢI giống thẻ <img> thật, không thì trình duyệt coi
+     là hai tài nguyên khác nhau và tải lại lần nữa. Giữ tham chiếu để ảnh đang tải không bị thu dọn giữa chừng. */
+  const preKey = (preload ?? []).slice(0, 2).map((s) => `${s.id}.${s.sha256}`).join("|");
+  const preHold = useRef<HTMLImageElement[]>([]);
+  useEffect(() => {
+    if (!loaded || !preKey || !wsId || scanning) return;
+    const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+    if (conn?.saveData) return;
+    const urls = (preload ?? []).slice(0, 2).map((s) => sheetImage(wsId, s));
+    const id = window.setTimeout(() => {
+      if (document.hidden) return;      // thẻ đang ẩn thì đừng tốn băng thông
+      preHold.current = urls.map((u) => {
+        const im = new Image();
+        im.crossOrigin = "use-credentials";
+        im.src = u;
+        return im;
+      });
+    }, 400);
+    return () => {
+      window.clearTimeout(id);
+      // Đổi mặt / unmount / bắt đầu quét: huỷ các ảnh đang tải dở rồi mới bỏ
+      preHold.current.forEach((im) => (im.src = ""));
+      preHold.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, preKey, wsId, scanning]);
 
   /* Cỡ hiển thị của ảnh, tính bằng JS thay vì để CSS tự lo.
    *
@@ -393,7 +592,6 @@ export default function SheetViewer({
 
   /* Kéo vạch chia giữa ảnh và sổ không làm trang vẽ lại (xem Splitter) nên phải tự nghe đổi cỡ. Cách đo sau mỗi lần vẽ ở
      trên vẫn giữ: observer không bắn khi khung đi từ ẩn sang hiện. */
-  const hasSheet = !!sheet;
   useEffect(() => {
     const box = scrollBox.current;
     if (!box || typeof ResizeObserver === "undefined") return;
@@ -412,7 +610,10 @@ export default function SheetViewer({
     if (markY == null || !fitH || !box) return;
     const half = box.getBoundingClientRect().height / 2;
     const dy = (markY - 0.5) * fitH * zoomNow.current;
-    setOffset((o) => (Math.abs(o.y + dy) <= Math.max(0, half - 28) ? o : { x: o.x, y: -dy }));
+    const o = offsetNow.current;
+    if (Math.abs(o.y + dy) <= Math.max(0, half - 28)) return;
+    setGlide(true);      // trượt êm tới dòng thay vì nhảy cụp
+    setView({ zoom: zoomNow.current, x: o.x, y: -dy });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markY]);
 
@@ -426,8 +627,15 @@ export default function SheetViewer({
 
   /** Đưa ảnh về đúng cỡ vừa khung, bỏ mọi phóng to/di chuyển đang có. */
   const vuaKhung = () => {
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
+    setGlide(true);
+    setView({ zoom: 1, x: 0, y: 0 });
+  };
+
+  /** Nút phóng/thu: quanh TÂM khung, lướt êm. */
+  const zoomStep = (d: number) => {
+    setGlide(true);
+    const v = viewNow();
+    setView(zoomAbout(v, 0, 0, v.zoom + d));
   };
 
   useEffect(() => {
@@ -441,10 +649,21 @@ export default function SheetViewer({
     setMids(midsOf(FULL_QUAD));
     setVert(0);
     setHorz(0);
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
+    setGlide(false);      // đổi mặt thì về giữa ngay, không lướt
+    setView({ zoom: 1, x: 0, y: 0 });
     clearPreview();
+    setHover(null);
+    ptrs.current.clear();
+    pinchStart.current = null;
+    pan.current = null;
+    downAt.current = null;
+    setPanning(false);
   }, [sheet?.id]);
+
+  // Vào chế độ cắt / nắn thì chuột dành cho khung cắt và tay nắm: bỏ khung rê
+  useEffect(() => {
+    if (cropping || warping) setHover(null);
+  }, [cropping, warping]);
 
   if (!sheet) {
     return (
@@ -458,12 +677,81 @@ export default function SheetViewer({
     );
   }
 
-  const rel = (e: React.MouseEvent) => {
+  const rel = (e: { clientX: number; clientY: number }) => {
     const r = imgBox.current!.getBoundingClientRect();
     return {
       x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     };
+  };
+
+  /* Nhả / huỷ một con trỏ trên khung ảnh. */
+  const endPointer = (e: React.PointerEvent, canceled: boolean) => {
+    if (!ptrs.current.delete(e.pointerId)) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* đã nhả rồi */
+    }
+    const left = ptrs.current.size;
+    if (left >= 1 && pinchStart.current) {
+      if (left === 1) {
+        // Hai → một ngón: lấy ngón còn lại làm gốc kéo mới (ảnh không giật), vẫn không coi là bấm
+        const q = [...ptrs.current.values()][0];
+        pinchStart.current = null;
+        pan.current = { x: q.x, y: q.y, ox: offsetNow.current.x, oy: offsetNow.current.y };
+      } else {
+        const [a, b] = [...ptrs.current.values()];
+        const m = fromCenter((a.x + b.x) / 2, (a.y + b.y) / 2);
+        pinchStart.current = { view: viewNow(), midX: m.x, midY: m.y, dist: Math.hypot(a.x - b.x, a.y - b.y) };
+      }
+      return;
+    }
+    if (left > 0) return;
+    // Con trỏ cuối đã nhả
+    const d = downAt.current;
+    downAt.current = null;
+    pan.current = null;
+    pinchStart.current = null;
+    setPanning(false);
+    if (canceled || !d || wasPinch.current || cropping || warping) return;
+    const touchy = d.type !== "mouse";
+    // Bấm = nhả gần chỗ nhấn (kéo là di ảnh). Ngón tay rung nhiều hơn chuột nên ngưỡng rộng hơn.
+    const tol = touchy ? 10 : 4;
+    if (Math.abs(e.clientX - d.x) >= tol || Math.abs(e.clientY - d.y) >= tol) return;
+    if (touchy) {
+      const lt = lastTap.current;
+      if (lt && e.timeStamp - lt.t < 300 && Math.hypot(e.clientX - lt.x, e.clientY - lt.y) < 24) {
+        // Chạm đúp: gần 100% thì phóng 2.2× quanh điểm chạm, ngược lại về 100%. Lần chạm thứ hai không chọn dòng.
+        lastTap.current = null;
+        setGlide(true);
+        const v = viewNow();
+        if (Math.abs(v.zoom - 1) < 0.05) {
+          const m = fromCenter(e.clientX, e.clientY);
+          setView(zoomAbout(v, m.x, m.y, 2.2));
+        } else {
+          setView({ zoom: 1, x: 0, y: 0 });
+        }
+        return;
+      }
+      lastTap.current = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+    }
+    if (fine !== 0 || !onPickRow) return;
+    const i = bandUnder(e.clientX, e.clientY);
+    if (i != null) onPickRow(i);
+  };
+
+  /* Dải dưới điểm (clientX, clientY). getBoundingClientRect đã gồm cả phóng to lẫn dịch chuyển, nên không tự nhân zoom/offset.
+     Khác `rel`: KHÔNG kẹp về 0..1 — điểm ngoài ảnh là không trúng gì. */
+  const bandUnder = (cx: number, cy: number): number | null => {
+    const el = imgBox.current;
+    if (!el || !rowBands || fine !== 0 || cropping || warping) return null;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const fx = (cx - r.left) / r.width;
+    const fy = (cy - r.top) / r.height;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null;
+    return bandAt(rowBands, fx, fy, sheet.width / sheet.height);
   };
 
   const startWarp = () => {
@@ -799,32 +1087,87 @@ export default function SheetViewer({
           tiền). Chữ đã đọc ra nằm ở cột kết quả bên phải và copy được. */}
       <div
         ref={scrollBox}
-        onMouseDown={(e) => {
-          // Đang nắn thì chuột dành cho 4 tay nắm, không dùng để di ảnh
-          if (cropping || warping || e.button !== 0) return;
+        onPointerDown={(e) => {
+          lastType.current = e.pointerType;
+          // Đang nắn thì con trỏ dành cho khung cắt / 4 tay nắm, không dùng để di ảnh
+          if (cropping || warping) return;
+          if (e.pointerType === "mouse" && e.button !== 0) return;
+          // Nút nổi trên ảnh phải bấm được (cũng không bắt con trỏ, để click của nút còn đến nơi)
+          if ((e.target as HTMLElement).closest("[data-nopick]")) return;
           e.preventDefault();
-          pan.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
-          setPanning(true);
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            /* con trỏ đã biến mất — bỏ qua */
+          }
+          freezeGlide();
+          setGlide(false);      // thao tác trực tiếp: bám tay tức thì
+          ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          const n = ptrs.current.size;
+          if (n === 1) {
+            pan.current = { x: e.clientX, y: e.clientY, ox: offsetNow.current.x, oy: offsetNow.current.y };
+            downAt.current = { x: e.clientX, y: e.clientY, type: e.pointerType };
+            wasPinch.current = false;
+            setPanning(true);
+          } else if (n === 2) {
+            // Ngón thứ hai: sang chụm, và cú chạm này không còn là một cú bấm
+            const [a, b] = [...ptrs.current.values()];
+            const m = fromCenter((a.x + b.x) / 2, (a.y + b.y) / 2);
+            pinchStart.current = { view: viewNow(), midX: m.x, midY: m.y, dist: Math.hypot(a.x - b.x, a.y - b.y) };
+            wasPinch.current = true;
+            downAt.current = null;
+            pan.current = null;
+            setHover(null);
+          }
         }}
-        onMouseMove={(e) => {
-          const p = pan.current;
-          if (!p) return;
-          setOffset({ x: p.ox + (e.clientX - p.x), y: p.oy + (e.clientY - p.y) });
+        onPointerMove={(e) => {
+          const me = ptrs.current.get(e.pointerId);
+          if (me) {
+            me.x = e.clientX;
+            me.y = e.clientY;
+            const ps = pinchStart.current;
+            if (ps && ptrs.current.size >= 2) {
+              const [a, b] = [...ptrs.current.values()];
+              const m = fromCenter((a.x + b.x) / 2, (a.y + b.y) / 2);
+              setView(pinch(ps, { midX: m.x, midY: m.y, dist: Math.hypot(a.x - b.x, a.y - b.y) }));
+              return;
+            }
+            const p = pan.current;
+            if (p && ptrs.current.size === 1) {
+              setView({ zoom: zoomNow.current, x: p.ox + (e.clientX - p.x), y: p.oy + (e.clientY - p.y) });
+              setHover(null);      // ảnh đang trôi, khung rê sẽ lệch chỗ
+            }
+            return;
+          }
+          // Khung rê chỉ có với chuột: ngón tay và bút không có khái niệm "rê"
+          if (e.pointerType !== "mouse" || cropping || warping || !rowBands) return;
+          const cx = e.clientX;
+          const cy = e.clientY;
+          if (hoverRaf.current) return;
+          hoverRaf.current = requestAnimationFrame(() => {
+            hoverRaf.current = 0;
+            hoverSheet.current = sheet.id;
+            setHover(bandUnder(cx, cy));
+          });
         }}
-        onMouseUp={() => {
-          pan.current = null;
-          setPanning(false);
+        onPointerUp={(e) => endPointer(e, false)}
+        onPointerCancel={(e) => endPointer(e, true)}
+        onLostPointerCapture={(e) => {
+          if (ptrs.current.has(e.pointerId)) endPointer(e, true);
         }}
-        onMouseLeave={() => {
-          pan.current = null;
-          setPanning(false);
+        onPointerLeave={() => {
+          cancelAnimationFrame(hoverRaf.current);
+          hoverRaf.current = 0;
+          setHover(null);
         }}
-        onDoubleClick={() => {
-          setZoom(1);
-          setOffset({ x: 0, y: 0 });
+        onDoubleClick={(e) => {
+          // Chạm đúp đã tự xử lý ở pointerup — đừng làm hai lần; bấm nhanh hai lần vào nút nổi cũng không phải nhấp đúp ảnh
+          if (lastType.current !== "mouse" || (e.target as HTMLElement).closest("[data-nopick]")) return;
+          vuaKhung();
         }}
-        className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden ${
-          cropping || warping ? "" : panning ? "cursor-grabbing" : "cursor-grab"
+        title={hover != null && !cropping && !warping ? t.rowPickHint : undefined}
+        className={`relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden ${
+          cropping || warping ? "" : panning ? "cursor-grabbing" : hover != null ? "cursor-pointer" : "cursor-grab"
         }`}
       >
         {/* Thanh phóng to nổi ở mép ảnh, không nằm trong thanh công cụ nữa:
@@ -839,13 +1182,14 @@ export default function SheetViewer({
             ở bốn góc, mà thanh này nằm đúng chỗ tay nắm góc dưới-phải. Lúc ấy
             ảnh cũng đã được kéo vừa khung sẵn (`vuaKhung`) nên không cần zoom. */}
         <div
+          data-nopick
           className={`absolute bottom-2 right-2 z-10 flex-col items-center rounded-md bg-shell2 py-0.5 shadow-ply ${
             cropping || warping ? "hidden" : "flex"
           }`}
         >
           {/* Phóng to ở TRÊN, thu nhỏ ở DƯỚI — cùng chiều với trục dọc. */}
           <Tool
-            onClick={() => setZoom((z) => Math.min(3, z + 0.2))}
+            onClick={() => zoomStep(0.2)}
             title={t.zoomIn}
             icon={<MagnifyingGlassPlus size={16} />}
           />
@@ -853,7 +1197,7 @@ export default function SheetViewer({
             {Math.round(zoom * 100)}%
           </span>
           <Tool
-            onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
+            onClick={() => zoomStep(-0.2)}
             title={t.zoomOut}
             icon={<MagnifyingGlassMinus size={16} />}
           />
@@ -863,11 +1207,17 @@ export default function SheetViewer({
             title={showMark ? t.rowMarkHide : t.rowMarkShow}
             icon={showMark ? <Eye size={16} /> : <EyeSlash size={16} />}
           />
+          <Tool
+            onClick={toggleLoupe}
+            title={t.loupeToggle}
+            pressed={showLoupe}
+            icon={<Rows size={16} weight={showLoupe ? "fill" : "regular"} />}
+          />
         </div>
 
         <div
           ref={imgBox}
-          className="relative select-none"
+          className={`relative select-none ${glide ? "transition-transform duration-[180ms] ease-out-expo motion-reduce:transition-none" : ""}`}
           style={{
             // Cỡ tính sẵn để ảnh luôn lọt khung; chưa đo xong thì tạm 70% bề ngang
             width: fit ? `${fit.w}px` : `${BASE_WIDTH * 100}%`,
@@ -875,13 +1225,19 @@ export default function SheetViewer({
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
             transformOrigin: "center center",
           }}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
             if (!cropping) return;
+            // Bắt con trỏ để ngón tay / chuột kéo ra ngoài ảnh vẫn vẽ tiếp khung cắt
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* bỏ qua */
+            }
             const p = rel(e);
             setDrag(p);
             setBox({ left: p.x, top: p.y, right: p.x, bottom: p.y });
           }}
-          onMouseMove={(e) => {
+          onPointerMove={(e) => {
             if (!cropping || !drag) return;
             const p = rel(e);
             setBox({
@@ -891,17 +1247,44 @@ export default function SheetViewer({
               bottom: Math.max(drag.y, p.y),
             });
           }}
-          onMouseUp={() => setDrag(null)}
-          onMouseLeave={() => setDrag(null)}
+          onPointerUp={() => setDrag(null)}
+          onPointerCancel={() => setDrag(null)}
+          onLostPointerCapture={() => setDrag(null)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
+          {/* Ảnh mờ (thu nhỏ — trình duyệt đã có sẵn vì cột trái đang hiện nó) phủ khung cho tới khi ảnh thật tải xong: đổi
+              mặt không còn "trống rồi cụp". Tải xong thì ở lại thêm đúng thời gian ảnh thật hiện dần, rồi mới tắt. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={sheetImage(wsId, sheet)}
+            data-testid="sheet-blur"
+            src={sheetImage(wsId, sheet, true)}
+            crossOrigin="use-credentials"
+            alt=""
+            aria-hidden
+            draggable={false}
+            className={`pointer-events-none absolute inset-0 h-full w-full rounded-sm object-fill ${
+              loaded ? "opacity-0 transition-opacity duration-0 delay-[160ms] motion-reduce:delay-0" : "opacity-100"
+            }`}
+            style={{ filter: "blur(6px) brightness(0.85)" }}
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={imgRef}
+            src={imgSrc}
             /* Xem chú thích ở SheetRail: không có cái này thì ảnh 401. */
             crossOrigin="use-credentials"
             alt={sheet.name}
             draggable={false}
-            className="block h-full w-full rounded-sm bg-white shadow-lift"
+            onLoad={(e) => {
+              if (e.currentTarget.getAttribute("src") === imgSrc) setLoadedSrc(imgSrc);
+            }}
+            onError={(e) => {
+              // Ảnh hỏng: bỏ lớp mờ, để ảnh hỏng hiện như trình duyệt vẫn làm — đừng kẹt lớp mờ vĩnh viễn
+              if (e.currentTarget.getAttribute("src") === imgSrc) setLoadedSrc(imgSrc);
+            }}
+            className={`relative block h-full w-full rounded-sm bg-white shadow-lift transition-opacity duration-[160ms] motion-reduce:transition-none ${
+              loaded ? "opacity-100" : "opacity-0"
+            }`}
             style={{
               transform: fine ? `rotate(${fine}deg)` : undefined,
               filter:
@@ -915,7 +1298,7 @@ export default function SheetViewer({
               lướt theo khi chuyển dòng. Bóng đổ của chính dải làm lớp tối nên nghiêng theo dải; khung ngoài cắt nó trong
               tấm ảnh. Solid = khớp số tiền và số dư theo OCR; dashed = chỉ ước lượng hình học. Ẩn khi đang chỉnh hình vì
               toạ độ xem trước khác. */}
-          {highlight && showMark && !cropping && !warping && fine === 0 && (
+          {loaded && highlight && showMark && !cropping && !warping && fine === 0 && (
             <div className="pointer-events-none absolute inset-0 animate-[fadeIn_120ms_ease-out] overflow-hidden rounded-sm motion-reduce:animate-none">
               <div
                 className="absolute transition-[top,height,left,width,transform] duration-[160ms] ease-out-expo motion-reduce:transition-none"
@@ -942,9 +1325,37 @@ export default function SheetViewer({
             </div>
           )}
 
+          {/* Khung mờ của dòng dưới con trỏ: báo trước bấm sẽ chọn dòng nào. Cùng cách tính vị trí với khung đỏ nhưng không
+              có chuyển động (phải bám con trỏ ngay) và không vẽ khi trùng dòng đang chọn. */}
+          {loaded && frameIdx != null && frameIdx !== pickedIndex && rowBands?.bands[frameIdx] && showMark && !cropping && !warping && fine === 0 && (
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sm">
+              {(() => {
+                const hb = rowBands.bands[frameIdx];
+                const hx0 = hb.x0 ?? rowBands.x0 ?? 0;
+                const hx1 = hb.x1 ?? rowBands.x1 ?? 1;
+                const hs = hb.skew_deg ?? rowBands.skew_deg ?? 0;
+                return (
+                  <div
+                    data-testid="row-hover"
+                    className="absolute"
+                    style={{
+                      top: `${hb.y0 * 100}%`,
+                      height: `${Math.max(0, hb.y1 - hb.y0) * 100}%`,
+                      left: `${hx0 * 100}%`,
+                      width: `${(hx1 - hx0) * 100}%`,
+                      border: "1px solid color-mix(in srgb, var(--mark) 55%, transparent)",
+                      background: "color-mix(in srgb, var(--mark) 7%, transparent)",
+                      transform: hs ? `skewY(${hs}deg)` : undefined,
+                    }}
+                  />
+                );
+              })()}
+            </div>
+          )}
+
           {/* Tia quét lướt qua ảnh của mặt đang quét. `scanSweep` dời -14%..114% theo chiều cao của CHÍNH lớp này, nên lớp cao
               78% ảnh và tia nằm ở 14% của lớp thì tia đi đúng từ mép trên tới mép dưới, không chạy quá ra ngoài. */}
-          {scanBeam && (
+          {loaded && scanBeam && (
             <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-sm">
               <span
                 className="scanline absolute inset-x-0 top-0 h-[78%]"
@@ -1066,6 +1477,7 @@ export default function SheetViewer({
                       }
                     }}
                     onPointerUp={() => (grab.current = null)}
+                    onPointerCancel={() => (grab.current = null)}
                     /* Bấm đúp vào điểm giữa = trả CẠNH ĐÓ về thẳng. Kéo tay về
                        đúng đường thẳng vẫn được, nhưng lỡ uốn quá đà thì bấm
                        đúp là xong, không phải rà. Bấm đúp vào GÓC thì không
@@ -1084,7 +1496,7 @@ export default function SheetViewer({
                     aria-label={
                       laGoc ? t.warpCorner(i + 1) : t.warpMid(i - 3)
                     }
-                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab border-2 border-white shadow-ply before:absolute before:-inset-1.5 before:content-[''] active:cursor-grabbing max-lg:before:-inset-3 ${
+                    className={`absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-grab touch-none border-2 border-white shadow-ply before:absolute before:-inset-1.5 before:content-[''] active:cursor-grabbing max-lg:before:-inset-3 ${
                       laGoc
                         ? "h-5 w-5 rounded-full bg-accent"
                         : "h-4 w-4 rounded-sm bg-accent"
@@ -1158,6 +1570,19 @@ export default function SheetViewer({
             }}
           />
         </div>
+      )}
+
+      {/* Kính lúp dòng đang chọn. Chỗ của nó ỔN ĐỊNH: không phụ thuộc đã chọn dòng hay dải đang tải (RowLoupe giữ chiều cao). */}
+      {showLoupe && hasRows && bandsState !== "unavailable" && !stale && !editing && !adjust && (
+        <RowLoupe
+          wsId={wsId}
+          sheet={sheet}
+          rowBands={rowBands}
+          bandsState={bandsState}
+          index={pickedIndex}
+          peekIndex={peek != null && rowBands?.bands[peek] ? peek : null}
+          onOpenTable={onOpenTable}
+        />
       )}
 
       {/* Chú thích dưới ảnh. Việc máy đã tự làm lúc nhập ghi ở đây; nút hoàn tác ảnh ở thanh công cụ. */}

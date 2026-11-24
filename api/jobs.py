@@ -2,13 +2,13 @@
 
 `core.scan()` là hàm ĐỒNG BỘ và chạy lâu (24 mặt sổ ≈ 4 phút), nên phải chạy
 trong thread riêng, không được chặn vòng lặp async của FastAPI. Mỗi job có một
-`queue.Queue` chứa sự kiện; endpoint SSE lấy ra và đẩy về trình duyệt.
+nhật ký sự kiện (`_log`); endpoint SSE đọc nhật ký theo CON TRỎ RIÊNG của từng
+người nghe rồi đẩy về trình duyệt.
 
 Lưu trong BỘ NHỚ — khởi động lại server là mất kết quả (ảnh thì vẫn còn trong
 workspace). Đủ cho giai đoạn 2; giai đoạn 3 có CSDL thì chuyển vào đó.
 """
 
-import queue
 import threading
 import time
 import traceback
@@ -21,9 +21,10 @@ from typing import Any
 import review
 from core import ExtractError, scan
 
-from . import results
+from . import demo, results
 
-_SENTINEL = object()
+# Chờ sự kiện mới tối đa bấy nhiêu giây thì ping giữ kết nối (hằng số để test thu nhỏ)
+PING_S = 25
 
 
 @dataclass
@@ -40,18 +41,32 @@ class Job:
     error_info: dict = field(default_factory=dict)   # con số ghép vào câu dịch
     result: dict | None = None
     created_at: float = field(default_factory=time.time)
-    events: queue.Queue = field(default_factory=queue.Queue)
     _log: list[dict] = field(default_factory=list)
+    # Người nghe chờ ở đây; `_closed` = luồng nền đã chạy xong hẳn (không còn sự kiện nào nữa)
+    _cond: threading.Condition = field(
+        default_factory=threading.Condition, repr=False, compare=False)
+    _closed: bool = False
+    # Lượt dùng thử đã giữ cho lần quét này (xem `start_scan`); lỗi sớm thì hoàn lại
+    reserved: int = 0
+    reserved_for: str | None = None
     _result_obj: Any = None              # ScanResult, giữ để xuất file
+    # Việc nối đuôi sau khi quét xong thành công (ví dụ đọc trước chữ cho khung đỏ). Truyền callable vào để jobs.py
+    # khỏi import workspace/rowanchors.
+    after: list = field(default_factory=list, repr=False, compare=False)
 
     def emit(self, event: dict) -> None:
-        """Ghi lại sự kiện rồi đẩy vào hàng đợi.
+        """Ghi sự kiện vào nhật ký rồi đánh thức mọi người đang nghe.
 
         `_log` để trình duyệt nối lại giữa chừng vẫn thấy các bước đã qua — F5
         lúc đang quét trang 12/24 mà mất sạch tiến độ thì rất khó chịu.
+
+        Không dùng một hàng đợi chung: F5 mở kết nối thứ hai khi kết nối cũ chưa
+        kịp đóng thì hai bên giành nhau sự kiện (người này lấy mất của người kia)
+        và phần phát lại còn gây trùng. Mỗi người nghe tự giữ con trỏ trên `_log`.
         """
-        self._log.append(event)
-        self.events.put(event)
+        with self._cond:
+            self._log.append(event)
+            self._cond.notify_all()
 
 
 _jobs: dict[str, Job] = {}
@@ -84,6 +99,14 @@ def latest_for(ws_id: str) -> Job | None:
     return max(done, key=lambda j: j.created_at, default=None)
 
 
+def active_for(ws_id: str) -> Job | None:
+    """Lần quét mới nhất của hồ sơ mà còn đang chạy — để F5 nối lại tiến độ."""
+    with _lock:
+        live = [j for j in _jobs.values()
+                if j.ws_id == ws_id and j.status in ("pending", "running") and not j._closed]
+    return max(live, key=lambda j: j.created_at, default=None)
+
+
 def start(job: Job, use_cache: bool = True) -> None:
     """Chạy quét trong thread nền. Trả về ngay, không chờ."""
     if job.status == "running":
@@ -108,32 +131,72 @@ def _run(job: Job, use_cache: bool) -> None:
         # Lưu ra đĩa theo TỪNG mặt sổ: quét mặt mới không xoá kết quả mặt cũ,
         # và F5 / khởi động lại server vẫn còn (đây cũng là lịch sử quét).
         results.save_job(job.ws_id, job.sheet_ids, job.result, job.id)
-        job.status = "done"
-        job.emit({
-            "stage": "finished",
-            "message": "Hoàn tất",
-            "totals": result.totals,
-            "cost_usd": result.cost_usd,
-            "cached": result.cached,
-        })
+        # Đổi trạng thái VÀ phát sự kiện cuối trong cùng một khoá: người nghe thấy
+        # "done" thì chắc chắn đã có sự kiện cuối trong nhật ký (không bỏ sót).
+        with job._cond:
+            job.status = "done"
+            job.emit({
+                "stage": "finished",
+                "message": "Hoàn tất",
+                "totals": result.totals,
+                "cost_usd": result.cost_usd,
+                "cached": result.cached,
+            })
     except ExtractError as e:
-        job.status = "error"
         job.error_code, job.error_sheet, job.error = _friendly(job, e)
         job.error_info = getattr(e, "info", {})
-        job.emit({
-            "stage": "error",
-            "message": job.error,        # dự phòng khi trình duyệt chưa dịch mã
-            "code": job.error_code,
-            "sheet": job.error_sheet,
-            "info": getattr(e, "info", {}),   # con số ghép vào câu đã dịch
-        })
+        with job._cond:                  # cùng lý do với nhánh "done" ở trên
+            job.status = "error"
+            job.emit({
+                "stage": "error",
+                "message": job.error,        # dự phòng khi trình duyệt chưa dịch mã
+                "code": job.error_code,
+                "sheet": job.error_sheet,
+                "info": getattr(e, "info", {}),   # con số ghép vào câu đã dịch
+            })
     except Exception as e:                                   # lỗi ngoài dự tính
-        job.status = "error"
         job.error = f"Lỗi không mong đợi: {e}"
         traceback.print_exc()
-        job.emit({"stage": "error", "message": job.error})
+        with job._cond:
+            job.status = "error"
+            job.emit({"stage": "error", "message": job.error})
     finally:
-        job.events.put(_SENTINEL)
+        with job._cond:
+            # Luồng chết bằng ngoại lệ không phải Exception (hoặc bị giết) mà status còn
+            # "running" → job "ma": active_for trả mãi, F5 nối vào luồng đã đóng. Chốt lỗi.
+            if job.status in ("pending", "running"):
+                job.error = "Lần quét bị dừng đột ngột"
+                job.status = "error"
+                job.emit({"stage": "error", "message": job.error})
+        _refund_if_early(job)
+        with job._cond:                  # báo "hết sự kiện" cho mọi người đang nghe
+            job._closed = True
+            job._cond.notify_all()
+        # Việc nối đuôi chỉ chạy khi quét THÀNH CÔNG, và SAU khi đã báo xong: lỗi ở đây không được đổi trạng thái job
+        if job.status == "done":
+            for task in job.after:
+                try:
+                    task()
+                except Exception:
+                    traceback.print_exc()
+
+
+def _refund_if_early(job: Job) -> None:
+    """Lỗi trước khi gọi mô hình lần nào thì hoàn lượt dùng thử đã giữ.
+
+    Sự kiện "page" phát NGAY TRƯỚC lời gọi mô hình của trang đó (extract_transactions),
+    nên chưa có "page" nào = chưa gọi gì (thiếu API key, file hỏng...). Có rồi thì không
+    chắc → không hoàn (nghiêng về phía giữ hạn mức công khai).
+    """
+    if job.status != "error" or not job.reserved or not job.reserved_for:
+        return
+    if any(e.get("stage") == "page" for e in list(job._log)):
+        return
+    n, job.reserved = job.reserved, 0
+    try:
+        demo.tra_lai(job.reserved_for, n)
+    except Exception:                                    # hoàn lượt hỏng không được che lỗi gốc
+        traceback.print_exc()
 
 
 def _friendly(job: Job, e: ExtractError) -> tuple[str, str, str]:
@@ -223,28 +286,31 @@ def _payload(job: Job, result) -> dict:
 
 
 def stream(job: Job, replay: bool = True):
-    """Generator sự kiện cho SSE. `replay` phát lại các bước đã qua trước."""
-    if replay:
-        for event in list(job._log):
-            yield event
-        if job.status in ("done", "error"):
-            return
+    """Generator sự kiện cho SSE. `replay` phát lại các bước đã qua trước.
 
+    Mỗi lời gọi có CON TRỎ riêng `i` trên `job._log`, nên nhiều trình duyệt (hoặc
+    F5 khi kết nối cũ chưa đóng) cùng nghe một job mà không giành nhau sự kiện,
+    và không bị trùng: phát lại rồi nghe tiếp chỉ là đọc tiếp cùng một dãy.
+    """
+    i = 0 if replay else len(job._log)
     while True:
-        try:
-            event = job.events.get(timeout=25)
-        except queue.Empty:
-            # Job đã xong mà không thấy dấu kết thúc → luồng chạy nền đã chết
-            # (thường là server vừa nạp lại code). Phải THOÁT, đừng ping tiếp:
-            # ping mãi thì uvicorn không đóng được tiến trình cũ và treo cả
-            # server — đã dính đúng lỗi này 01/08/2026.
-            if job.status in ("done", "error"):
-                return
-            yield {"stage": "ping", "message": ""}   # giữ kết nối sống
+        with job._cond:
+            job._cond.wait_for(
+                lambda: len(job._log) > i or job._closed or job.status in ("done", "error"),
+                timeout=PING_S,
+            )
+            batch = job._log[i:]
+            over = job._closed or job.status in ("done", "error")
+        if batch:
+            i += len(batch)
+            yield from batch          # nhả ngoài khoá: trình duyệt chậm không chặn luồng quét
             continue
-        if event is _SENTINEL:
+        # Hết sự kiện mà job đã xong (kể cả khi luồng nền chết mà chưa kịp đóng, thường
+        # là server vừa nạp lại code) → phải THOÁT, đừng ping tiếp: ping mãi thì uvicorn
+        # không đóng được tiến trình cũ và treo cả server — đã dính đúng lỗi này 01/08/2026.
+        if over:
             return
-        yield event
+        yield {"stage": "ping", "message": ""}   # giữ kết nối sống
 
 
 def to_json(job: Job) -> dict:
@@ -256,5 +322,7 @@ def to_json(job: Job) -> dict:
         "error_sheet": job.error_sheet,
         "error_info": job.error_info,
         "sheet_ids": job.sheet_ids,
+        "names": job.names,
+        "created_at": job.created_at,
         "result": job.result,
     }

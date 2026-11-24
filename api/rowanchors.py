@@ -6,18 +6,28 @@ balance. Ambiguous or unmatched rows retain an explicitly estimated band.
 """
 import csv
 import io
+import json
+import logging
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import uuid
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
 from . import ocrengine, rowmap
+
+log = logging.getLogger("tsucho.rowanchors")
+
+# Phiên bản của words.json cạnh ảnh. TĂNG khi đổi cách đọc/lọc chữ: `_number`, ngưỡng điểm (0.6 RapidOCR, 30 Tesseract),
+# cỡ ảnh đưa vào bộ đọc, hay cách khử trùng — không thì máy giữ chữ đọc theo luật cũ.
+WORDS_VERSION = 1
 
 
 @lru_cache(maxsize=12)
@@ -128,6 +138,26 @@ def _dedupe(words):
                    and abs(o["y"] - w["y"]) < max(o["height"], w["height"]) * .5 for o in kept):
             kept.append(w)
     return kept
+
+
+def _unglue(rows, words):
+    """Tách số thứ tự dòng bị đọc dính vào số dư: «*22,289 01▸» của sổ ゆうちょ ra thành «2228901».
+
+    Sổ ゆうちょ in số thứ tự dòng (01..24) sát ngay sau số dư, và bộ đọc chữ gộp hai con số làm một — số dư của CẢ TRANG
+    không khớp được dòng nào (đo trên sổ mẫu: chỉ 2/24 dòng khớp, phần còn lại phải suy và lệch tới 4 dòng). Con số đọc
+    được mà bằng đúng «số dư + số dòng hai chữ số» của MỘT dòng duy nhất, và không trùng số thật của dòng nào, thì chính
+    là số dư của dòng đó: bằng chứng còn mạnh hơn số dư trơn, vì phải trùng thêm cả hai chữ số của số dòng.
+    """
+    real, glued = set(), {}
+    for row in rows:
+        if row.get("is_note"):
+            continue
+        real |= {_number(row.get(key)) for key in ("balance", "amount_in", "amount_out")}
+        no, balance = row.get("row_no"), _number(row.get("balance"))
+        if balance and isinstance(no, int) and not isinstance(no, bool) and 1 <= no <= 99:
+            glued.setdefault(f"{balance}{no:02d}", set()).add(balance)
+    return [{**w, "value": next(iter(glued[w["value"]]))}
+            if w["value"] not in real and len(glued.get(w["value"], ())) == 1 else w for w in words]
 
 
 def _pair_hits(row, tokens):
@@ -283,17 +313,46 @@ def _between(ya, yb, steps, peaks, pa, pb, first_idx, numbered):
         return out
 
     if (yb - ya) - steps * pitch > .8 * pitch:
+        def side(y, step, count, sign):
+            """Đi `count` dòng từ một đầu; mỗi bước bám vệt mực gần chỗ dự tính rồi đi tiếp TỪ CHÍNH vệt đó.
+
+            Cộng thẳng «đầu ± nhịp × n» thì sai số của nhịp dồn lại: tám dòng là lệch gần một phần ba dòng, vừa đủ để
+            trượt khỏi vệt mực của mình và bám nhầm vệt bên cạnh.
+            """
+            out, hit = [], 0
+            for _ in range(count):
+                expect = y + sign * step
+                near = min((q for q in inside if q not in out), key=lambda q: abs(q - expect), default=None)
+                if near is not None and abs(near - expect) <= .3 * step:
+                    step, y, hit = .7 * step + .3 * abs(near - y), near, hit + 1
+                else:
+                    y = expect
+                out.append(y)
+            return out, hit
+
+        def layout(k):                      # k dòng bám đầu trên, phần còn lại bám đầu dưới
+            top, a = side(ya, pa, k, 1)
+            bottom, b = side(yb, pb, need - k, -1)
+            spots = top + bottom[::-1]
+            if any(q - p < .5 * pitch for p, q in zip([ya] + spots, spots + [yb])):
+                return None
+            return spots, a + b
+
         best = None
-        for k in range(need + 1):           # k dòng bám đầu trên, phần còn lại bám đầu dưới
-            spots = [ya + pa * n for n in range(1, k + 1)] + [yb - pb * (need - n) for n in range(k, need)]
-            if any(b - a < .5 * pitch for a, b in zip([ya] + spots, spots + [yb])):
-                continue
-            score = sum(1 for y in spots if any(abs(q - y) <= .3 * pitch for q in inside))
-            score += 1.5 if numbered and first_idx + k == FOLD_AFTER else 0
-            if best is None or score > best[0]:
-                best = (score, spots)
+        for k in range(need + 1):
+            found = layout(k)
+            if found and (best is None or found[1] > best[1]):
+                best = found
+        # Có số in ở lề thì BIẾT nếp gấp nằm sau dòng 12: tin số in hơn vệt mực. Trong khoảng gấp vẫn có mực (dòng tiêu
+        # đề cột của trang dưới, mép giấy, bóng nếp gấp) và các vệt đó từng kéo sáu dòng của trang dưới lên nằm trên nếp
+        # gấp (sổ mẫu ゆうちょ: lệch 4 dòng). Chỉ nhường cho vệt mực khi cách chia khác bám được nhiều hơn HẲN (từ hai
+        # vệt trở lên): đó là sổ không phải 24 dòng mỗi mặt, nếp gấp của nó nằm chỗ khác.
+        at_fold = FOLD_AFTER - first_idx
+        fixed = layout(at_fold) if numbered and 0 <= at_fold <= need else None
+        if fixed and (best is None or fixed[1] >= best[1] - 1):
+            return fixed[0]
         if best:
-            return snap(best[1], .3 * pitch)
+            return best[0]
     if len(inside) == need:
         return inside                       # đúng số vệt chữ: nhận thẳng
     local = (yb - ya) / steps
@@ -349,7 +408,7 @@ def match_rows(rows, words, geometry, width, height, peaks_fn=None, gutter_fn=No
 
     base = math.tan(math.radians(geometry["skew_deg"])) * width / height
     mid = (geometry["x0"] + geometry["x1"]) / 2
-    words = _dedupe(words)
+    words = _dedupe(_unglue(rows, words))
     line = (0., base, base, base)
 
     def slope(y):
@@ -545,6 +604,92 @@ def local_ocr_enabled() -> bool:
     return os.getenv("TSUCHO_LOCAL_OCR", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def _load_store(path: Path, revision: str) -> dict:
+    """Chữ đã đọc từ lần trước (words.json cạnh ảnh); sai phiên bản/ảnh đã đổi/file hỏng thì coi như chưa có."""
+    empty = {"rapid": None, "tess": None}
+    try:
+        data = json.loads((path.parent / "words.json").read_text(encoding="utf-8"))
+        if data.get("v") != WORDS_VERSION or data.get("rev") != revision:
+            return empty
+        return {key: data[key] if isinstance(data.get(key), list) else None for key in empty}
+    except Exception:  # noqa: BLE001 — nhớ đệm hỏng không được làm hỏng việc định vị
+        return empty
+
+
+def _save_store(path: Path, revision: str, store: dict) -> None:
+    """Ghi nguyên tử (file tạm rồi `os.replace` có thử lại): hai yêu cầu cùng lúc không thấy file dở."""
+    from .workspace import _replace
+    target = path.parent / "words.json"
+    tmp = target.with_name(f"words.json.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_text(json.dumps({"v": WORDS_VERSION, "rev": revision, **store}), encoding="utf-8")
+        _replace(tmp, target)
+    except Exception:  # noqa: BLE001 — không ghi được thì lần sau đọc lại, không phải lỗi
+        log.warning("không ghi được words.json cạnh %s", path, exc_info=True)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+_GATHER_LOCKS: dict[str, threading.Lock] = {}
+_GATHER_GUARD = threading.Lock()
+
+
+def _gather(path: Path, revision: str, executable) -> tuple[list, bool, bool]:
+    """(chữ của mọi bộ đọc, có bộ đọc nào chạy được không, có bộ đọc nào lỗi không). Phần đã nhớ trên đĩa thì dùng lại.
+
+    Khoá theo ảnh bao quanh «đọc store → chạy bộ đọc còn thiếu → ghi store»: `warm` (nền) và `locate` (yêu cầu) cùng mặt
+    sổ không đọc chữ hai lần; bên đến sau lấy được khoá thì đọc lại store và dùng luôn kết quả của bên đến trước.
+    """
+    key = str(path.resolve())
+    with _GATHER_GUARD:
+        lock = _GATHER_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        return _gather_locked(path, revision, executable)
+
+
+def _gather_locked(path: Path, revision: str, executable) -> tuple[list, bool, bool]:
+    store = _load_store(path, revision)         # đọc SAU khi có khoá
+    names = ("rapid", "tess")
+    words_by_name: dict = {}
+    todo = [name for name in names if store[name] is None and (name == "rapid" or executable)]
+    words, available, failed, dirty = [], any(store[n] is not None for n in names), False, False
+    if todo:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            readers = {"rapid": lambda: _read_rapid_words(str(path.resolve()), revision),
+                       "tess": lambda: _read_words(str(path.resolve()), revision, executable)}
+            futures = {name: pool.submit(readers[name]) for name in todo}
+            for name, future in futures.items():
+                try:
+                    found = future.result()
+                    available = True
+                    words_by_name[name] = found
+                    # Tesseract nuốt lỗi từng ngôn ngữ và trả [] khi cả hai hỏng: không phân biệt được với «trang không
+                    # có số», nên danh sách rỗng của nó không được nhớ (lần sau thử lại).
+                    if found or name == "rapid":
+                        store[name], dirty = found, True
+                except ImportError:
+                    pass
+                except Exception:
+                    # Optional readers fail closed; keep the geometry result.
+                    failed = True
+    if dirty:
+        # Store đã đọc ở trên (cùng v+rev) nên các phần có sẵn nằm trong `store`: không bao giờ ghi null đè lên kết quả.
+        _save_store(path, revision, store)
+    # Thứ tự cũ: RapidOCR trước, Tesseract sau
+    for name in names:
+        words.extend(store[name] if store[name] is not None else words_by_name.get(name, []))
+    return words, available, failed
+
+
+def warm(path: Path, revision: str) -> None:
+    """Đọc chữ trước và ghi words.json để lần bấm dòng đầu tiên không phải chờ. Nuốt mọi lỗi."""
+    try:
+        if local_ocr_enabled() and path.is_file():
+            _gather(path, revision, _executable())
+    except Exception:  # noqa: BLE001
+        log.exception("không đọc trước được chữ: %s", path)
+
+
 def locate(path: Path, revision: str, rows: list[dict], geometry: dict) -> dict:
     executable = _executable()
     peaks = geometry.get("peaks")
@@ -554,22 +699,9 @@ def locate(path: Path, revision: str, rows: list[dict], geometry: dict) -> dict:
                 "ocr_status": "unavailable"}
     if not rows or not local_ocr_enabled():
         return geometry
-    words = []
-    available = False
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        rapid = pool.submit(_read_rapid_words, str(path.resolve()), revision)
-        classic = pool.submit(_read_words, str(path.resolve()), revision, executable) if executable else None
-        for future in (rapid, classic):
-            if future is None:
-                continue
-            try:
-                words.extend(future.result())
-                available = True
-            except ImportError:
-                pass
-            except Exception:
-                # Optional readers fail closed; keep the geometry result.
-                geometry["ocr_status"] = "failed"
+    words, available, failed = _gather(path, revision, executable)
+    if failed:
+        geometry["ocr_status"] = "failed"
     if available:
         sizes: dict = {}
         for row in rows:

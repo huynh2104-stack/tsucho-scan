@@ -42,6 +42,7 @@ export {
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
   Moon,
+  Rows,
   Monitor,
   PencilSimple,
   PencilSimpleLine,

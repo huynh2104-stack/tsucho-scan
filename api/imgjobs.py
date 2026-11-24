@@ -12,21 +12,25 @@ từng gặp). Muốn nhanh hơn thì nâng máy chứ đừng nâng số luồn
 Việc nào ném lỗi thì ghi log rồi làm tiếp việc sau; mỗi việc tự đánh dấu mặt sổ hỏng của nó.
 """
 
+import itertools
 import logging
 import queue
 import threading
 
 log = logging.getLogger("tsucho.imgjobs")
 
-_q: "queue.Queue[tuple]" = queue.Queue()
+# Hàng ưu tiên: (mức, số thứ tự, fn, args). Mức 0 = việc người dùng đang chờ (nhập file, tự xoay/cắt), mức 1 = việc nền
+# thấp (đọc trước chữ cho khung đỏ): 24 việc ~5 giây không được chặn ảnh vừa tải lên. Cùng mức thì theo thứ tự xếp.
+_q: "queue.PriorityQueue[tuple]" = queue.PriorityQueue()
+_seq = itertools.count()
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 
 
-def submit(fn, *args) -> None:
-    """Xếp một việc vào hàng; luồng nền được dựng lười ở lần đầu."""
+def submit(fn, *args, low: bool = False) -> None:
+    """Xếp một việc vào hàng; luồng nền được dựng lười ở lần đầu. `low` = việc nền thấp, nhường mọi việc thường."""
     global _thread
-    _q.put((fn, args))
+    _q.put((1 if low else 0, next(_seq), fn, args))
     with _lock:
         if _thread is None or not _thread.is_alive():
             _thread = threading.Thread(target=_run, name="tsucho-imgjobs", daemon=True)
@@ -35,7 +39,7 @@ def submit(fn, *args) -> None:
 
 def _run() -> None:
     while True:
-        fn, args = _q.get()
+        _, _, fn, args = _q.get()
         try:
             fn(*args)
         except Exception:  # noqa: BLE001 — một việc hỏng không được làm chết cả hàng

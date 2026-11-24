@@ -21,7 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from export import export_accounts
-from extract import is_sample_file
+from core import estimate_pages_usd
+from extract import _resolve_model, cache_status
 
 from . import (
     auth, autofix, corrections, demo, export_csv, imgjobs, jobs, prefs, results, rowmap, rowanchors, sample, workspace,
@@ -439,6 +440,7 @@ def dup_ok(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
 
 @app.get("/api/ws/{ws_id}/sheets/{sheet_id}/image")
 def sheet_image(
+    request: Request,
     ws_id: str,
     sheet_id: str,
     user: CurrentUser,
@@ -448,10 +450,21 @@ def sheet_image(
     """Ảnh hiện tại của mặt sổ (đã áp dụng xoay/cắt). `v` để phá cache trình duyệt."""
     ws = _ws(ws_id, user)
     sheet = _sheet(ws, sheet_id)
-    path = sheet.dir(ws.id) / ("thumb.png" if thumb else "current.png")
+    path = workspace.view_path(ws.id, sheet, thumb)
     if not path.is_file():
         raise HTTPException(404, "Chưa có ảnh")
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+    # Cố ý KHÔNG `immutable`/`max-age`: đây là ảnh sổ ngân hàng, có thể xem trên máy dùng chung ở văn phòng; max-age cho
+    # trình duyệt đưa ảnh ra từ bộ nhớ đệm mà không hỏi máy chủ, tức không kiểm đăng nhập. `no-cache` + ETag (FileResponse tự
+    # gắn) thì xem lại chỉ tốn một yêu cầu 304 không thân, mà phiên vẫn được kiểm mỗi lần.
+    response = FileResponse(path, media_type="image/jpeg" if path.suffix == ".jpg" else "image/png",
+                            headers={"Cache-Control": "private, no-cache"}, stat_result=path.stat())
+    # Starlette gắn ETag nhưng KHÔNG tự trả 304 cho FileResponse (chỉ StaticFiles làm): tự so ở đây.
+    etag = response.headers.get("etag", "")
+    # Proxy có thể đổi "abc" thành W/"abc": so không tính tiền tố yếu ở cả hai phía
+    sent = [t.strip().removeprefix("W/") for t in request.headers.get("if-none-match", "").split(",")]
+    if etag and (etag.removeprefix("W/") in sent or "*" in sent):
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
+    return response
 
 
 # ── Chỉnh ảnh: xoay (nhiều mặt) / cắt (một mặt) ──────────────────────
@@ -757,25 +770,80 @@ def split_sheet(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
 
 # ── Quét ─────────────────────────────────────────────────────────────
 
+def _scan_plan(ws: workspace.Workspace, body: dict) -> tuple[list[str], list[workspace.Sheet], list[str]]:
+    """Mặt sổ cần quét: bỏ id lạ, sắp theo thứ tự đang thấy. Dùng chung cho quét thật và ước tính."""
+    ids = body.get("sheet_ids")
+    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) for x in ids):
+        raise HTTPException(400, "Chưa chọn mặt sổ nào để quét")
+    order = {s.id: i for i, s in enumerate(ws.sheets)}
+    ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
+    sheets = [_sheet(ws, sid) for sid in ids]
+    return ids, sheets, [str(s.scan_path(ws.id)) for s in sheets]
+
+
+def _scan_units(paths: list[str], no_cache: bool) -> list[dict]:
+    """Mỗi mặt: {"pages", "free" (không gọi model), "bad" (hỏng, cũng không gọi model)}.
+    Trang tốn tiền = pages - free - bad.
+
+    Một nơi duy nhất quyết "trang nào tốn tiền" — cả hạn mức dùng thử lẫn ước tính
+    đều dùng, để hai bên không lệch nhau. `no_cache` bỏ qua cache nhưng ảnh mẫu
+    vẫn đọc sẵn (xem `_extract_single`), nên chỉ ảnh mẫu còn miễn phí.
+    """
+    return [
+        {"pages": c["units"], "free": c["sample"] if no_cache else c["free"], "bad": c["bad"]}
+        for c in cache_status(paths)
+    ]
+
+
+@app.post("/api/ws/{ws_id}/scan/estimate")
+def estimate_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
+    """Báo trước một lần quét tốn gì. Chỉ đọc: không đổi dữ liệu, không gọi model."""
+    ws = _ws(ws_id, user)
+    ids, _sheets, paths = _scan_plan(ws, body)
+    per = _scan_units(paths, bool(body.get("no_cache")))
+    pages = sum(c["pages"] for c in per)
+    free = sum(c["free"] for c in per)
+    bad = sum(c["bad"] for c in per)
+    new = pages - free - bad
+    model = _resolve_model()
+    usd = estimate_pages_usd(model, new)
+    left = demo.con_lai(user)
+    return {
+        "pages": pages,
+        "free": free,
+        "bad": bad,
+        "new": new,
+        "est_usd": None if usd is None else round(usd, 4),
+        "model": model,
+        "demo_left": left,
+        "demo_limit": None if left is None else demo.han_muc(),
+        "per_sheet": [{"id": i, "pages": c["pages"], "free": c["free"], "bad": c["bad"]} for i, c in zip(ids, per)],
+    }
+
+
+def _warm_words(ws_id: str, sheets: list) -> None:
+    """Sau khi quét xong: xếp việc đọc trước chữ cho từng mặt sổ vừa quét (xem `rowanchors.warm`)."""
+    for s in sheets:
+        imgjobs.submit(rowanchors.warm, s.dir(ws_id) / "current.png", s.sha256, low=True)
+
+
 @app.post("/api/ws/{ws_id}/scan")
 def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
     """Quét đúng những mặt sổ người dùng chọn, theo thứ tự họ đang thấy."""
     ws = _ws(ws_id, user)
     with workspace.locked(ws_id):
-        ids = body.get("sheet_ids") or []
-        if not ids:
-            raise HTTPException(400, "Chưa chọn mặt sổ nào để quét")
-
-        order = {s.id: i for i, s in enumerate(ws.sheets)}
-        ids = sorted({s for s in ids if s in order}, key=lambda s: order[s])
-
-        sheets = [_sheet(ws, sid) for sid in ids]
-        paths = [str(s.scan_path(ws.id)) for s in sheets]
+        ids, sheets, paths = _scan_plan(ws, body)
 
         # Tài khoản dùng thử là tài khoản CÔNG KHAI — chặn một người quét hết hạn
-        # mức gọi mô hình của cả ngày. Ảnh sổ mẫu nguyên vẹn không gọi mô hình nên không bị tính.
+        # mức gọi mô hình của cả ngày. Chỉ tính trang THẬT SỰ gọi mô hình: ảnh sổ mẫu
+        # và trang đã có cache thì không (quét lại trang đã trả tiền không được trừ lượt).
         con = demo.con_lai(user)
-        real = sum(1 for p in paths if not is_sample_file(p))
+        no_cache = bool(body.get("no_cache"))
+        real = 0
+        for sh, c in zip(sheets, _scan_units(paths, no_cache)):
+            real += c["pages"] - c["free"] - c["bad"]
+            if sh.status != "ready":
+                real += c["bad"]        # đang xử lý nền: chưa có file để biết hỏng hay không → tính 1 như trước
         if con is not None and real > con:
             raise HTTPException(
                 429,
@@ -784,10 +852,26 @@ def start_scan(ws_id: str, user: CurrentUser, body: dict = Body(...)) -> dict:
         if any(s.status != "ready" for s in sheets):
             raise HTTPException(409, {"kind": "not_ready"})
 
-        job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
-        jobs.start(job, use_cache=not bool(body.get("no_cache")))
-        if con is not None and real:
-            demo.ghi_nhan(user.id, real)
+        # Giữ chỗ NGUYÊN TỬ ngay trước khi tạo job: kiểm ở trên chỉ để báo sớm, còn hai hồ sơ
+        # (hai khoá khác nhau) cùng quét có thể cùng thấy "còn đủ" → phải giữ bằng một câu SQL.
+        giu = con is not None and real > 0
+        if giu and not demo.giu_cho(user, real):
+            raise HTTPException(
+                429,
+                {"kind": "demo_quota", "limit": demo.han_muc(), "left": demo.con_lai(user)},
+            )
+        try:
+            job = jobs.create(ws.id, ids, paths, names=[s.name for s in sheets])
+            if giu:
+                job.reserved, job.reserved_for = real, user.id    # lỗi sớm thì job tự hoàn
+            if rowanchors.local_ocr_enabled():
+                # Khoá nhớ đệm giống hệt route rowmap: (current.png, sha256). Xếp vào hàng nền một luồng.
+                job.after.append(lambda ws_id=ws.id, sheets=list(sheets): _warm_words(ws_id, sheets))
+            jobs.start(job, use_cache=not no_cache)
+        except BaseException:
+            if giu:
+                demo.tra_lai(user.id, real)
+            raise
         for s in sheets:
             s.scanned = True
         ws.save()
@@ -804,6 +888,14 @@ def _job(job_id: str, user: auth.User):
     if not job or not (ws := workspace.load(job.ws_id)) or ws.owner != user.id:
         raise HTTPException(404, "Không tìm thấy lần quét")
     return job
+
+
+@app.get("/api/ws/{ws_id}/jobs/active")
+def active_job(ws_id: str, user: CurrentUser) -> dict:
+    """Lần quét đang chạy của hồ sơ (nếu có) — F5 xong giao diện hỏi để nối lại tiến độ."""
+    ws = _ws(ws_id, user)
+    job = jobs.active_for(ws.id)
+    return {"job": jobs.to_json(job) if job else None}
 
 
 @app.get("/api/jobs/{job_id}")

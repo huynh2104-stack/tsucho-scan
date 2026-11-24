@@ -95,6 +95,19 @@ export function sheetRowIndex(store: ResultStore, ref: RowRef): number {
   return n + ref.row;
 }
 
+/** Ngược lại với `sheetRowIndex`: thứ tự phẳng trong mặt sổ → địa chỉ dòng (bấm vào dải trên ảnh để chọn dòng ở bảng). */
+export function rowAtSheetIndex(store: ResultStore, sheetId: string, index: number): RowRef | null {
+  const data = store[sheetId];
+  if (!data || !Number.isInteger(index) || index < 0) return null;
+  let left = index;
+  for (let b = 0; b < data.blocks.length; b++) {
+    const n = data.blocks[b].rows.length;
+    if (left < n) return { sheet: sheetId, block: b, row: left };
+    left -= n;
+  }
+  return null;
+}
+
 /**
  * Phần ảnh cần cắt để xem MỘT dòng: dải của dòng đó nới thêm một dòng mỗi phía (lấy dải hàng xóm nếu có, không
  * thì bằng đúng chiều cao dòng), theo bề ngang TỜ GIẤY và lố sang phải một chút (`STRIP_RIGHT_PAD`): `x1` đo mép dải,
@@ -119,8 +132,11 @@ export function stripRect(bands: RowBands | null, index: number): StripRect | nu
   const h = band.y1 - band.y0;
   const prev = bands.bands[index - 1];
   const next = bands.bands[index + 1];
-  const cy0 = clamp(prev && prev.y1 > prev.y0 ? prev.y0 : band.y0 - h);
-  const cy1 = clamp(next && next.y1 > next.y0 ? next.y1 : band.y1 + h);
+  // Hàng xóm chỉ tính khi NẰM SÁT dòng này. Dòng ngay cạnh nếp gấp giữa trang có «hàng xóm» ở tận bên kia nếp gấp: lấy mép
+  // của nó thì dải cắt ôm luôn cả khoảng gấp, cao gấp mấy lần bình thường (kính lúp phình ra, khung ảnh nhảy).
+  const near = (gap: number) => gap <= 0.5 * h;
+  const cy0 = clamp(prev && prev.y1 > prev.y0 && near(band.y0 - prev.y1) ? prev.y0 : band.y0 - h);
+  const cy1 = clamp(next && next.y1 > next.y0 && near(next.y0 - band.y1) ? next.y1 : band.y1 + h);
   // Khung có bề ngang / độ nghiêng riêng (hai cuốn sổ cạnh nhau, ảnh chụp có phối cảnh) thì theo khung, không theo cả trang
   const px0 = clamp(band.x0 ?? bands.x0 ?? 0);
   const px1 = clamp(band.x1 ?? bands.x1 ?? 1);
@@ -143,11 +159,12 @@ export const STRIP_COL_PX = 600;
 export const STRIP_MAX_SEGMENTS = 3;
 export const STRIP_OVERLAP = 0.05;
 
-export function stripSegments(rect: StripRect, imgW: number, imgH: number): { x0: number; x1: number }[] {
+export function stripSegments(rect: StripRect, imgW: number, imgH: number, colPx: number = STRIP_COL_PX, maxSegments: number = STRIP_MAX_SEGMENTS): { x0: number; x1: number }[] {
   const w = rect.cx1 - rect.cx0;
   const rowPx = (rect.y1 - rect.y0) * imgH;
   const zoom = rowPx > 0 ? STRIP_ROW_PX / rowPx : 1;
-  const n = Math.min(STRIP_MAX_SEGMENTS, Math.max(1, Math.ceil((w * imgW * zoom) / STRIP_COL_PX)));
+  // Cột hẹp hơn mặc định (kính lúp ở đáy khung ảnh) thì cần nhiều đoạn hơn cho cùng độ phóng
+  const n = Math.min(Math.max(1, Math.floor(maxSegments)), Math.max(1, Math.ceil((w * imgW * zoom) / Math.max(1, colPx))));
   const base = w / n;
   const ov = n > 1 ? w * STRIP_OVERLAP : 0;
   return Array.from({ length: n }, (_, i) => ({

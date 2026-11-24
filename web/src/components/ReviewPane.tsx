@@ -1123,6 +1123,7 @@ export default function ReviewPane({
   fixBar,
   footer,
   scanText,
+  onHoverRow,
 }: {
   store: ResultStore;
   sheets: Sheet[];
@@ -1160,6 +1161,8 @@ export default function ReviewPane({
   footer?: ReactNode;
   /** Đang quét: câu tiến độ thay cho câu chờ ở sổ trống. */
   scanText?: string;
+  /** Rê chuột lên một dòng của bảng (null = rời bảng). Chỉ gọi khi ĐỔI dòng; nhận hàm có danh tính cố định. */
+  onHoverRow?: (ref: TxRef | null) => void;
 }) {
   const { t, lang } = useT();
   const scroller = useRef<HTMLDivElement>(null);
@@ -1194,6 +1197,24 @@ export default function ReviewPane({
     setSel(null);           // bấm một ô là để SỬA, không phải để chọn vùng
   };
 
+  /* Rê chuột lên dòng: bắt bằng UỶ QUYỀN ở khung cuộn (không gắn handler lên từng dòng — `Row` đang memo). Nhớ khoá dòng
+     lần trước để chỉ báo khi ĐỔI dòng. */
+  const hoverKey = useRef<string | null>(null);
+  const reportHover = (key: string | null) => {
+    if (hoverKey.current === key) return;
+    hoverKey.current = key;
+    if (!onHoverRow) return;
+    if (!key) return onHoverRow(null);
+    const [sheet, block, row] = key.split(":");
+    const b = Number(block);
+    const r = Number(row);
+    onHoverRow(sheet && Number.isInteger(b) && Number.isInteger(r) ? { sheet, block: b, row: r } : null);
+  };
+  // Chỉ chuột mới "rê": chạm trên máy cảm ứng sinh mouseover giả, nhưng pointerType của nó là touch
+  const onHoverOver = (e: React.PointerEvent) => {
+    if (e.pointerType !== "mouse") return;
+    reportHover((e.target as HTMLElement).closest<HTMLElement>("tr[data-row]")?.dataset.row ?? null);
+  };
   const onOver = (e: React.MouseEvent) => {
     const root = scroller.current;
     if (!dragging.current || !anchor.current || !root) return;
@@ -1517,6 +1538,8 @@ export default function ReviewPane({
         data-mode={mode}
         onMouseDown={onDown}
         onMouseOver={onOver}
+        onPointerOver={onHoverOver}
+        onPointerLeave={() => reportHover(null)}
         style={gridStyle}
         className={`ledger-grid thin-scroll min-h-0 flex-1 overflow-auto ${sel ? "select-none" : ""}`}
       >

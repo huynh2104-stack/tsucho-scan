@@ -293,3 +293,81 @@ def test_inferred_rows_count_as_located_for_the_whole_sheet(tmp_path, monkeypatc
     monkeypatch.setattr(rowanchors, "_executable", lambda: None)
     found = rowanchors.locate(path, "b", rows, geometry(3))
     assert [b["method"] for b in found["bands"]] == ["content", "inferred", "content"] and found["exact"]
+
+
+# ── Sổ ゆうちょ: số thứ tự dòng in sát số dư; nếp gấp biết từ số in ở lề ──
+# Các toạ độ dưới đây ĐO TỪ SỔ MẪU THẬT (samples/yucho.jpg sau khi tự cắt): dữ liệu giả «đều tăm tắp» không tái hiện
+# được hai lỗi này — test viết lần đầu bằng số giả đã qua cả trên bản code còn lỗi.
+
+YUCHO_UPPER = [.084, .109, .136, .162, .188, .217, .245, .273, .304, .334, .364, .393]     # dòng 1..12 (nhịp ≈ .028)
+YUCHO_LOWER = [.535, .565, .595, .626, .656, .687, .719, .752, .784]                         # dòng 13..21 (nhịp ≈ .031)
+YUCHO_FOLD_INK = [.423, .458, .482, .513]         # mực trong nếp gấp: mép giấy, bóng, dòng tiêu đề cột của trang dưới
+
+
+def yucho(n, first_no=1):
+    """Giống sổ thật: số tiền LẶP LẠI giữa các dòng (cước điện thoại 3,280 hằng tháng) nên một mình nó không định vị được."""
+    return [{"balance": 20000 + i * 3137, "amount_out": 3280, "amount_in": None, "row_no": first_no + i} for i in range(n)]
+
+
+def glued(row, y, x_amount=.68, x_balance=.88):
+    """Cách bộ đọc chữ thấy «3,280 … *22,289 01▸»: số tiền riêng, còn số dư DÍNH luôn hai chữ số của số dòng."""
+    return [token(row["amount_out"], x_amount, y), token(f"{row['balance']}{row['row_no']:02d}", x_balance, y)]
+
+
+def test_a_balance_glued_to_its_printed_row_number_still_matches():
+    rows = yucho(12)
+    words = [w for row, y in zip(rows, YUCHO_UPPER) for w in glued(row, y)]
+    bands = rowanchors.match_rows(rows, words, geometry(12), 1000, 1400)
+    assert [b["method"] for b in bands] == ["content"] * 12
+    assert [round(mid(b), 3) for b in bands] == YUCHO_UPPER
+
+
+def test_a_glued_number_needs_the_right_row_number():
+    rows = yucho(12)
+    words = [w for row, y in zip(rows, YUCHO_UPPER) for w in glued(row, y)]
+    words[5]["value"] = f"{rows[2]['balance']}{rows[2]['row_no'] + 5:02d}"           # số dư dòng 3 + số dòng 08: không phải nó
+    band = rowanchors.match_rows(rows, words, geometry(12), 1000, 1400)[2]
+    assert band["method"] == "inferred"
+
+
+def test_a_number_that_really_belongs_to_another_row_is_never_unglued():
+    rows = book(4)
+    rows[3]["balance"] = int(f"{rows[1]['balance']}{rows[1]['row_no']:02d}")         # số THẬT của dòng 4 trông y như «số dư dòng 2 + 02»
+    words = pair(rows[0], .30) + pair(rows[2], .36) + pair(rows[3], .39)
+    bands = rowanchors.match_rows(rows, words, geometry(4), 1000, 1400)
+    assert bands[3]["method"] == "content" and mid(bands[3]) == pytest.approx(.39)
+    assert bands[1]["method"] == "inferred" and mid(bands[1]) == pytest.approx(.33, abs=.003)
+
+
+def test_printed_row_numbers_place_the_fold_even_when_ink_inside_it_says_otherwise():
+    # Chỉ khớp được dòng 12 (cuối trang trên) và dòng 21. Nghe theo mực trong nếp gấp thì sáu dòng của trang dưới bị
+    # kéo lên nằm trên nếp gấp — đúng lỗi lệch 4 dòng của sổ mẫu.
+    rows = book(10, first_no=12)
+    words = pair(rows[0], YUCHO_UPPER[-1]) + pair(rows[9], YUCHO_LOWER[-1])
+    peaks = YUCHO_UPPER + YUCHO_FOLD_INK + YUCHO_LOWER
+    bands = rowanchors.match_rows(rows, words, {**geometry(10), "peaks": peaks}, 1000, 1400)
+    assert [round(mid(b), 3) for b in bands[1:9]] == YUCHO_LOWER[:-1]
+    assert {b["method"] for b in bands[1:9]} == {"inferred"}
+
+
+def test_rows_hung_from_the_far_end_follow_the_ink_instead_of_drifting():
+    # Trang trên nhịp .028, trang dưới .031 (phối cảnh): cộng dồn nhịp phỏng chừng thì tám dòng lệch hẳn sang vệt bên cạnh.
+    rows = book(10, first_no=12)
+    words = pair(rows[0], YUCHO_UPPER[-1]) + pair(rows[9], YUCHO_LOWER[-1])
+    bands = rowanchors.match_rows(rows, words, {**geometry(10), "peaks": YUCHO_UPPER + YUCHO_LOWER}, 1000, 1400)
+    assert [round(mid(b), 3) for b in bands[1:9]] == YUCHO_LOWER[:-1]
+
+
+def test_a_book_with_another_page_size_keeps_its_own_fold():
+    # Sổ 16 dòng mỗi mặt (nếp gấp sau dòng 8) vẫn có số in ở lề: đừng ép nếp gấp về sau dòng 12 khi mực nói rõ chỗ khác.
+    rows = book(12, first_no=3)
+    upper, lower = [.23, .26, .29, .32, .35], [.50, .53, .56, .59, .62]
+    words = pair(rows[0], .20) + pair(rows[11], .65)
+    bands = rowanchors.match_rows(rows, words, {**geometry(12), "peaks": [.20] + upper + lower + [.65]}, 1000, 1400)
+    assert [round(mid(b), 3) for b in bands[1:11]] == upper + lower
+
+
+def test_nothing_is_unglued_without_a_printed_row_number():
+    rows = [{**r, "row_no": None} for r in yucho(3)]
+    words = [token(f"{r['balance']}01", .88, .3 + i * .03) for i, r in enumerate(rows)]
+    assert rowanchors._unglue(rows, words) == words

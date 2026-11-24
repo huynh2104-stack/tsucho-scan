@@ -312,12 +312,12 @@ def _write_sheet_images(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
 
     img.save(d / "original.png")
     # current.png lúc mới nhập giống hệt original.png: chép file, khỏi mã hoá PNG lần hai
-    shutil.copyfile(d / "original.png", d / "current.png")
+    _atomic(d / "current.png", lambda tmp: shutil.copyfile(d / "original.png", tmp))
     sheet.width, sheet.height = img.size
 
     thumb = img.copy()
     thumb.thumbnail((THUMB_W, THUMB_W * 3), Image.LANCZOS)
-    thumb.save(d / "thumb.png")
+    _atomic(d / "thumb.png", lambda tmp: thumb.save(tmp, "PNG"))
 
 
 def _write_scan_jpeg(path: Path, img: Image.Image) -> None:
@@ -342,12 +342,12 @@ def _regen_current(ws: Workspace, sheet: Sheet, img: Image.Image) -> None:
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     img = _cap(img)
-    img.save(d / "current.png")
+    _atomic(d / "current.png", lambda tmp: img.save(tmp, "PNG"))
     _write_scan_jpeg(d / "scan.jpg", img)
     sheet.width, sheet.height = img.size
     thumb = img.copy()
     thumb.thumbnail((THUMB_W, THUMB_W * 3), Image.LANCZOS)
-    thumb.save(d / "thumb.png")
+    _atomic(d / "thumb.png", lambda tmp: thumb.save(tmp, "PNG"))
 
 
 def _unique_name(ws: Workspace, base: str, page: int | None) -> str:
@@ -677,6 +677,95 @@ def add_upload(ws: Workspace, filename: str, data: bytes, auto: bool = False) ->
     if bad:
         raise ValueError(f"'{filename}': không xử lý được ({bad[0].error})")
     return made
+
+
+_VIEW_LOCK = threading.Lock()
+
+
+def _replace(tmp: Path, dst: Path) -> None:
+    """`os.replace` có thử lại: Windows ném PermissionError khi file đích đang được một yêu cầu khác đọc."""
+    for attempt in range(3):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if attempt == 2:
+                raise
+            time.sleep(0.05)
+
+
+def _atomic(dst: Path, write) -> None:
+    """Ghi `dst` qua file tạm cùng thư mục rồi đổi tên: người đọc không bao giờ gặp PNG ghi dở (và mtime đổi đúng một lần)."""
+    tmp = dst.with_name(f"{dst.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        write(tmp)
+        _replace(tmp, dst)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _to_jpeg_mode(im: Image.Image) -> Image.Image:
+    """RGB và xám lưu thẳng (đỡ RAM); có alpha thì dán lên nền TRẮNG (convert thẳng cho vùng trong suốt thành đen)."""
+    if im.mode in ("RGB", "L"):
+        return im
+    if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+        rgba = im.convert("RGBA")
+        out = Image.new("RGB", rgba.size, "white")
+        out.paste(rgba, mask=rgba.getchannel("A"))
+        return out
+    return im.convert("RGB")
+
+
+def _encode_jpeg(src: Path, dst: Path, quality: int) -> None:
+    """PNG → JPEG, ghi nguyên tử, và mtime của JPEG = mtime của PNG nguồn lúc đọc.
+
+    Nguồn đổi (mtime/kích thước) trong lúc mã hoá thì bỏ bản vừa làm và làm lại: không thì JPEG mang nội dung cũ
+    nhưng mtime mới hơn PNG sẽ bị coi là «tươi» mãi. Đọc cả file vào RAM trước để cửa sổ giữ file mở chỉ vài ms
+    (Windows không cho ghi đè file đang mở).
+    """
+    for _ in range(3):
+        st = src.stat()
+        data = src.read_bytes()
+        tmp = dst.with_name(f"{dst.name}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with Image.open(io.BytesIO(data)) as im:
+                _to_jpeg_mode(im).save(tmp, "JPEG", quality=quality, optimize=True, progressive=True)
+            now = src.stat()
+            if (now.st_mtime_ns, now.st_size) != (st.st_mtime_ns, st.st_size):
+                continue
+            os.utime(tmp, ns=(st.st_mtime_ns, st.st_mtime_ns))
+            _replace(tmp, dst)
+            return
+        finally:
+            tmp.unlink(missing_ok=True)
+    raise RuntimeError(f"ảnh nguồn cứ đổi liên tục: {src}")
+
+
+def view_path(ws_id: str, sheet: Sheet, thumb: bool) -> Path:
+    """Bản JPEG để XEM trên trình duyệt (PNG 2600px nặng ~5MB một mặt). Sinh lười.
+
+    Giữ nguyên số điểm ảnh của `current.png`: khung đỏ/cắt/nắn tính theo tỉ lệ ảnh đó. PNG vẫn là nguồn sự thật cho
+    mọi thuật toán. «Tươi» = mtime của JPEG BẰNG ĐÚNG mtime của PNG (`_encode_jpeg` đóng dấu như vậy): PNG nào mới
+    được ghi, hay được khôi phục với mtime cũ, đều lệch nên sinh lại. Mã hoá lỗi thì trả thẳng PNG: một bản xem
+    không được làm hỏng yêu cầu.
+    """
+    d = sheet.dir(ws_id)
+    src = d / ("thumb.png" if thumb else "current.png")
+    dst = d / ("thumb.jpg" if thumb else "view.jpg")
+    if not src.is_file():
+        return src
+    try:
+        def fresh() -> bool:
+            return dst.is_file() and dst.stat().st_mtime_ns == src.stat().st_mtime_ns
+
+        if not fresh():
+            with _VIEW_LOCK:
+                if not fresh():            # luồng khác vừa mã hoá xong trong lúc ta chờ khoá
+                    _encode_jpeg(src, dst, 80 if thumb else 85)
+        return dst
+    except Exception:  # noqa: BLE001
+        log.exception("không mã hoá được bản xem JPEG: %s", src)
+        return src
 
 
 def _hash_current(ws: Workspace, sheet: Sheet) -> str:

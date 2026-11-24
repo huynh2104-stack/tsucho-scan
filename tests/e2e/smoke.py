@@ -1878,7 +1878,8 @@ def step_dictionary_modes(pg, base: str, ctx: dict) -> str:
 
         # ── Tắt: không học, không gợi ý ──
         open_settings()
-        dialog.get_by_role("button", name="Tắt").click()
+        # Hộp cài đặt nay có thêm công tắc Tắt/Bật của mục «Quét» (4.3) nên phải chỉ rõ là nút của mục từ điển
+        dialog.locator("[data-testid=dict-section]").get_by_role("button", name="Tắt").click()
         wait_until(lambda: j("/api/me/prefs")["dictMode"] == "off", "máy chủ lưu dictMode = off", timeout=15)
         pg.keyboard.press("Escape")
         dialog.wait_for(state="detached", timeout=5000)
