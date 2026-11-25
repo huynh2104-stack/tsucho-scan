@@ -94,9 +94,12 @@ export const metadata: Metadata = {
       '通帳の画像・PDFを読み取り、原本と照合して確認・修正。残高チェックからExcel・CSVの書き出しまで、ひとつの画面で進められます。',
     type: 'website',
     locale: 'ja_JP',
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: '通帳スキャン — AIで読み取り、原本で確かめる。' }],
   },
+  twitter: { card: 'summary_large_image', images: ['/og.png'] },
   icons: {
     icon: [
+      { url: '/favicon.ico', sizes: '48x48' },
       { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
       { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
       { url: '/icon.svg', type: 'image/svg+xml' },

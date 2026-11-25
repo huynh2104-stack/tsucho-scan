@@ -1054,7 +1054,7 @@ function Footer() {
               <ul>
                 {col.links.map(([label, to]) => (
                   <li key={label}>
-                    {to.startsWith('#') ? (
+                    {to.startsWith('#') || to.startsWith('/') ? (
                       <a href={to}>{label}</a>
                     ) : (
                       <button type="button" onClick={() => demo(to === 'contact' ? 'contact' : 'page')}>

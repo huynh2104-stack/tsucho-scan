@@ -1,0 +1,104 @@
+/* Trang pháp lý: tờ giấy trắng trên nền giấy sổ, chữ 16px dòng thoáng — ưu tiên đọc được, không trang trí. */
+.legal {
+  --ji: #eeeeea;
+  --sheet: #fcfcfa;
+  --sumi: #1c1d1f;
+  --sumi-2: #47484b;
+  --shu: #bf3a2b;
+  --rule: rgba(28, 29, 31, 0.14);
+  min-height: 100vh;
+  background: var(--ji);
+  color: var(--sumi);
+  font-family: var(--font-zenkaku), 'Hiragino Sans', 'Yu Gothic', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.9;
+  letter-spacing: 0.02em;
+  padding: 32px 16px 64px;
+}
+.legal-sheet {
+  max-width: 760px;
+  margin: 0 auto;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: clamp(24px, 5vw, 56px);
+}
+.legal h1 {
+  font-family: var(--font-shippori), 'Hiragino Mincho ProN', serif;
+  font-size: clamp(26px, 4vw, 34px);
+  line-height: 1.4;
+  margin: 8px 0 4px;
+  padding-bottom: 12px;
+  border-bottom: 3px double var(--sumi);
+}
+.legal h2 {
+  font-size: 18px;
+  margin: 36px 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--shu);
+  line-height: 1.5;
+}
+.legal p,
+.legal li {
+  color: var(--sumi-2);
+}
+.legal ol,
+.legal ul {
+  padding-left: 1.6em;
+  margin: 8px 0;
+}
+/* Tailwind preflight xoá dấu đầu dòng: trả lại cho văn bản pháp lý (đánh số là để trích dẫn được) */
+.legal ol {
+  list-style: decimal;
+}
+.legal ul {
+  list-style: disc;
+}
+.legal li + li {
+  margin-top: 4px;
+}
+.legal table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 15px;
+}
+.legal th,
+.legal td {
+  border: 1px solid var(--rule);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.legal th {
+  background: var(--ji);
+  white-space: nowrap;
+  font-weight: 700;
+}
+.legal a {
+  color: var(--sumi);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.legal-back {
+  font-size: 14px;
+  margin: 0;
+}
+.legal-date {
+  font-size: 14px;
+  margin: 8px 0 24px;
+}
+.legal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+}
+@media (max-width: 560px) {
+  .legal th {
+    white-space: normal;
+  }
+}

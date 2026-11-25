@@ -259,7 +259,7 @@ const jp = {
     cols: [
       { h: '製品', links: [['仕組み', '#how'], ['作業画面', '#screen'], ['紹介動画', '#film'], ['読み取れるもの', '#reads'], ['料金', '#pricing']] },
       { h: 'サポート', links: [['よくある質問', '#faq'], ['使い方ガイド', ''], ['お問い合わせ', 'contact']] },
-      { h: '運営・規約', links: [['運営者情報', ''], ['利用規約', ''], ['プライバシーポリシー', ''], ['特定商取引法に基づく表記', ''], ['情報の取り扱い', '#data']] },
+      { h: '運営・規約', links: [['運営者情報', '/privacy#operator'], ['利用規約', '/terms'], ['プライバシーポリシー', '/privacy'], ['特定商取引法に基づく表記', ''], ['情報の取り扱い', '#data']] },
     ] as { h: string; links: [string, string][] }[],
     version: '開発版 2026年10月',
   },
@@ -527,7 +527,7 @@ const vn: Copy = {
     cols: [
       { h: 'Sản phẩm', links: [['Cách hoạt động', '#how'], ['Màn hình', '#screen'], ['Video', '#film'], ['Đọc được gì', '#reads'], ['Bảng giá', '#pricing']] },
       { h: 'Hỗ trợ', links: [['Hỏi đáp', '#faq'], ['Hướng dẫn sử dụng', ''], ['Liên hệ', 'contact']] },
-      { h: 'Vận hành, điều khoản', links: [['Đơn vị vận hành', ''], ['Điều khoản sử dụng', ''], ['Chính sách quyền riêng tư', ''], ['Thông tin theo luật thương mại', ''], ['Xử lý dữ liệu', '#data']] },
+      { h: 'Vận hành, điều khoản', links: [['Đơn vị vận hành', '/privacy#operator'], ['Điều khoản sử dụng', '/terms'], ['Chính sách quyền riêng tư', '/privacy'], ['Thông tin theo luật thương mại', ''], ['Xử lý dữ liệu', '#data']] },
     ],
     version: 'Bản phát triển, tháng 10/2026',
   },
@@ -793,7 +793,7 @@ const en: Copy = {
     cols: [
       { h: 'Product', links: [['How it works', '#how'], ['The app', '#screen'], ['Video', '#film'], ['What it reads', '#reads'], ['Pricing', '#pricing']] },
       { h: 'Support', links: [['FAQ', '#faq'], ['User guide', ''], ['Contact', 'contact']] },
-      { h: 'Company and terms', links: [['Operator', ''], ['Terms of use', ''], ['Privacy policy', ''], ['Commercial disclosure', ''], ['Data handling', '#data']] },
+      { h: 'Company and terms', links: [['Operator', '/privacy#operator'], ['Terms of use', '/terms'], ['Privacy policy', '/privacy'], ['Commercial disclosure', ''], ['Data handling', '#data']] },
     ],
     version: 'Preview, October 2026',
   },
