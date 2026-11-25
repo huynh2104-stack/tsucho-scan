@@ -235,10 +235,10 @@ const jp = {
   contact: {
     title: '導入について相談する',
     dlgTitle: 'お問い合わせ',
-    body: '正式なお問い合わせ窓口は、提供開始にあわせて公開します。',
-    email: 'contact@tsucho-scan.example',
-    note: '下のアドレスは開発版のための例で、現在はメールを受け付けていません。',
-    exLabel: '例',
+    body: 'ご質問や導入のご相談は、下記のメールアドレスまでお気軽にどうぞ。',
+    email: 'contact@tsucho-scan.com',
+    note: '開発中のデモ版のため、お返事まで数日いただくことがあります。',
+    exLabel: 'メール',
   },
   data: {
     title: 'データの扱い',
@@ -503,10 +503,10 @@ const vn: Copy = {
   contact: {
     title: 'Trao đổi về việc sử dụng',
     dlgTitle: 'Liên hệ',
-    body: 'Kênh liên hệ chính thức sẽ được công bố khi dịch vụ ra mắt.',
-    email: 'contact@tsucho-scan.example',
-    note: 'Địa chỉ dưới đây chỉ là ví dụ cho bản phát triển, hiện chưa nhận email.',
-    exLabel: 'Ví dụ',
+    body: 'Câu hỏi hoặc trao đổi về việc sử dụng, xin gửi email tới địa chỉ dưới đây.',
+    email: 'contact@tsucho-scan.com',
+    note: 'Đây là bản demo đang phát triển, có thể mất vài ngày để phản hồi.',
+    exLabel: 'Email',
   },
   data: {
     title: 'Xử lý dữ liệu',
@@ -769,10 +769,10 @@ const en: Copy = {
   contact: {
     title: 'Talk to us about using it',
     dlgTitle: 'Contact',
-    body: 'The official contact will be published when the service launches.',
-    email: 'contact@tsucho-scan.example',
-    note: 'The address below is an example for this development version and does not receive mail yet.',
-    exLabel: 'Example',
+    body: 'For questions or to talk about using it, email the address below.',
+    email: 'contact@tsucho-scan.com',
+    note: 'This is a demo in development, so replies may take a few days.',
+    exLabel: 'Email',
   },
   data: {
     title: 'How your data is handled',

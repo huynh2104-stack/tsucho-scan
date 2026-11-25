@@ -3416,9 +3416,15 @@ html:has(.sc-lb[open]) {
   padding-right: 0;
 }
 
-/* Hộp liên hệ: địa chỉ ghi rõ là ví dụ, chữ nhạt */
+/* Hộp liên hệ: địa chỉ thật, bấm để mở trình soạn thư */
 .v5 .dlg-mail {
-  color: var(--sumi-3) !important;
+  color: var(--sumi) !important;
+}
+.v5 .dlg-mail a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  word-break: break-all;
 }
 .v5 .dlg-mail span {
   display: inline-block;

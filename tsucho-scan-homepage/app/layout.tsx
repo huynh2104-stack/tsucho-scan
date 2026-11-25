@@ -1,4 +1,3 @@
-import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import {
   Be_Vietnam_Pro,
@@ -77,7 +76,7 @@ const plexMono = IBM_Plex_Mono({
 /* Phần mô tả chỉ nói những gì ứng dụng LÀM ĐƯỢC THẬT. Bản cũ hứa
  * "tự động仕訳・分類" và "月次レポート" — hai thứ ứng dụng không có. */
 export const metadata: Metadata = {
-  metadataBase: new URL('https://tsucho-scan.vercel.app'),
+  metadataBase: new URL('https://tsucho-scan.com'),
   title: '通帳スキャン | AIで読み取り、原本で確かめる。',
   description:
     '通帳の写真・PDFをAIが読み取り、日付・摘要・入出金・残高をデータ化。原本との照合、残高の検算、Excel・CSVへの出力まで、ひとつの画面で進められます。',
@@ -134,7 +133,6 @@ export default function RootLayout({
         <MotionRoot>
           <LanguageProvider>{children}</LanguageProvider>
         </MotionRoot>
-        <Analytics />
       </body>
     </html>
   )

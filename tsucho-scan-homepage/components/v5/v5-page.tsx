@@ -140,7 +140,7 @@ function DemoDialog({ kind, onClose }: { kind: DlgKind | null; onClose: () => vo
                 <p className="dlg-note">{c.contact.note}</p>
                 <p className="dlg-mail">
                   <span>{c.contact.exLabel}</span>
-                  {c.contact.email}
+                  <a href={`mailto:${c.contact.email}`}>{c.contact.email}</a>
                 </p>
               </>
             ) : (
