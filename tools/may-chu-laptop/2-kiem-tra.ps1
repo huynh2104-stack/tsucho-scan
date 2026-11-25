@@ -1,7 +1,7 @@
 ﻿# Xem nhanh máy chủ có ổn không. Chạy được bằng PowerShell thường (không cần quản trị) — nhưng muốn đọc
 # nhật ký lỗi đầy đủ thì mở bằng «Run as administrator».
 
-param([string]$Root = "C:\TsuchoScan", [int]$Port = 8000)
+param([string]$Root = "C:\TsuchoScan", [int]$Port = 8000, [string]$PublicUrl = "https://app.tsucho-scan.com")
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 function Dong([string]$ten, [bool]$ok, [string]$chu) {
     $mau = if ($ok) { "Green" } else { "Red" }
@@ -17,17 +17,11 @@ $alive = $false
 try { $alive = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 "http://127.0.0.1:$Port/api/health").StatusCode -eq 200 } catch {}
 Dong "Máy chủ trả lời" $alive $(if ($alive) { "http://127.0.0.1:$Port" } else { "không trả lời — xem nhật ký bên dưới" })
 
-$ts = "C:\Program Files\Tailscale\tailscale.exe"
-if (Test-Path $ts) {
-    $st = (& $ts funnel status 2>&1 | Out-String)
-    $url = [regex]::Match($st, "https://[a-z0-9.-]+\.ts\.net").Value
-    Dong "Đường link công khai" ([bool]$url) $(if ($url) { $url } else { "Funnel chưa bật — chạy lại 1-cai-dat.ps1 (bước 8)" })
-    if ($url) {
-        $pub = $false
-        try { $pub = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "$url/api/health").StatusCode -eq 200 } catch {}
-        Dong "Từ internet vào được" $pub $(if ($pub) { "ok" } else { "chưa — mạng vừa rớt thì chờ 1–2 phút, Tailscale tự nối lại" })
-    }
-} else { Dong "Tailscale" $false "chưa cài" }
+$cf = Get-Service -Name "Cloudflared" -ErrorAction SilentlyContinue
+Dong "Đường hầm Cloudflare" ($cf -and $cf.Status -eq "Running") $(if ($cf) { "$($cf.Status)" } else { "chưa cài — xem docs/MAY_CHU_LAPTOP.md" })
+$pub = $false
+try { $pub = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 "$PublicUrl/api/health").StatusCode -eq 200 } catch {}
+Dong "Từ internet vào được" $pub $(if ($pub) { $PublicUrl } else { "chưa — mạng vừa rớt thì chờ 1–2 phút, cloudflared tự nối lại" })
 
 $os = Get-CimInstance Win32_OperatingSystem
 $freeRam = [math]::Round($os.FreePhysicalMemory / 1MB, 1)

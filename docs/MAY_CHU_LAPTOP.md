@@ -8,12 +8,12 @@
 
 ## Kết quả sau khi làm xong
 
-- Laptop phụ chạy app **24/24**, khách mở một đường link cố định dạng `https://ten-may.ten-mang.ts.net`.
+- Laptop phụ chạy app **24/24**, khách mở đường link cố định **https://app.tsucho-scan.com** (tên miền riêng, qua Cloudflare Tunnel).
 - **Tự hồi phục**, không ai phải làm gì:
 
   | Chuyện xảy ra | Máy tự làm gì |
   |---|---|
-  | Wi-Fi/mạng rớt rồi có lại | Đường hầm Tailscale tự nối lại (thường trong 1–2 phút) |
+  | Wi-Fi/mạng rớt rồi có lại | Đường hầm Cloudflare (dịch vụ `cloudflared`) tự nối lại, thường trong 1 phút |
   | App bị lỗi, tự tắt | Bật lại sau 5 giây |
   | App treo, không trả lời | Sau 90 giây tự tắt hẳn và bật lại |
   | Windows Update khởi động lại máy | App tự chạy khi máy lên, không cần đăng nhập |
@@ -30,7 +30,7 @@
 1. **Laptop phụ** chạy Windows 10 hoặc 11, **RAM 4 GB trở lên** (8 GB càng tốt), ổ C trống ≥ 5 GB.
    - RAM dưới 4 GB vẫn chạy được, nhưng script tự tắt bộ đọc chữ cục bộ → khung đỏ chỉ là nét đứt ước lượng.
 2. **Cắm sạc liên tục**, đặt ở chỗ thoáng (chạy lâu ngày sẽ nóng).
-3. Một tài khoản **Google hoặc Microsoft** để đăng nhập Tailscale (miễn phí).
+3. Tài khoản **Cloudflare** có tên miền (ở đây `tsucho-scan.com`, mua trên Cloudflare ~$11/năm). Đường hầm miễn phí.
 4. Khoá **GEMINI_API_KEY** (lấy ở https://aistudio.google.com/apikey).
 5. **Code mới phải có trên GitHub** (nhánh `web-app-giai-doan-2`). Laptop tải code từ đó.
    Nếu bản trên máy chính chưa đưa lên GitHub thì nhờ Claude «commit và push» trước.
@@ -50,21 +50,26 @@
 
 3. Script chạy 8 bước, mỗi bước hiện dòng xanh `✓` khi xong. Có 2 chỗ nó **hỏi anh**:
    - **Bước 5:** dán khoá Gemini → Enter. Chữ **không hiện ra** khi dán, đó là bình thường (để người đứng cạnh không nhìn thấy).
-   - **Bước 8:** trình duyệt mở trang **Tailscale** → đăng nhập bằng Google/Microsoft. Nếu nó hỏi bật **HTTPS** hoặc **Funnel** → bấm đồng ý. Xong quay lại cửa sổ PowerShell.
-4. Cuối cùng script in dòng `https://….ts.net` — **đó là đường link gửi cho khách**.
+   - **Bước 8:** script kiểm đường hầm Cloudflare. Lần đầu chưa có thì nó nhắc làm mục ngay dưới đây.
 
 Nếu script dừng giữa chừng với chữ đỏ `DỪNG: …`: làm theo câu đó rồi **chạy lại đúng lệnh ở mục 2**. Script tự bỏ qua những bước đã xong.
 
-### Một việc làm tay trên trang Tailscale (2 phút, để link không tự hết hạn sau 6 tháng)
+### Nối ra internet bằng Cloudflare Tunnel (làm một lần, ~10 phút)
 
-1. Mở https://login.tailscale.com/admin/machines
-2. Ở dòng tên laptop phụ, bấm **⋯** → **Disable key expiry**.
+1. Trên máy bất kỳ, vào https://dash.cloudflare.com → **Networking → Tunnels → Create a tunnel** → loại **Cloudflared**, đặt tên (vd. `laptop-demo`).
+2. Chọn **Windows**, chép lệnh `cloudflared.exe service install <mã>` mà trang hiện ra.
+   **Mã này như mật khẩu — chỉ dán trên laptop, đừng gửi cho ai.**
+3. Trên laptop: cài cloudflared (`winget install Cloudflare.cloudflared`), mở PowerShell **Run as administrator**, dán lệnh ở bước 2 → Enter.
+   Trang Cloudflare báo *Tunnel connected successfully* là được. cloudflared chạy thành dịch vụ Windows, tự bật khi máy khởi động.
+4. Trong tunnel → **Routes → Add route → Published application**: Subdomain `app`, Domain `tsucho-scan.com`,
+   Service URL `http://localhost:8000` → **Add route**. Cloudflare tự tạo DNS và HTTPS.
+5. Mở https://app.tsucho-scan.com — thấy trang đăng nhập là xong.
 
 ---
 
 ## Bước 2 — Thử
 
-1. Trên **điện thoại** (tắt Wi-Fi, dùng 4G để chắc là từ ngoài vào), mở đường link `https://….ts.net`.
+1. Trên **điện thoại** (tắt Wi-Fi, dùng 4G để chắc là từ ngoài vào), mở https://app.tsucho-scan.com.
 2. Đăng nhập, bấm **サンプル通帳で試す** (thử sổ mẫu) → quét → bấm một dòng → thấy khung đỏ trên ảnh.
 3. Thử «mất mạng»: rút Wi-Fi laptop 1 phút rồi cắm lại → chờ 2 phút → link vẫn mở được.
 
@@ -106,7 +111,7 @@ PowerShell **Run as administrator**:
 ```powershell
 Unregister-ScheduledTask -TaskName TsuchoScan-MayChu -Confirm:$false
 Unregister-ScheduledTask -TaskName TsuchoScan-SaoLuu -Confirm:$false
-& "C:\Program Files\Tailscale\tailscale.exe" funnel reset
+cloudflared.exe service uninstall
 ```
 
 Rồi xoá thư mục `C:\TsuchoScan` (sau khi đã chép `backup` ra nếu cần giữ dữ liệu).
@@ -115,7 +120,7 @@ Rồi xoá thư mục `C:\TsuchoScan` (sau khi đã chép `backup` ra nếu cầ
 
 ## An toàn — đã tính tới
 
-- App chỉ nghe ở `127.0.0.1`: người cùng mạng Wi-Fi **không** gõ thẳng vào được; chỉ đi qua đường hầm Tailscale (có HTTPS).
+- App chỉ nghe ở `127.0.0.1`: người cùng mạng Wi-Fi **không** gõ thẳng vào được; chỉ đi qua đường hầm Cloudflare (có HTTPS).
 - **Không mở cổng modem**, không lộ địa chỉ IP nhà.
 - Khoá Gemini nằm trong `config.env`, chỉ tài khoản quản trị và hệ thống đọc được.
 - Cookie đăng nhập có cờ `Secure` (chỉ gửi qua HTTPS).
@@ -125,8 +130,8 @@ Rồi xoá thư mục `C:\TsuchoScan` (sau khi đã chép `backup` ra nếu cầ
 - Đây là **laptop cá nhân**, không phải trung tâm dữ liệu: mất điện lâu, hỏng ổ đĩa, hay laptop bị tắt là app ngừng.
 - **Dữ liệu sổ ngân hàng nằm trên laptop của người phát triển.** Với demo dùng sổ mẫu thì không sao; với sổ thật của khách thì phải nói rõ điều này. Câu trả lời trung thực khi khách hỏi「データはどこに保存されますか？」:
   > デモ版のため、通帳の画像と読み取り結果は開発者が管理するパソコン（サーバー）に保存されます。読み取りには Google Gemini API（有料プラン：学習に使われません）を使用します。本番運用ではクラウドのサーバーに移行します。
-- Tailscale Funnel đang ở dạng **beta** và có giới hạn băng thông (không công bố con số) — đủ cho demo vài người, không phải cho hàng trăm người cùng lúc.
-- Đăng nhập thử sai nhiều lần bị khoá **theo địa chỉ IP**; qua đường hầm mọi người đều hiện cùng một IP (`127.0.0.1`), nên một người đoán sai mật khẩu nhiều lần có thể làm người khác tạm bị khoá. Chấp nhận được cho demo.
+- Cloudflare Tunnel miễn phí, đủ cho demo; nhưng tốc độ vẫn phụ thuộc mạng nhà và sức laptop.
+- Đăng nhập thử sai nhiều lần bị khoá **theo địa chỉ IP**. Script đặt sẵn `TSUCHO_TRUST_PROXY=cloudflare` nên app lấy IP thật của từng người từ header `CF-Connecting-IP` (Cloudflare tự ghi, người gửi không giả được). Không dùng `=1` ở đây: `X-Forwarded-For` qua Cloudflare vẫn giả được phần đầu.
 
 ## Khi có khách dùng thật
 

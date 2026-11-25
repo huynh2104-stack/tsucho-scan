@@ -281,8 +281,19 @@ def client_ip(request) -> str:
     qua proxy mà vẫn tin nó thì kẻ dò chỉ cần đổi header mỗi lần gọi là thoát
     khoá theo IP. Vì vậy chỉ tin khi `TSUCHO_TRUST_PROXY=1` — đặt biến này khi
     và chỉ khi app thật sự nằm sau proxy.
+
+    Sau Cloudflare (Tunnel) thì `X-Forwarded-For` vẫn giả được: Cloudflare chỉ
+    NỐI IP thật vào cuối, phần đầu là chữ người gửi tự điền. Header đáng tin là
+    `CF-Connecting-IP` (Cloudflare luôn ghi đè) → đặt `TSUCHO_TRUST_PROXY=cloudflare`.
+    Chỉ đặt khi app CHỈ nhận kết nối từ cloudflared (nghe ở 127.0.0.1), không thì
+    ai gọi thẳng vào cũng tự điền được header này.
     """
-    if os.getenv("TSUCHO_TRUST_PROXY", "").lower() in ("1", "true", "yes"):
+    mode = os.getenv("TSUCHO_TRUST_PROXY", "").strip().lower()
+    if mode == "cloudflare":
+        cf = request.headers.get("cf-connecting-ip", "").strip()
+        if cf:
+            return cf
+    elif mode in ("1", "true", "yes"):
         forwarded = request.headers.get("x-forwarded-for", "")
         if forwarded.strip():
             return forwarded.split(",")[0].strip()

@@ -237,6 +237,28 @@ def test_khong_tin_x_forwarded_for_khi_chua_bat(client, monkeypatch):
     assert r.status_code == 429
 
 
+class _Req:
+    def __init__(self, headers, host="127.0.0.1"):
+        self.headers = headers
+        self.client = type("C", (), {"host": host})()
+
+
+def test_che_do_cloudflare_dung_cf_connecting_ip(monkeypatch):
+    """Sau Cloudflare: X-Forwarded-For có phần đầu do người gửi tự điền → phải bỏ qua."""
+    monkeypatch.setenv("TSUCHO_TRUST_PROXY", "cloudflare")
+    req = _Req({"x-forwarded-for": "1.2.3.4, 203.0.113.7", "cf-connecting-ip": "203.0.113.7"})
+    assert auth.client_ip(req) == "203.0.113.7"
+    # Không có header Cloudflare (gọi thẳng vào máy) → IP kết nối, KHÔNG tin X-Forwarded-For
+    assert auth.client_ip(_Req({"x-forwarded-for": "1.2.3.4"})) == "127.0.0.1"
+
+
+def test_che_do_cu_van_doc_x_forwarded_for(monkeypatch):
+    monkeypatch.setenv("TSUCHO_TRUST_PROXY", "1")
+    assert auth.client_ip(_Req({"x-forwarded-for": "5.6.7.8, 10.0.0.1"})) == "5.6.7.8"
+    monkeypatch.delenv("TSUCHO_TRUST_PROXY")
+    assert auth.client_ip(_Req({"x-forwarded-for": "5.6.7.8", "cf-connecting-ip": "9.9.9.9"})) == "127.0.0.1"
+
+
 # ── Mật khẩu ─────────────────────────────────────────────────────────
 
 def test_mat_khau_khong_luu_tho(client):

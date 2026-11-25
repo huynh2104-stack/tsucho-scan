@@ -4,7 +4,7 @@
 # Nó bật máy chủ, rồi cứ 30 giây hỏi «còn sống không?» (/api/health):
 #   • tiến trình tự thoát (lỗi, hết RAM…)        → 5 giây sau bật lại
 #   • còn chạy mà 3 lần liền không trả lời (treo) → tắt hẳn rồi bật lại
-# Mất mạng không làm máy chủ chết: nó chỉ nghe ở 127.0.0.1, đường hầm Tailscale tự nối lại khi có mạng.
+# Mất mạng không làm máy chủ chết: nó chỉ nghe ở 127.0.0.1, đường hầm Cloudflare (cloudflared) tự nối lại khi có mạng.
 #
 # Tham số chỉ để thử trên máy khác; trên laptop máy chủ cứ để mặc định.
 
@@ -56,6 +56,9 @@ $env:PYTHONUNBUFFERED = "1"
 if (-not $env:TSUCHO_LOCAL_OCR) { $env:TSUCHO_LOCAL_OCR = "1" }
 # Người ngoài vào qua https (đường hầm) nên cookie đăng nhập phải có cờ Secure
 if (-not $env:TSUCHO_COOKIE_SECURE) { $env:TSUCHO_COOKIE_SECURE = "1" }
+# Người ngoài vào qua Cloudflare Tunnel: lấy IP thật từ CF-Connecting-IP để khoá đăng nhập theo từng người
+# (app chỉ nghe ở 127.0.0.1 nên không ai gọi thẳng vào giả được header này; thiếu header thì app tự bỏ qua)
+if (-not $env:TSUCHO_TRUST_PROXY) { $env:TSUCHO_TRUST_PROXY = "cloudflare" }
 
 $health = "http://127.0.0.1:$Port/api/health"
 function Song {
@@ -70,7 +73,7 @@ while ($true) {
     if (-not (Test-Path $Python)) { Ghi "Không thấy Python ở $Python — chờ 60 giây rồi thử lại"; Start-Sleep 60; continue }
     Xoay (Join-Path $LogDir "may-chu.log"); Xoay (Join-Path $LogDir "may-chu-loi.log"); Xoay $journal
 
-    # Chỉ nghe ở 127.0.0.1: không ai trong mạng Wi-Fi gõ thẳng vào được, chỉ đường hầm Tailscale mới tới.
+    # Chỉ nghe ở 127.0.0.1: không ai trong mạng Wi-Fi gõ thẳng vào được, chỉ đường hầm Cloudflare mới tới.
     # MỘT tiến trình (không --workers): danh sách lần quét đang chạy nằm trong bộ nhớ của tiến trình.
     $proc = Start-Process -FilePath $Python -WorkingDirectory $AppDir -WindowStyle Hidden -PassThru `
         -ArgumentList @("-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$Port") `

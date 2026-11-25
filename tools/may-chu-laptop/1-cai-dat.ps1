@@ -5,13 +5,13 @@
 #
 # Script làm lần lượt (chạy lại nhiều lần cũng được — bước nào xong rồi thì bỏ qua):
 #   1. kiểm máy (quyền quản trị, RAM, ổ đĩa, winget)
-#   2. cài Git, Python 3.12, Node.js, Tesseract, Tailscale (qua winget của Microsoft)
+#   2. cài Git, Python 3.12, Node.js, Tesseract, cloudflared (qua winget của Microsoft)
 #   3. tải code tsucho-scan từ GitHub về C:\TsuchoScan\app
 #   4. cài thư viện Python + dựng trang web
 #   5. hỏi khoá Gemini, ghi vào C:\TsuchoScan\config.env (chỉ quản trị viên đọc được)
 #   6. chỉnh nguồn điện: cắm sạc thì không bao giờ ngủ, gập màn hình không làm gì
 #   7. tạo tác vụ Windows chạy máy chủ lúc khởi động + tự bật lại khi chết, và tác vụ sao lưu mỗi đêm
-#   8. bật đường hầm Tailscale Funnel → in ra đường link https cố định cho khách
+#   8. kiểm đường hầm Cloudflare Tunnel (tạo trên trang Cloudflare, xem docs) → link https cố định cho khách
 
 param(
     [string]$Root   = "C:\TsuchoScan",
@@ -55,7 +55,7 @@ $pkgs = @(
     @{ id = "Python.Python.3.12";         ten = "Python 3.12"; co = { (Co "py") -and ((& py -3.12 -c "print(1)" 2>$null) -eq "1") } },
     @{ id = "OpenJS.NodeJS.LTS";          ten = "Node.js";    co = { Co "npm" } },
     @{ id = "UB-Mannheim.TesseractOCR";   ten = "Tesseract";  co = { Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe" } },
-    @{ id = "Tailscale.Tailscale";        ten = "Tailscale";  co = { Test-Path "C:\Program Files\Tailscale\tailscale.exe" } }
+    @{ id = "Cloudflare.cloudflared";     ten = "cloudflared"; co = { (Co "cloudflared") -or (Test-Path "C:\Program Files (x86)\cloudflared\cloudflared.exe") } }
 )
 foreach ($p in $pkgs) {
     NapPath
@@ -153,14 +153,17 @@ if (-not $up) { Dung "Máy chủ chưa lên. Xem nhật ký: $Root\logs\may-chu-
 Ok "máy chủ đang chạy ở http://127.0.0.1:$Port (chỉ máy này vào được)"
 
 # ── 8. Đường hầm ─────────────────────────────────────────────────────
-Buoc "8/8 Mở đường link công khai bằng Tailscale Funnel"
-$ts = "C:\Program Files\Tailscale\tailscale.exe"
-Write-Host "    Trình duyệt sẽ mở trang đăng nhập Tailscale (dùng tài khoản Google/Microsoft của anh)."
-Write-Host "    Đăng nhập xong quay lại đây. Nếu nó hỏi bật HTTPS/Funnel thì bấm đồng ý."
-& $ts up --unattended=true
-& $ts set --unattended=true
-& $ts funnel --bg $Port
-& $ts funnel status
-Write-Host ""
-Write-Host "XONG. Đường link cho khách là dòng https://….ts.net ở trên." -ForegroundColor Green
+Buoc "8/8 Đường link công khai (Cloudflare Tunnel)"
+$cf = Get-Service -Name "Cloudflared" -ErrorAction SilentlyContinue
+if ($cf -and $cf.Status -eq "Running") {
+    Ok "dịch vụ cloudflared đang chạy (đường hầm tự nối lại khi mạng rớt)"
+    Write-Host ""
+    Write-Host "XONG. Đường link cho khách: https://app.tsucho-scan.com (route đặt trên trang Cloudflare)." -ForegroundColor Green
+} else {
+    Canh "Chưa có đường hầm. Làm theo docs/MAY_CHU_LAPTOP.md, mục «Nối ra internet bằng Cloudflare Tunnel»:"
+    Write-Host "    tạo tunnel trên dash.cloudflare.com, dán lệnh «cloudflared.exe service install <mã>» vào cửa sổ quản trị này,"
+    Write-Host "    rồi thêm route app → http://localhost:$Port. Mã đó như mật khẩu — đừng gửi cho ai."
+    Write-Host ""
+    Write-Host "Máy chủ đã chạy trong máy; chỉ còn thiếu đường hầm." -ForegroundColor Yellow
+}
 Write-Host "Kiểm tra bất cứ lúc nào: chạy 2-kiem-tra.ps1 trong $tools"
