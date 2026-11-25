@@ -14,7 +14,7 @@ import io
 
 from PIL import Image
 
-from api import auth, demo, imgjobs, main, workspace
+from api import auth, demo, imgjobs, main, quota, workspace
 
 # Route ai cũng gọi được — số còn lại bắt buộc phải đăng nhập
 PUBLIC = {
@@ -22,6 +22,14 @@ PUBLIC = {
     "/api/auth/register",
     "/api/auth/login",
     "/api/auth/logout",
+    "/api/auth/trial",
+    "/api/auth/verify",
+    "/api/auth/resend",
+    "/api/auth/forgot",
+    "/api/auth/reset",
+    "/api/auth/methods",
+    "/api/auth/{provider}/start",
+    "/api/auth/{provider}/callback",
     # Danh sách tài khoản dùng thử: cố ý công khai — người chưa đăng nhập phải
     # đọc được thì mới có cái để bấm. Máy chủ không khai báo thì trả rỗng.
     "/api/auth/demo",
@@ -44,6 +52,12 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "DB_PATH", tmp_path / "app.db")
     # Các test ở đây kiểm đăng nhập CHẶT (sai email = 401, bị khoá...). Đăng nhập mở: tests/test_open_login.py
     monkeypatch.setattr(auth, "OPEN_LOGIN", False)
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)       # không bao giờ gửi thư thật: thư ghi ra outbox
+    monkeypatch.setenv("TSUCHO_MAIL_SYNC", "1")               # việc gửi thư chạy nền → đồng bộ cho test
+    monkeypatch.delenv("TSUCHO_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("TSUCHO_ORIGINS", raising=False)
+    monkeypatch.delenv("TSUCHO_ADMIN_EMAILS", raising=False)
+    monkeypatch.delenv("TSUCHO_TRUST_PROXY", raising=False)
     auth.init_db()
     with TestClient(main.app) as c:
         yield c
@@ -53,7 +67,9 @@ def client(tmp_path, monkeypatch):
 
 
 def register(client, email="a@b.com", password="matkhau123"):
-    r = client.post("/api/auth/register", json={"email": email, "password": password})
+    """Tạo một thành viên ĐÃ xác minh rồi đăng nhập (đường đăng ký thật qua thư: tests/test_auth_email.py)."""
+    auth.create_user(email, password, verified=True)
+    r = client.post("/api/auth/login", json={"email": email, "password": password})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -124,19 +140,20 @@ def test_sai_mat_khau_va_sai_email_bao_giong_nhau(client):
     assert sai_mk.json()["detail"] == khong_co.json()["detail"]
 
 
-def test_tu_choi_email_hong_va_mat_khau_ngan(client):
-    assert client.post(
-        "/api/auth/register", json={"email": "khong-phai-email", "password": "matkhau123"}
-    ).status_code == 400
-    assert client.post(
-        "/api/auth/register", json={"email": "an@vd.com", "password": "ngan"}
-    ).status_code == 400
+def test_tu_choi_email_hong(client):
+    assert client.post("/api/auth/register", json={"email": "khong-phai-email"}).status_code == 400
+    assert client.post("/api/auth/register", json={"email": ""}).status_code == 400
 
 
-def test_khong_dang_ky_trung_email(client):
+def test_dang_ky_trung_email_khong_lo_la_da_co(client):
+    """Đăng ký email đã có trả Y HỆT như đăng ký mới (không lộ email nào đã có tài khoản)."""
     register(client, "an@vd.com")
-    r = client.post("/api/auth/register", json={"email": "AN@vd.com", "password": "matkhau123"})
-    assert r.status_code == 400
+    client.post("/api/auth/logout")
+    moi = client.post("/api/auth/register", json={"email": "moi@vd.com"})
+    cu = client.post("/api/auth/register", json={"email": "AN@vd.com"})
+    assert cu.status_code == moi.status_code == 200
+    assert cu.json() == moi.json() == {"ok": True, "sent": True}
+    assert client.get("/api/auth/me").status_code == 401, "đăng ký không mở phiên"
 
 
 # ── Chống dò mật khẩu ────────────────────────────────────────────────
@@ -275,22 +292,38 @@ def test_hai_lan_bam_cung_mat_khau_ra_khac_nhau():
     assert auth.hash_password("matkhau123") != auth.hash_password("matkhau123")
 
 
-# ── Người đầu tiên ───────────────────────────────────────────────────
+# ── Admin do TSUCHO_ADMIN_EMAILS (không còn luật «người đầu tiên») ─────────
 
-def test_nguoi_dau_tien_la_admin_va_nhan_du_lieu_cu(client):
+def test_nguoi_dau_tien_khong_con_la_admin(client):
     cu = workspace.create()          # workspace tạo từ hồi chưa có đăng nhập
+    assert register(client, "an@vd.com")["role"] == "user"
+    assert client.get(f"/api/ws/{cu.id}").status_code == 404     # không nhận dữ liệu cũ
+
+
+def test_email_trong_danh_sach_admin_thanh_admin_va_nhan_du_lieu_cu(client, monkeypatch):
+    monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "Chu@VD.com, khac@vd.com")
+    cu = workspace.create()
     assert cu.owner == ""
 
-    dau = register(client, "an@vd.com")
+    dau = register(client, "chu@vd.com")
     assert dau["role"] == "admin"
-    assert dau["claimed_workspaces"] == 1
     assert client.get(f"/api/ws/{cu.id}").status_code == 200
 
     client.post("/api/auth/logout")
     sau = register(client, "binh@vd.com")
     assert sau["role"] == "user"
-    assert sau["claimed_workspaces"] == 0
     assert client.get(f"/api/ws/{cu.id}").status_code == 404
+
+
+def test_email_admin_chua_xac_minh_khong_duoc_len_admin(client, monkeypatch):
+    monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "chu@vd.com")
+    user = auth.create_user("chu@vd.com", "matkhau123", verified=False)
+    assert auth.apply_admin_emails(user).role == "user"
+    assert auth.get_by_id(user.id).role == "user"
+    # trial mang đúng tên email đó cũng không thành admin
+    monkeypatch.setattr(auth, "OPEN_LOGIN", True)
+    r = client.post("/api/auth/trial", json={"id": "chu@vd.com", "password": "x"})
+    assert r.json()["role"] == "user"
 
 
 # ── Tài khoản dùng thử ───────────────────────────────────────────────
@@ -350,23 +383,19 @@ def test_tai_khoan_thuong_khong_bi_han_muc(client, monkeypatch):
     monkeypatch.setenv("TSUCHO_DEMO_SCAN_LIMIT", "0")
     register(client, "that@nguoi.com")
     me = client.get("/api/auth/me").json()
-    assert demo.con_lai(auth.get_by_id(me["id"])) is None
+    # thành viên thường cũng có hạn mức (mặc định 30), chỉ admin là không giới hạn
+    assert quota.limit_for(auth.get_by_id(me["id"])) == 30
+    monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "that@nguoi.com")
+    client.post("/api/auth/logout")
+    client.post("/api/auth/login", json={"email": "that@nguoi.com", "password": "matkhau123"})
+    assert client.get("/api/auth/me").json()["quota"]["limit"] is None
 
 
 # ── Lỗi đăng ký phải có MÃ để giao diện dịch ────────────────────────
 
 def test_loi_dang_ky_co_ma_de_dich(client):
     """Không có mã thì người Nhật nhận câu tiếng Việt — đã từng xảy ra thật."""
-    register(client, "trung@lap.com")
-    r = client.post(
-        "/api/auth/register", json={"email": "trung@lap.com", "password": "matkhau123"}
-    )
-    assert r.status_code == 400
-    assert r.json()["detail"]["kind"] == "email_taken"
-
-    r = client.post("/api/auth/register", json={"email": "khong-phai-email", "password": "matkhau123"})
+    r = client.post("/api/auth/register", json={"email": "khong-phai-email"})
     assert r.json()["detail"]["kind"] == "bad_email"
 
-    r = client.post("/api/auth/register", json={"email": "moi@nguoi.com", "password": "ngan"})
-    assert r.json()["detail"]["kind"] == "weak_password"
-    assert r.json()["detail"]["min"] == auth.MIN_PASSWORD
+

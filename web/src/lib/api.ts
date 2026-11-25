@@ -236,7 +236,7 @@ export type ScanEvent = {
   /** Tên mặt sổ hỏng — ghép vào câu đã dịch. */
   sheet?: string;
   /** Con số cần ghép vào câu đã dịch (cỡ file, giới hạn...). */
-  info?: { size_mb?: number; limit_mb?: number };
+  info?: { size_mb?: number; limit_mb?: number; limit?: number; scope?: string };
   index?: number;
   total?: number;
   label?: string;
@@ -299,13 +299,49 @@ const jsonPost = <T,>(path: string, body: unknown) =>
 
 // ── Tài khoản ──────────────────────────────────────────────────────
 
-export type Me = { id: string; email: string; role: "admin" | "user" };
+export type Me = {
+  id: string;
+  email: string;
+  role: "admin" | "user";
+  /** member = tài khoản thật · trial = «お試し» · demo = tài khoản dùng chung */
+  kind?: "member" | "trial" | "demo";
+  email_verified?: boolean;
+  display_name?: string;
+  providers?: string[];
+  /** limit/left = null: không giới hạn */
+  quota?: { limit: number | null; used: number; left: number | null };
+};
 
-export const register = (email: string, password: string) =>
-  jsonPost<Me & { claimed_workspaces: number }>("/api/auth/register", {
-    email,
-    password,
-  });
+/** Cửa nào đang mở trên máy chủ này (thiếu khoá thì nút tương ứng ẩn). */
+export type AuthMethods = {
+  google: boolean;
+  line: boolean;
+  email: boolean;
+  trial: boolean;
+  trial_limit: number;
+  member_limit: number;
+};
+export const fetchAuthMethods = async () =>
+  asJson<AuthMethods>(await fetch(`${API}/api/auth/methods`, CRED));
+
+/** Đăng ký KHÔNG tạo phiên: máy chủ gửi thư xác minh và luôn trả `sent` (kể cả email đã có). */
+export const registerEmail = (email: string, lang: string) =>
+  jsonPost<{ ok: true; sent: true }>("/api/auth/register", { email, lang });
+
+export const trialLogin = (id: string, password: string) =>
+  jsonPost<Me>("/api/auth/trial", { id, password });
+
+export const verifyEmail = (token: string, password: string) =>
+  jsonPost<Me>("/api/auth/verify", { token, password });
+
+export const resendVerify = (email: string, lang: string) =>
+  jsonPost<{ ok: true }>("/api/auth/resend", { email, lang });
+
+export const forgotPassword = (email: string, lang: string) =>
+  jsonPost<{ ok: true }>("/api/auth/forgot", { email, lang });
+
+export const resetPassword = (token: string, password: string) =>
+  jsonPost<Me>("/api/auth/reset", { token, password });
 
 export const login = (email: string, password: string) =>
   jsonPost<Me>("/api/auth/login", { email, password });

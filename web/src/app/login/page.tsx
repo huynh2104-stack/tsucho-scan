@@ -6,6 +6,9 @@
  * Người dùng cuối là kế toán lớn tuổi người Nhật nên: chữ to, hai ô nhập, một
  * nút, không có bước thừa.
  *
+ * Đợt C (KE_HOACH_DANG_NHAP): Google · LINE · email (đăng ký phải xác minh qua thư) và khung «お試し（登録不要）»
+ * riêng cho khách xem thử. Đăng ký KHÔNG đăng nhập — chỉ báo «đã gửi thư».
+ *
  * BA ĐIỀU ĐÃ SỬA SAU KHI THỬ LẠI TỪNG BƯỚC:
  *
  * 1. TÀI KHOẢN DÙNG THỬ. Người đến xem — nhất là dân IT hoặc kế toán cẩn thận —
@@ -22,18 +25,28 @@
  * trong lúc React đang render là lỗi.
  */
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState, type CSSProperties } from "react";
 
 import LangMenu from "@/components/LangMenu";
 import { BrandMark } from "@/components/ui/Brand";
 import Seal from "@/components/ui/Seal";
-import { CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
-import { ApiError, Unauthorized, fetchDemoAccounts, type DemoAccount } from "@/lib/api";
+import ProviderButtons from "@/components/ui/ProviderButtons";
+import { CheckCircle, CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
+import {
+  ApiError,
+  Unauthorized,
+  fetchAuthMethods,
+  fetchDemoAccounts,
+  resendVerify,
+  type AuthMethods,
+  type DemoAccount,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { safeNext } from "@/lib/authnext";
 import { useT } from "@/lib/i18n";
 
-const TRANG_GIOI_THIEU = "https://tsucho-scan.vercel.app/";
+const TRANG_GIOI_THIEU = "https://tsucho-scan.com/";
 
 /* Dòng 19 đến 24 của sổ mẫu, đúng số trong samples/fukuoka.json; ảnh public/login/passbook-rows.jpg cắt và nắn
    từ samples/fukuoka.jpg. Bỏ dòng 18 vì dòng đó có tên bên chuyển khoản. Dòng 23 là dòng báo của ATM nên chuỗi đứt:
@@ -135,12 +148,21 @@ function Showcase() {
   );
 }
 
-export default function LoginPage() {
-  const { t } = useT();
-  const { user, ready, login, register } = useAuth();
-  const router = useRouter();
+const PRIVACY_URL = "https://tsucho-scan.com/privacy";
+const TERMS_URL = "https://tsucho-scan.com/terms";
+const ERR_MARK = "mt-4 flex items-start gap-2 rounded-[3px] bg-warnbg px-3 py-2 text-t13 leading-[1.6] text-warnink";
+const LABEL = "block text-t13 font-bold text-ink2";
+const INPUT = "field mt-1.5 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16";
 
-  const [mode, setMode] = useState<"in" | "up">("in");
+function LoginInner() {
+  const { t, lang } = useT();
+  const { user, ready, login, register, trial } = useAuth();
+  const router = useRouter();
+  const sp = useSearchParams();
+  const next = safeNext(sp.get("next"));
+  const authError = sp.get("auth_error");
+
+  const [mode, setMode] = useState<"in" | "up" | "sent">(sp.get("tab") === "register" ? "up" : "in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [hienMk, setHienMk] = useState(false);
@@ -149,20 +171,30 @@ export default function LoginPage() {
   // sang tiếng Nhật vẫn thấy câu tiếng Việt đứng nguyên đó.
   const [err, setErr] = useState<unknown>(null);
 
-  const [demo, setDemo] = useState<{
-    accounts: DemoAccount[];
-    scan_limit: number;
-    open_login?: boolean;
-  } | null>(null);
+  // Khung «お試し»
+  const [tId, setTId] = useState("");
+  const [tPw, setTPw] = useState("");
+  const [tBusy, setTBusy] = useState(false);
+  const [tErr, setTErr] = useState<unknown>(null);
+
+  // Gửi lại thư xác nhận: khoá 60 giây
+  const [wait, setWait] = useState(0);
+  const [resent, setResent] = useState(false);
+
+  const [methods, setMethods] = useState<AuthMethods | null>(null);
+  const [demo, setDemo] = useState<{ accounts: DemoAccount[]; scan_limit: number } | null>(null);
   const [dangVao, setDangVao] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ready && user) router.replace("/");
-  }, [ready, user, router]);
+    if (ready && user) router.replace(next);
+  }, [ready, user, router, next]);
 
-  // Máy chủ cũ chưa có route này, hoặc chưa khai báo tài khoản nào → bỏ qua im lặng
+  // Máy chủ cũ chưa có route này → bỏ qua im lặng: khung お試し hiện theo mặc định, nút Google/LINE ẩn
   useEffect(() => {
     let con = true;
+    fetchAuthMethods()
+      .then((m) => con && setMethods(m))
+      .catch(() => {});
     fetchDemoAccounts()
       .then((d) => con && setDemo(d))
       .catch(() => {});
@@ -171,13 +203,30 @@ export default function LoginPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (methods && !methods.email && mode === "up") setMode("in");
+  }, [methods, mode]);
+
+  useEffect(() => {
+    if (wait <= 0) return;
+    const id = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(id);
+  }, [wait]);
+
   async function vao(e: string, mk: string) {
     setErr(null);
+    setResent(false);
     setBusy(true);
     try {
-      if (mode === "up") await register(e, mk);
-      else await login(e, mk);
-      router.replace("/");
+      if (mode === "up") {
+        await register(e, lang);
+        setMode("sent");
+        setWait(60);
+        setBusy(false);
+        return;
+      }
+      await login(e, mk);
+      router.replace(next);
     } catch (loi) {
       setErr(loi);
       setBusy(false);
@@ -185,28 +234,64 @@ export default function LoginPage() {
     }
   }
 
+  async function thu() {
+    setTErr(null);
+    setTBusy(true);
+    try {
+      await trial(tId.trim(), tPw);
+      router.replace(next);
+    } catch (loi) {
+      setTErr(loi);
+      setTBusy(false);
+    }
+  }
+
+  async function guiLai() {
+    setWait(60);
+    setResent(true);
+    try {
+      await resendVerify(email, lang);
+    } catch {
+      /* máy chủ luôn trả 200; lỗi mạng thì người dùng bấm lại sau 60 giây */
+    }
+  }
+
   /** Server gửi MÃ lỗi vì nó không biết người dùng đang xem tiếng nào; câu chữ
    *  ghép ở đây, ngay lúc VẼ. Lỗi chưa có mã thì hiện nguyên văn. */
-  function errText(e: unknown): string {
+  function errText(e: unknown, trialBox: boolean): string {
     if (e instanceof ApiError) {
       const so = (k: string, mac: number) => Number(e.info?.[k] ?? mac);
-      if (e.code === "locked")
-        return t.authLocked(Math.max(1, Math.ceil(so("seconds", 0) / 60)));
+      if (e.code === "locked") return t.authLocked(Math.max(1, Math.ceil(so("seconds", 0) / 60)));
+      if (e.code === "unverified") return t.authUnverified;
+      if (e.code === "trial_off") return t.authTrialOff;
+      if (e.code === "trial_new_limit") return t.authTrialNewLimit;
       if (e.code === "email_taken") return t.authEmailTaken;
       if (e.code === "bad_email") return t.authBadEmail;
       if (e.code === "bad_id") return t.authOpenBadId(so("max", 100));
       if (e.code === "weak_password") return t.authWeakPassword(so("min", 8));
     }
-    // Ở TRANG NÀY 401 chỉ có một nghĩa: sai email hoặc sai mật khẩu (server cố
-    // ý không nói rõ cái nào, để người ngoài không dò ra email nào có thật).
-    // Đăng nhập mở thì tên lạ đã được tự tạo tài khoản, nên 401 chắc chắn là: tên đã có người, sai mật khẩu.
-    if (e instanceof Unauthorized) return open ? t.authOpenBadLogin : t.authBadLogin;
+    // 401 chỉ có một nghĩa: sai email/mật khẩu (server cố ý không nói rõ cái nào). Ở khung お試し thì
+    // tên lạ đã tự tạo tài khoản nên 401 chắc chắn là: ID đã có người dùng + sai mật khẩu.
+    if (e instanceof Unauthorized) return trialBox ? t.authOpenBadLogin : t.authBadLogin;
     return e instanceof Error ? e.message : String(e);
   }
 
-  const coDemo = mode === "in" && !!demo && demo.accounts.length > 0;
-  // Bản đang phát triển: nhập tên/mật khẩu tuỳ ý, tên mới tự tạo tài khoản ⇒ không cần ô đăng ký riêng
-  const open = mode === "in" && !!demo?.open_login;
+  const errCode = err instanceof ApiError ? err.code : undefined;
+  const coDemo = !!demo && demo.accounts.length > 0;
+  const showTrial = methods ? methods.trial : true;
+  // Máy chủ chưa cài gửi thư (thiếu RESEND_API_KEY) → ẩn đăng ký + quên mật khẩu: báo «đã gửi» mà thư không tới còn tệ hơn không có nút
+  const emailOn = methods ? methods.email : true;
+  const trialLimit = methods?.trial_limit ?? 5;
+  const authErrText =
+    authError === "cancelled"
+      ? t.authErrCancelled
+      : authError === "state"
+        ? t.authErrState
+        : authError === "email_unverified"
+          ? t.authErrEmailUnverified
+          : authError
+            ? t.authErrProvider
+            : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,56fr)_minmax(0,44fr)]">
@@ -228,100 +313,225 @@ export default function LoginPage() {
 
         <div className="m-auto w-full max-w-[484px] px-4 py-6 sm:py-10 lg:pt-14">
           <div className="overflow-hidden rounded-[3px] bg-card shadow-ply">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void vao(email, password);
-              }}
-              className="px-6 pb-6 pt-5"
-            >
-              <h1 className="text-t22 font-bold">{mode === "up" ? t.authHeadUp : t.authHeadIn}</h1>
-              {coDemo && <p className="mt-1 text-t13 leading-[1.6] text-ink2">{t.demoOr}</p>}
-              {/* «Bản đang phát triển»: nói rõ không cần email thật / mật khẩu chuẩn. Đứng sau tiêu đề và nhỏ hơn: việc chính vẫn là đăng nhập. */}
-              {open && (
-                <div role="note" data-testid="dev-notice" className="mt-2 border-b border-rule2 pb-3">
-                  <p className="text-t13 font-bold text-ink2">{t.devHead}</p>
-                  <p className="mt-0.5 text-t13 leading-[1.7] text-ink2">{t.devBody}</p>
-                  <p className="mt-1 text-t12 leading-[1.6] text-pretty text-ink3">{t.devNote}</p>
-                </div>
-              )}
-
-              <label className="mt-4 block text-t13 font-bold text-ink2" htmlFor="email">
-                {open ? t.authOpenId : t.authEmail}
-              </label>
-              <input
-                id="email"
-                type={open ? "text" : "email"}
-                required
-                maxLength={open ? 100 : undefined}
-                autoCapitalize="none"
-                autoComplete={open ? "username" : "email"}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="field mt-1.5 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16"
-              />
-
-              <div className="mt-3.5 flex items-center justify-between gap-3">
-                <label className="block text-t13 font-bold text-ink2" htmlFor="password">
-                  {t.authPassword}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setHienMk((v) => !v)}
-                  className="btn btn-ghost btn-sm -mr-2 font-normal text-ink2 max-sm:min-h-10"
-                >
-                  {hienMk ? <EyeSlash size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
-                  {hienMk ? t.authHidePw : t.authShowPw}
+            {mode === "sent" ? (
+              <div className="px-6 pb-6 pt-5" data-testid="register-sent">
+                <h1 className="flex items-center gap-2 text-t22 font-bold">
+                  <CheckCircle size={24} aria-hidden className="flex-none text-accent" />
+                  {t.authSentHead}
+                </h1>
+                <p className="num mt-3 break-all text-t16 font-bold">{email}</p>
+                <p className="mt-2 text-t14 leading-[1.7] text-ink2">{t.authSentBody}</p>
+                <p className="mt-1 text-t14 leading-[1.7] text-ink2">{t.authSentSetPw}</p>
+                <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.authSentSpam}</p>
+                <button type="button" disabled={wait > 0} onClick={() => void guiLai()} className="btn btn-lg mt-5 w-full">
+                  {wait > 0 ? t.authResendWait(wait) : t.authResend}
                 </button>
-              </div>
-              <input
-                id="password"
-                type={hienMk ? "text" : "password"}
-                required
-                minLength={open ? undefined : 8}
-                autoComplete={mode === "up" ? "new-password" : "current-password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="field mt-1 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16"
-              />
-              {mode === "up" && <p className="mt-1.5 text-t12 text-ink2">{t.authPasswordHint}</p>}
-              {open && <p className="mt-1.5 text-t12 text-ink2">{t.authOpenPwHint}</p>}
-
-              {err !== null && (
-                <p
-                  role="alert"
-                  aria-live="assertive"
-                  className="mt-4 flex items-start gap-2 rounded-[3px] bg-warnbg px-3 py-2 text-t13 leading-[1.6] text-warnink"
-                >
-                  <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
-                  <span className="min-w-0">{errText(err)}</span>
-                </p>
-              )}
-
-              <button type="submit" disabled={busy} className="btn btn-primary btn-lg mt-5 w-full">
-                {busy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
-                {busy ? t.authWorking : mode === "up" ? t.signUp : t.signIn}
-              </button>
-
-              {/* Đăng nhập mở thì tên mới tự tạo tài khoản — nút «đăng ký» chỉ thêm một lựa chọn gây bối rối */}
-              {!open && (
+                {resent && wait > 0 && (
+                  <p role="status" className="mt-2 text-t13 text-okink">
+                    {t.authResent}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => {
-                    setMode(mode === "up" ? "in" : "up");
-                    setErr(null);
+                    setMode("in");
+                    setPassword("");
                   }}
                   className="btn btn-ghost mt-2 w-full whitespace-normal py-1 font-normal text-accent hover:text-accenthover"
                 >
-                  {mode === "up" ? t.authToIn : t.authToUp}
+                  {t.backToLogin}
                 </button>
-              )}
+              </div>
+            ) : (
+              <div className="px-6 pb-6 pt-5">
+                <h1 className="sr-only">{mode === "up" ? t.authHeadUp : t.authHeadIn}</h1>
 
-              {!coDemo && <p className="mt-4 text-t12 leading-[1.7] text-ink3">{t.authPrivacy}</p>}
-            </form>
+                {authErrText && (
+                  <p role="alert" data-testid="auth-error" className={`${ERR_MARK} mb-4 mt-0`}>
+                    <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                    <span className="min-w-0">{authErrText}</span>
+                  </p>
+                )}
+
+                <ProviderButtons next={next} google={!!methods?.google} line={!!methods?.line} />
+
+                {(methods?.google || methods?.line) && (
+                  <div className="my-4 flex items-center gap-3 text-t13 text-ink3" role="separator">
+                    <span className="h-px flex-1 bg-rule2" />
+                    <span>{t.authOrEmail}</span>
+                    <span className="h-px flex-1 bg-rule2" />
+                  </div>
+                )}
+
+                {/* Hai thẻ: đăng nhập / đăng ký */}
+                {emailOn && (
+                <div role="tablist" className="mb-4 grid grid-cols-2 border-b border-rule">
+                  {(["in", "up"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="tab"
+                      aria-selected={mode === m}
+                      data-testid={m === "in" ? "tab-in" : "tab-up"}
+                      onClick={() => {
+                        setMode(m);
+                        setErr(null);
+                      }}
+                      className={`-mb-px min-h-[calc(42px*var(--fs))] cursor-pointer border-b-2 text-t15 font-bold transition-colors duration-100 ${
+                        mode === m ? "border-accent text-ink" : "border-transparent text-ink3 hover:text-ink"
+                      }`}
+                    >
+                      {m === "in" ? t.signIn : t.signUp}
+                    </button>
+                  ))}
+                </div>
+                )}
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void vao(email, password);
+                  }}
+                >
+                  <label className={LABEL} htmlFor="email">
+                    {t.authEmail}
+                  </label>
+                  <input
+                    id="email"
+                    type="text"
+                    inputMode="email"
+                    required
+                    autoCapitalize="none"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={INPUT}
+                  />
+
+                  {mode === "in" && (
+                  <>
+                  <div className="mt-3.5 flex items-center justify-between gap-3">
+                    <label className={LABEL} htmlFor="password">
+                      {t.authPassword}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setHienMk((v) => !v)}
+                      className="btn btn-ghost btn-sm -mr-2 font-normal text-ink2 max-sm:min-h-10"
+                    >
+                      {hienMk ? <EyeSlash size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
+                      {hienMk ? t.authHidePw : t.authShowPw}
+                    </button>
+                  </div>
+                  <input
+                    id="password"
+                    type={hienMk ? "text" : "password"}
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="field mt-1 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16"
+                  />
+                  </>
+                  )}
+                  {mode === "up" && <p className="mt-2 text-t13 leading-[1.7] text-ink2">{t.authSignupNote}</p>}
+
+                  {err !== null && (
+                    <div role="alert" aria-live="assertive" className={ERR_MARK}>
+                      <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                      <div className="min-w-0">
+                        <span>{errText(err, false)}</span>
+                        {errCode === "unverified" && (
+                          <button
+                            type="button"
+                            disabled={wait > 0}
+                            onClick={() => void guiLai()}
+                            className="btn btn-sm mt-2 block whitespace-normal"
+                          >
+                            {wait > 0 ? t.authResendWait(wait) : t.authResend}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={busy} className="btn btn-primary btn-lg mt-5 w-full">
+                    {busy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                    {busy ? t.authWorking : mode === "up" ? t.signUp : t.signIn}
+                  </button>
+                </form>
+
+                {mode === "in" && emailOn && (
+                  <a href="/forgot/" className="mt-3 inline-block text-t13 text-accent underline hover:text-accenthover">
+                    {t.authForgotLink}
+                  </a>
+                )}
+
+                <p className="mt-4 text-t12 text-ink3">
+                  <a href={PRIVACY_URL} className="underline hover:text-ink2">
+                    {t.authPrivacyLink}
+                  </a>
+                  {" · "}
+                  <a href={TERMS_URL} className="underline hover:text-ink2">
+                    {t.authTermsLink}
+                  </a>
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Lối vào nhanh bằng tài khoản dùng chung */}
+          {/* Cửa cho khách xem sản phẩm: khung riêng, nền giấy nhạt, viền mảnh. KHÔNG giấu. */}
+          {showTrial && (
+            <section data-testid="trial-box" className="mt-5 rounded-[3px] border border-rule bg-card2 px-6 pb-5 pt-4">
+              <h2 className="text-t16 font-bold">{t.trialHead}</h2>
+              <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.trialNote(trialLimit)}</p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void thu();
+                }}
+              >
+                <label className={`${LABEL} mt-3`} htmlFor="trial-id">
+                  {t.trialId}
+                </label>
+                <input
+                  id="trial-id"
+                  type="text"
+                  required
+                  maxLength={100}
+                  autoCapitalize="none"
+                  autoComplete="username"
+                  value={tId}
+                  onChange={(e) => setTId(e.target.value)}
+                  className={INPUT}
+                />
+                <label className={`${LABEL} mt-3`} htmlFor="trial-password">
+                  {t.authPassword}
+                </label>
+                <input
+                  id="trial-password"
+                  type={hienMk ? "text" : "password"}
+                  required
+                  autoComplete="current-password"
+                  value={tPw}
+                  onChange={(e) => setTPw(e.target.value)}
+                  className={INPUT}
+                />
+                {tErr !== null && (
+                  <p role="alert" aria-live="assertive" className={ERR_MARK}>
+                    <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                    <span className="min-w-0">{errText(tErr, true)}</span>
+                  </p>
+                )}
+                <button type="submit" data-testid="trial-submit" disabled={tBusy} className="btn btn-lg mt-4 w-full">
+                  {tBusy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                  {tBusy ? t.authWorking : t.trialGo}
+                </button>
+              </form>
+            </section>
+          )}
+
+          {/* Tài khoản dùng chung (nếu máy chủ còn khai báo) */}
           {coDemo && (
             <section className="mt-6">
               <h2 className="text-t15 font-bold">{t.demoHead}</h2>
@@ -342,8 +552,7 @@ export default function LoginPage() {
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-t14 font-bold">{tk.label}</span>
-                        {/* KHÔNG cắt cụt: có người muốn tự gõ tay chứ không bấm
-                            nút, mà mật khẩu bị "…" thì chịu. Cho xuống dòng. */}
+                        {/* KHÔNG cắt cụt: có người muốn tự gõ tay chứ không bấm nút, mà mật khẩu bị "…" thì chịu. */}
                         <span className="num block text-t12 break-all text-ink2">
                           {tk.email} · {tk.password}
                         </span>
@@ -356,14 +565,23 @@ export default function LoginPage() {
                 ))}
               </ul>
               <p className="mt-2.5 text-t12 leading-[1.7] text-ink2">{t.demoNote(demo!.scan_limit)}</p>
-              <p className="mt-2 text-t12 leading-[1.7] text-ink2">{t.authPrivacy}</p>
-              <a href={TRANG_GIOI_THIEU} className="mt-2.5 inline-block text-t13 text-accent underline hover:text-accenthover">
-                {t.authBackHome}
-              </a>
             </section>
           )}
+
+          <p className="mt-4 text-t12 leading-[1.7] text-ink3">{t.authPrivacy}</p>
+          <a href={TRANG_GIOI_THIEU} className="mt-2.5 inline-block text-t13 text-accent underline hover:text-accenthover">
+            {t.authBackHome}
+          </a>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }

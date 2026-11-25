@@ -45,6 +45,8 @@ const sealFont = Shippori_Antique({
 });
 
 export const metadata: Metadata = {
+  /* Ảnh chia sẻ (opengraph-image.png) cần đường dẫn tuyệt đối; LINE/Messenger đọc từ đây */
+  metadataBase: new URL("https://app.tsucho-scan.com"),
   title: "通帳スキャン｜通帳の写真・PDFをExcelに",
   description:
     "通帳の写真・PDFを読み取り、残高の連続チェックで確かめながらExcelに変換します。画像と表を並べて確認できます。",

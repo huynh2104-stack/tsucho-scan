@@ -160,7 +160,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_route_jobs_active(client, sach_jobs):
-    client.post("/api/auth/login", json={"email": "chu", "password": "1"})
+    client.post("/api/auth/trial", json={"id": "chu", "password": "1"})
     ws_id = client.post("/api/ws").json()["id"]
     url = f"/api/ws/{ws_id}/jobs/active"
     assert client.get(url).json() == {"job": None}
@@ -177,10 +177,10 @@ def test_route_jobs_active(client, sach_jobs):
 
 
 def test_route_jobs_active_nguoi_khac_404(client, sach_jobs):
-    client.post("/api/auth/login", json={"email": "chu", "password": "1"})
+    client.post("/api/auth/trial", json={"id": "chu", "password": "1"})
     ws_id = client.post("/api/ws").json()["id"]
     client.post("/api/auth/logout")
-    client.post("/api/auth/login", json={"email": "ke-la", "password": "1"})
+    client.post("/api/auth/trial", json={"id": "ke-la", "password": "1"})
     assert client.get(f"/api/ws/{ws_id}/jobs/active").status_code == 404
     client.post("/api/auth/logout")
     assert client.get(f"/api/ws/{ws_id}/jobs/active").status_code == 401

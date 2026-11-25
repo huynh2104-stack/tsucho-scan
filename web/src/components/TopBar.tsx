@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import LangMenu from "@/components/LangMenu";
 import SettingsDialog from "@/components/SettingsDialog";
+import TrialBar from "@/components/TrialBar";
 import { BrandMark } from "@/components/ui/Brand";
 import Menu, { type MenuEntry } from "@/components/ui/Menu";
 import { CaretDown, CaretRight, Gear, Monitor, Moon, Question, SignOut, Sun, User } from "@/components/ui/icons";
@@ -32,7 +33,7 @@ export default function TopBar() {
   const onCases = pathname.startsWith("/cases");
 
   // Trang đăng nhập có bố cục riêng, đã tự vẽ thương hiệu và nút đổi ngôn ngữ
-  if (pathname.startsWith("/login")) return null;
+  if (/^\/(login|verify|reset|forgot)/.test(pathname)) return null;
 
   const accountEntries: MenuEntry[] = user
     ? [
@@ -121,6 +122,7 @@ export default function TopBar() {
           )}
         </div>
       </header>
+      <TrialBar />
 
       {/* Nằm ngoài <header>: trong đó sẽ ăn theo màu của .on-ink và bị nhốt trong stacking context của thanh trên */}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}

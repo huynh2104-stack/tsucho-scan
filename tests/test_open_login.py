@@ -1,6 +1,6 @@
 """Bản demo cho khách Nhật (03/11/2026): đăng nhập mở, cài đặt theo máy cho tài khoản chung, sổ mẫu thật.
 
-- Đăng nhập mở: tên tuỳ ý + mật khẩu tuỳ ý; tên mới tự tạo tài khoản (role user), tên cũ vẫn phải đúng mật khẩu.
+- «お試し» (/api/auth/trial): ID tuỳ ý + mật khẩu tuỳ ý; ID mới tự tạo tài khoản trial (role user), ID cũ vẫn phải đúng mật khẩu.
 - Tài khoản dùng thử là tài khoản CHUNG ⇒ ngôn ngữ/giao diện không lưu lên máy chủ (người trước không áp lên người sau).
 - Sổ mẫu thật (samples/*.jpg): thêm vào chưa quét; quét đúng ảnh mẫu thì dùng kết quả đọc sẵn, KHÔNG gọi mô hình,
   không tính vào hạn mức dùng thử.
@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import extract
-from api import auth, demo, imgjobs, main, workspace
+from api import auth, demo, imgjobs, main, quota, workspace
 
 
 @pytest.fixture
@@ -44,29 +44,29 @@ def no_model(monkeypatch):
 # ── Đăng nhập mở ──────────────────────────────────────────────────────
 
 def test_ten_moi_tu_tao_tai_khoan_va_vao_luon(client):
-    r = client.post("/api/auth/login", json={"email": " Tanaka ", "password": "1"})
+    r = client.post("/api/auth/trial", json={"id": " Tanaka ", "password": "1"})
     assert r.status_code == 200, r.text
     assert r.json()["created"] is True
     assert r.json()["role"] == "user"                  # không bao giờ thành admin dù là người đầu tiên
     assert client.get("/api/auth/me").json()["email"] == "tanaka"
 
     client.post("/api/auth/logout")
-    r = client.post("/api/auth/login", json={"email": "TANAKA", "password": "1"})
+    r = client.post("/api/auth/trial", json={"id": "TANAKA", "password": "1"})
     assert r.status_code == 200 and "created" not in r.json()
 
 
 def test_ten_da_co_van_phai_dung_mat_khau(client):
-    assert client.post("/api/auth/login", json={"email": "sato", "password": "abc"}).status_code == 200
+    assert client.post("/api/auth/trial", json={"id": "sato", "password": "abc"}).status_code == 200
     client.post("/api/auth/logout")
-    r = client.post("/api/auth/login", json={"email": "sato", "password": "sai"})
+    r = client.post("/api/auth/trial", json={"id": "sato", "password": "sai"})
     assert r.status_code == 401
     assert client.get("/api/auth/me").status_code == 401
 
 
 def test_khong_nhan_ten_hoac_mat_khau_rong(client):
-    r = client.post("/api/auth/login", json={"email": "   ", "password": "1"})
+    r = client.post("/api/auth/trial", json={"id": "   ", "password": "1"})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_id"
-    r = client.post("/api/auth/login", json={"email": "abc", "password": ""})
+    r = client.post("/api/auth/trial", json={"id": "abc", "password": ""})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"
     assert auth.count_users() == 0
 
@@ -75,6 +75,10 @@ def test_trang_dang_nhap_biet_dang_mo(client, monkeypatch):
     assert client.get("/api/auth/demo").json()["open_login"] is True
     monkeypatch.setattr(auth, "OPEN_LOGIN", False)
     assert client.get("/api/auth/demo").json()["open_login"] is False
+    r = client.post("/api/auth/trial", json={"id": "nguoi-la", "password": "1"})
+    assert r.status_code == 404 and r.json()["detail"] == {"kind": "trial_off"} and auth.count_users() == 0
+    # /login KHÔNG còn tự tạo tài khoản (đây là nhánh đăng nhập mở cũ)
+    monkeypatch.setattr(auth, "OPEN_LOGIN", True)
     r = client.post("/api/auth/login", json={"email": "nguoi-la", "password": "1"})
     assert r.status_code == 401 and auth.count_users() == 0
 
@@ -95,7 +99,7 @@ def test_tai_khoan_dung_thu_khong_luu_ngon_ngu_giao_dien(client, monkeypatch):
 
 
 def test_tai_khoan_rieng_van_luu_ngon_ngu(client):
-    client.post("/api/auth/login", json={"email": "rieng", "password": "1"})
+    client.post("/api/auth/trial", json={"id": "rieng", "password": "1"})
     client.put("/api/me/prefs", json={"lang": "vi", "theme": "dark"})
     got = client.get("/api/me/prefs").json()
     assert got["lang"] == "vi" and got["theme"] == "dark"
@@ -150,4 +154,4 @@ def test_them_so_mau_roi_quet_khong_tinh_han_muc(client, monkeypatch, no_model):
     assert rows[body["added"][1]] == 24
     assert rows[body["added"][0]] >= 24
     user = auth.get_by_email("demo@x.test")[0]
-    assert demo.da_quet_hom_nay(user.id) == 0                  # không trừ lượt nào
+    assert quota.used(user.id) == 0                  # không trừ lượt nào

@@ -15,17 +15,13 @@ Không đặt biến này thì mọi thứ ở đây im lặng: không tạo tà
 đăng nhập không hiện khối dùng thử. Nhờ vậy máy phát triển và máy thật tự do
 khác nhau, và mật khẩu dùng thử không nằm trong kho mã nguồn công khai.
 
-HẠN MỨC QUÉT. Tài khoản dùng thử là tài khoản CÔNG KHAI: ai cũng đăng nhập
-được. Mỗi mặt sổ quét thật là một lượt gọi mô hình, mà gói miễn phí chỉ có
-20 lượt/ngày — một người tò mò bấm quét cả tập là hết sạch phần của người
-khác. Nên mỗi tài khoản dùng thử chỉ được quét `TSUCHO_DEMO_SCAN_LIMIT` mặt
-mỗi ngày (mặc định 6). Sổ MẪU không tính: nó không gọi mô hình.
+HẠN MỨC QUÉT của tài khoản dùng thử (`TSUCHO_DEMO_SCAN_LIMIT`, mặc định 6) nay do `api/quota.py` lo
+chung với mọi loại tài khoản; ở đây chỉ còn danh sách và việc tạo tài khoản.
 """
 
 from __future__ import annotations
 
 import os
-import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,8 +29,6 @@ from dataclasses import dataclass
 from . import auth
 
 ENV_ACCOUNTS = "TSUCHO_DEMO_ACCOUNTS"
-ENV_LIMIT = "TSUCHO_DEMO_SCAN_LIMIT"
-MAC_DINH_HAN_MUC = 6
 
 
 @dataclass(frozen=True)
@@ -63,13 +57,6 @@ def danh_sach() -> list[TaiKhoan]:
     return ra
 
 
-def han_muc() -> int:
-    try:
-        return max(0, int(os.environ.get(ENV_LIMIT, MAC_DINH_HAN_MUC)))
-    except ValueError:
-        return MAC_DINH_HAN_MUC
-
-
 def la_demo(email: str) -> bool:
     e = auth.normalize_email(email)
     return any(t.email == e for t in danh_sach())
@@ -78,87 +65,25 @@ def la_demo(email: str) -> bool:
 def tao_neu_thieu() -> int:
     """Tạo các tài khoản dùng thử còn thiếu. Gọi lúc máy chủ khởi động.
 
-    KHÔNG dùng `auth.create_user`: hàm đó phong người đăng ký ĐẦU TIÊN làm
-    admin. Máy chủ mới tinh mà tài khoản dùng thử chạy trước thì một tài khoản
-    công khai sẽ thành admin — luôn ghi thẳng role 'user'.
+    Luôn ghi thẳng role 'user', kind 'demo', đã xác minh (tài khoản công khai tuyệt đối không là admin).
 
-    Tài khoản đã có thì để nguyên, không đặt lại mật khẩu: người thật có thể
-    đang dùng email đó.
+    Tài khoản đã có thì để nguyên mật khẩu (người thật có thể đang dùng email đó), chỉ bảo đảm nó mang
+    kind 'demo' để hạn mức đúng loại.
     """
     tao = 0
     for t in danh_sach():
         if auth.get_by_email(t.email):
+            with auth._db() as conn:
+                conn.execute(
+                    "UPDATE users SET kind = 'demo', email_verified = 1 WHERE email = ? AND kind = 'member'",
+                    (t.email,),
+                )
             continue
         with auth._db() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO users (id, email, password_hash, role, created_at)"
-                " VALUES (?, ?, ?, 'user', ?)",
+                "INSERT OR IGNORE INTO users (id, email, password_hash, role, created_at, kind, email_verified)"
+                " VALUES (?, ?, ?, 'user', ?, 'demo', 1)",
                 (uuid.uuid4().hex[:12], t.email, auth.hash_password(t.password), time.time()),
             )
         tao += 1
     return tao
-
-
-def _hom_nay() -> str:
-    return time.strftime("%Y-%m-%d", time.localtime())
-
-
-def da_quet_hom_nay(user_id: str) -> int:
-    with auth._db() as conn:
-        row = conn.execute(
-            "SELECT faces FROM demo_usage WHERE user_id = ? AND day = ?",
-            (user_id, _hom_nay()),
-        ).fetchone()
-    return int(row["faces"]) if row else 0
-
-
-def ghi_nhan(user_id: str, so_mat: int) -> None:
-    with auth._db() as conn:
-        conn.execute(
-            "INSERT INTO demo_usage (user_id, day, faces) VALUES (?, ?, ?)"
-            " ON CONFLICT(user_id, day) DO UPDATE SET faces = faces + excluded.faces",
-            (user_id, _hom_nay(), so_mat),
-        )
-
-
-_khoa = threading.Lock()
-
-
-def giu_cho(user: auth.User, so_trang: int) -> bool:
-    """Giữ chỗ `so_trang` lượt NGUYÊN TỬ: đủ hạn mức thì cộng luôn và trả True, không đủ thì
-    không đổi gì, trả False.
-
-    Hai hồ sơ có khoá riêng nên "kiểm rồi ghi" tách đôi sẽ cho hai lần quét cùng thấy còn đủ
-    lượt (vượt hạn mức). Gộp thành MỘT câu UPDATE có điều kiện (kèm khoá mô-đun cho chắc).
-    """
-    if so_trang <= 0:
-        return True
-    with _khoa, auth._db() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO demo_usage (user_id, day, faces) VALUES (?, ?, 0)",
-            (user.id, _hom_nay()),
-        )
-        cur = conn.execute(
-            "UPDATE demo_usage SET faces = faces + ? WHERE user_id = ? AND day = ?"
-            " AND faces + ? <= ?",
-            (so_trang, user.id, _hom_nay(), so_trang, han_muc()),
-        )
-        return cur.rowcount == 1
-
-
-def tra_lai(user_id: str, so_trang: int) -> None:
-    """Hoàn lượt đã giữ khi lần quét hỏng trước khi gọi mô hình. Không cho âm."""
-    if so_trang <= 0:
-        return
-    with _khoa, auth._db() as conn:
-        conn.execute(
-            "UPDATE demo_usage SET faces = MAX(0, faces - ?) WHERE user_id = ? AND day = ?",
-            (so_trang, user_id, _hom_nay()),
-        )
-
-
-def con_lai(user: auth.User) -> int | None:
-    """Số mặt còn được quét hôm nay. `None` = không phải tài khoản dùng thử."""
-    if not la_demo(user.email):
-        return None
-    return max(0, han_muc() - da_quet_hom_nay(user.id))

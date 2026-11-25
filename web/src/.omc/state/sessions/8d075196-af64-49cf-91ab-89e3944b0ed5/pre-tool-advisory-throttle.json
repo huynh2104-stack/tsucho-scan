@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "entries": {
+    "445ed27a3872b681d98190bae61ccb84954e1bc4e140df5370be958dee776b3a": {
+      "last_emitted_at_ms": 1794397789959,
+      "message": "Verify changes work after editing. Test functionality before marking complete."
+    },
+    "79a93d4a2f8f50b95f852280616242fee1855dc99a3c75211917f55e72e95fae": {
+      "last_emitted_at_ms": 1794397783542,
+      "message": "Use parallel execution for independent tasks. Use run_in_background for long operations (npm install, builds, tests)."
+    },
+    "ffc20b64e2f51376bf6e41d77ce7f84077d3d3c5cc7e4a3c96630bed87d8ec96": {
+      "last_emitted_at_ms": 1794397779660,
+      "message": "Spawning agent: oh-my-claudecode:code-reviewer (sonnet) | Task: Kiểm duyệt phần giao diện"
+    }
+  },
+  "updated_at": "2026-11-11T11:49:49.959Z"
+}

@@ -231,14 +231,12 @@ def make_rotated_pdf(path: Path) -> list[int]:
 # ── các bước ──────────────────────────────────────────────────────────
 
 def step_register(pg, base: str, ctx: dict) -> str:
-    """Đăng nhập mở (bản đang phát triển, mặc định bật): có khung báo «đang phát triển», không có nút đăng ký riêng —
-    gõ tên mới là tự tạo tài khoản rồi vào luôn."""
+    """Ô «お試し（登録不要）» (khung riêng dưới form đăng nhập): gõ ID mới là tự tạo tài khoản thử rồi vào luôn."""
     pg.goto(f"{base}/login/")
-    pg.locator("[data-testid=dev-notice]").wait_for(timeout=10000)
-    assert pg.get_by_role("button", name=VI["toSignUp"]).count() == 0, "đăng nhập mở mà vẫn hiện nút đăng ký"
-    pg.fill("#email", EMAIL)
-    pg.fill("#password", PASSWORD)
-    pg.click("button[type=submit]")
+    pg.locator("[data-testid=trial-box]").wait_for(timeout=10000)
+    pg.fill("#trial-id", EMAIL)
+    pg.fill("#trial-password", PASSWORD)
+    pg.click("[data-testid=trial-submit]")
     pg.locator('[data-tour="drop"]').wait_for(timeout=15000)      # bàn làm việc đã hiện
     if ctx.get("font_scale"):                                     # --font-scale: chạy cả kịch bản ở cỡ chữ lớn
         assert pg.request.put(f"{base}/api/me/prefs", data={"fontScale": ctx["font_scale"]}).ok
@@ -1391,10 +1389,10 @@ def step_settings(pg, base: str, ctx: dict) -> str:
         pg2 = other.new_page()
         pg2.set_default_timeout(10000)
         pg2.goto(f"{base}/login/")
-        pg2.locator("[data-testid=dev-notice]").wait_for()    # gõ trước khi trang sẵn sàng thì mất chữ
-        pg2.fill("#email", EMAIL)
-        pg2.fill("#password", PASSWORD)
-        pg2.click("button[type=submit]")
+        pg2.locator("[data-testid=trial-box]").wait_for()    # gõ trước khi trang sẵn sàng thì mất chữ
+        pg2.fill("#trial-id", EMAIL)
+        pg2.fill("#trial-password", PASSWORD)
+        pg2.click("[data-testid=trial-submit]")
         pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
         wait_until(lambda: pg2.evaluate("document.documentElement.lang") == "ja", "máy lạ nhận ngôn ngữ đã lưu (ja)")
         wait_until(lambda: pg2.evaluate("document.documentElement.dataset.theme") == "dark", "máy lạ nhận chủ đề đã lưu (tối)")
@@ -1967,12 +1965,12 @@ def step_font_scale(pg, base: str, ctx: dict) -> str:
             pg2 = other.new_page()
             pg2.set_default_timeout(10000)
             pg2.goto(f"{base}/login/")
-            pg2.locator("[data-testid=dev-notice]").wait_for()
+            pg2.locator("[data-testid=trial-box]").wait_for()
             px = pg2.evaluate("parseFloat(getComputedStyle(document.querySelector('button[type=submit]')).fontSize)")
             assert abs(px - 15) < 0.05, f"máy lạ chưa chọn gì: chữ phải đúng cỡ chuẩn (15px) nhờ --fs mặc định trong CSS, đang là {px}"
-            pg2.fill("#email", EMAIL)
-            pg2.fill("#password", PASSWORD)
-            pg2.click("button[type=submit]")
+            pg2.fill("#trial-id", EMAIL)
+            pg2.fill("#trial-password", PASSWORD)
+            pg2.click("[data-testid=trial-submit]")
             pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
             wait_until(lambda: pg2.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()") == "1.3",
                        "máy lạ nhận cỡ chữ đã lưu")

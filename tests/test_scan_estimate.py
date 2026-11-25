@@ -16,7 +16,7 @@ from PIL import Image
 
 import core
 import extract
-from api import auth, demo, imgjobs, main, workspace
+from api import auth, demo, imgjobs, main, quota, workspace
 
 MODEL = "gemini-3.1-flash-lite"
 MAT_KHAU = "matkhau-demo"
@@ -81,8 +81,13 @@ def _them_mat(ws_id: str, sid: str, data: bytes, ext: str = ".jpg") -> None:
 
 
 def _ho_so(client, email="thuong", demo_acc=False):
-    """Đăng nhập, tạo hồ sơ có 1 mặt MẪU (m) + 1 mặt thường chưa quét (n)."""
-    client.post("/api/auth/login", json={"email": email, "password": MAT_KHAU})
+    """Đăng nhập, tạo hồ sơ có 1 mặt MẪU (m) + 1 mặt thường chưa quét (n).
+
+    Tài khoản demo vào bằng /login; còn lại là «お試し» (trial) qua /trial."""
+    if email == "demo@x.test":
+        client.post("/api/auth/login", json={"email": email, "password": MAT_KHAU})
+    else:
+        client.post("/api/auth/trial", json={"id": email, "password": MAT_KHAU})
     ws_id = client.post("/api/ws").json()["id"]
     _them_mat(ws_id, "m", (extract.SAMPLE_DIR / "yucho.jpg").read_bytes())
     _them_mat(ws_id, "n", _jpeg(10))
@@ -183,7 +188,7 @@ def test_uoc_tinh_mot_mau_mot_thuong(client, model):
     body = r.json()
     assert (body["pages"], body["free"], body["new"]) == (2, 1, 1)
     assert body["est_usd"] == 0.004 and body["model"] == MODEL
-    assert body["demo_left"] is None and body["demo_limit"] is None     # tài khoản thường
+    assert (body["demo_left"], body["demo_limit"]) == (5, 5)             # tài khoản «お試し»: 5 mặt/ngày
     assert body["bad"] == 0
     assert body["per_sheet"] == [
         {"id": "m", "pages": 1, "free": 1, "bad": 0}, {"id": "n", "pages": 1, "free": 0, "bad": 0},
@@ -236,7 +241,7 @@ def test_uoc_tinh_bo_id_la_va_rong_thi_400(client, model):
 def test_uoc_tinh_ho_so_nguoi_khac_thi_404(client, model):
     ws_id = _ho_so(client, "chu")
     client.post("/api/auth/logout")
-    client.post("/api/auth/login", json={"email": "ke-la", "password": MAT_KHAU})
+    client.post("/api/auth/trial", json={"id": "ke-la", "password": MAT_KHAU})
     assert _uoc(client, ws_id, ["n"]).status_code == 404
     client.post("/api/auth/logout")
     assert _uoc(client, ws_id, ["n"]).status_code == 401
@@ -253,7 +258,7 @@ def test_hai_duong_scan_toi_dung_ham():
 # ── Hạn mức dùng thử công bằng ────────────────────────────────────────
 
 def _da_quet(email="demo@x.test") -> int:
-    return demo.da_quet_hom_nay(auth.get_by_email(email)[0].id)
+    return quota.used(auth.get_by_email(email)[0].id)
 
 
 def test_dung_thu_quet_mat_da_co_cache_khong_tru_luot(client, model, monkeypatch):
@@ -284,7 +289,7 @@ def test_dung_thu_het_luot_thi_429_nhung_mat_co_san_van_quet(client, model, monk
     _them_mat(ws_id, "p", _jpeg(99))
     r = _quet(client, ws_id, ["p"])
     assert r.status_code == 429
-    assert r.json()["detail"] == {"kind": "demo_quota", "limit": 1, "left": 0}
+    assert r.json()["detail"] == {"kind": "demo_quota", "limit": 1, "left": 0, "scope": "user"}
     assert _quet(client, ws_id, ["m", "n"]).status_code == 200      # mẫu + đã cache: không cần lượt
     assert _da_quet() == 1
     # bỏ cache cũng cần lượt → bị chặn
@@ -314,7 +319,7 @@ def test_pdf_nhieu_trang_tinh_han_muc_theo_trang(client, model, monkeypatch):
     body = _uoc(client, ws_id, ["pdf"]).json()
     assert (body["pages"], body["new"], body["demo_left"]) == (3, 3, 2)
     r = client.post(f"/api/ws/{ws_id}/scan", json={"sheet_ids": ["pdf"]})
-    assert r.status_code == 429 and r.json()["detail"] == {"kind": "demo_quota", "limit": 2, "left": 2}
+    assert r.status_code == 429 and r.json()["detail"] == {"kind": "demo_quota", "limit": 2, "left": 2, "scope": "user"}
     assert _da_quet() == 0
 
 
@@ -381,11 +386,12 @@ def test_loi_sau_khi_da_vao_trang_dau_thi_khong_hoan(client, model, monkeypatch)
 def test_tra_lai_khong_am(client, monkeypatch):
     _dung_thu(client, monkeypatch, "6")
     user = auth.get_by_email("demo@x.test")[0]
-    demo.tra_lai(user.id, 5)
-    assert demo.da_quet_hom_nay(user.id) == 0
-    assert demo.giu_cho(user, 4) is True
-    demo.tra_lai(user.id, 9)
-    assert demo.da_quet_hom_nay(user.id) == 0
+    keys = quota.key_names(user, "1.1.1.1")
+    quota.refund(keys, 5)
+    assert _da_quet() == 0
+    assert quota.reserve(user, "1.1.1.1", 4) is True
+    quota.refund(keys, 9)
+    assert _da_quet() == 0
 
 
 def test_hai_ho_so_quet_cung_luc_khong_vuot_han_muc(client, model, monkeypatch):

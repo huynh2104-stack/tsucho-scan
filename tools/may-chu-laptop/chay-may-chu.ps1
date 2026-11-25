@@ -59,6 +59,9 @@ if (-not $env:TSUCHO_COOKIE_SECURE) { $env:TSUCHO_COOKIE_SECURE = "1" }
 # Người ngoài vào qua Cloudflare Tunnel: lấy IP thật từ CF-Connecting-IP để khoá đăng nhập theo từng người
 # (app chỉ nghe ở 127.0.0.1 nên không ai gọi thẳng vào giả được header này; thiếu header thì app tự bỏ qua)
 if (-not $env:TSUCHO_TRUST_PROXY) { $env:TSUCHO_TRUST_PROXY = "cloudflare" }
+# Địa chỉ công khai: link trong thư xác minh/đặt lại mật khẩu, và app chỉ nhận thao tác gửi từ đúng địa chỉ này
+# (thiếu thì mọi nút bấm từ https://app.tsucho-scan.com bị chặn 403)
+if (-not $env:TSUCHO_PUBLIC_URL) { $env:TSUCHO_PUBLIC_URL = "https://app.tsucho-scan.com" }
 
 $health = "http://127.0.0.1:$Port/api/health"
 function Song {
@@ -76,7 +79,7 @@ while ($true) {
     # Chỉ nghe ở 127.0.0.1: không ai trong mạng Wi-Fi gõ thẳng vào được, chỉ đường hầm Cloudflare mới tới.
     # MỘT tiến trình (không --workers): danh sách lần quét đang chạy nằm trong bộ nhớ của tiến trình.
     $proc = Start-Process -FilePath $Python -WorkingDirectory $AppDir -WindowStyle Hidden -PassThru `
-        -ArgumentList @("-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$Port") `
+        -ArgumentList @("-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$Port", "--no-access-log") `
         -RedirectStandardOutput (Join-Path $LogDir "may-chu.log") `
         -RedirectStandardError  (Join-Path $LogDir "may-chu-loi.log")
     $null = $proc.Handle      # giữ tay cầm tiến trình, không thì PowerShell 5.1 trả mã thoát rỗng

@@ -105,7 +105,7 @@ def measure(mode: str, server_python: str, port: int) -> dict:
         out["rss_khoi_dong_mb"] = round(rss_mb(p))
 
         c = httpx.Client(base_url=base, timeout=180)
-        assert c.post("/api/auth/register", json={"email": "ram@test.local", "password": "matkhau123"}).status_code == 200
+        assert c.post("/api/auth/trial", json={"id": "ram@test.local", "password": "matkhau123"}).status_code == 200
         ws = c.post("/api/ws").json()["id"]
         data = c.post(f"/api/ws/{ws}/sample").json()
         sheets = data["sheets"]

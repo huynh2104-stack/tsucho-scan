@@ -21,7 +21,7 @@ from typing import Any
 import review
 from core import ExtractError, scan
 
-from . import demo, results
+from . import quota, results
 
 # Chờ sự kiện mới tối đa bấy nhiêu giây thì ping giữ kết nối (hằng số để test thu nhỏ)
 PING_S = 25
@@ -46,9 +46,10 @@ class Job:
     _cond: threading.Condition = field(
         default_factory=threading.Condition, repr=False, compare=False)
     _closed: bool = False
-    # Lượt dùng thử đã giữ cho lần quét này (xem `start_scan`); lỗi sớm thì hoàn lại
+    # Hạn mức đã giữ cho lần quét này (xem `start_scan`); lỗi sớm thì hoàn lại đúng các khoá đã cộng
     reserved: int = 0
-    reserved_for: str | None = None
+    reserved_for: list[str] | None = None     # danh sách khoá `quota.key_names`
+    reserved_day: str | None = None
     _result_obj: Any = None              # ScanResult, giữ để xuất file
     # Việc nối đuôi sau khi quét xong thành công (ví dụ đọc trước chữ cho khung đỏ). Truyền callable vào để jobs.py
     # khỏi import workspace/rowanchors.
@@ -182,7 +183,7 @@ def _run(job: Job, use_cache: bool) -> None:
 
 
 def _refund_if_early(job: Job) -> None:
-    """Lỗi trước khi gọi mô hình lần nào thì hoàn lượt dùng thử đã giữ.
+    """Lỗi trước khi gọi mô hình lần nào thì hoàn lượt (hạn mức) đã giữ.
 
     Sự kiện "page" phát NGAY TRƯỚC lời gọi mô hình của trang đó (extract_transactions),
     nên chưa có "page" nào = chưa gọi gì (thiếu API key, file hỏng...). Có rồi thì không
@@ -194,7 +195,7 @@ def _refund_if_early(job: Job) -> None:
         return
     n, job.reserved = job.reserved, 0
     try:
-        demo.tra_lai(job.reserved_for, n)
+        quota.refund(job.reserved_for, n, job.reserved_day)
     except Exception:                                    # hoàn lượt hỏng không được che lỗi gốc
         traceback.print_exc()
 

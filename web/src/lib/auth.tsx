@@ -28,7 +28,12 @@ type Ctx = {
   user: Me | null;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<number>;
+  /** Không đăng nhập: máy chủ gửi thư xác minh. */
+  register: (email: string, lang: string) => Promise<void>;
+  trial: (id: string, password: string) => Promise<void>;
+  /** Dùng cho /verify và /reset: thành công là đã đăng nhập. */
+  verify: (token: string, password: string) => Promise<void>;
+  reset: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -36,7 +41,10 @@ const AuthCtx = createContext<Ctx>({
   user: null,
   ready: false,
   login: async () => {},
-  register: async () => 0,
+  register: async () => {},
+  trial: async () => {},
+  verify: async () => {},
+  reset: async () => {},
   logout: async () => {},
 });
 
@@ -61,10 +69,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await api.login(email, password));
   }, []);
 
-  const register = useCallback(async (email: string, password: string) => {
-    const me = await api.register(email, password);
-    setUser(me);
-    return me.claimed_workspaces;
+  const register = useCallback(async (email: string, lang: string) => {
+    await api.registerEmail(email, lang);
+  }, []);
+
+  const trial = useCallback(async (id: string, password: string) => {
+    setUser(await api.trialLogin(id, password));
+  }, []);
+
+  const verify = useCallback(async (token: string, password: string) => {
+    setUser(await api.verifyEmail(token, password));
+  }, []);
+
+  const reset = useCallback(async (token: string, password: string) => {
+    setUser(await api.resetPassword(token, password));
   }, []);
 
   const logout = useCallback(async () => {
@@ -77,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   return (
-    <AuthCtx.Provider value={{ user, ready, login, register, logout }}>
+    <AuthCtx.Provider value={{ user, ready, login, register, trial, verify, reset, logout }}>
       {children}
     </AuthCtx.Provider>
   );

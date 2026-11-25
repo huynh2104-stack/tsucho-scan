@@ -126,7 +126,7 @@ import { MagicWand, Scan, Trash, UploadSimple, X, CircleNotch } from "@/componen
 type ErrInfo = {
   code?: string;
   sheet?: string;
-  info?: { size_mb?: number; limit_mb?: number; limit?: number };
+  info?: { size_mb?: number; limit_mb?: number; limit?: number; scope?: string };
   text: string;
 } | null;
 
@@ -175,6 +175,8 @@ export default function Workbench() {
     }
     // Tài khoản dùng thử hết lượt quét trong ngày — nói rõ vì sao và lối ra,
     // đừng để người xem tưởng ứng dụng hỏng.
+    // Hết phần chung của tài khoản «お試し» (theo IP hoặc tổng cả ngày): mời đăng ký thay vì báo «còn N lượt».
+    if (e.code === "demo_quota" && (e.info?.scope === "ip" || e.info?.scope === "all")) return t.scanQuotaShared;
     if (e.code === "demo_quota") return t.scanDemoQuota(e.info?.limit ?? 0);
     return e.text;
   }, [t]);
