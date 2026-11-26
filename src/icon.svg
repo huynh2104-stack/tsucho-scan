@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="通帳スキャン">
+  <!-- Con dấu 朱 + ba dòng kẻ sổ, dòng giữa đậm = đúng việc app làm: chỉ ra một dòng trên trang giấy.
+       Bộ PNG/ICO (favicon.ico, apple-icon.png, public/icon-*.png) dựng từ đúng hình này. -->
+  <rect x="1.5" y="1.5" width="29" height="29" rx="5" fill="#bd392c" />
+  <g fill="#ffffff">
+    <rect x="7" y="8" width="18" height="2" rx="1" opacity="0.45" />
+    <rect x="7" y="14" width="18" height="4" rx="1.4" />
+    <rect x="7" y="22" width="18" height="2" rx="1" opacity="0.45" />
+  </g>
+</svg>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja" data-site="app" data-target="https://app.tsucho-scan.com">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>移転のお知らせ｜通帳スキャン</title>
+<meta name="description" content="通帳スキャンのアプリは 2026年11月25日より app.tsucho-scan.com に移転しました。">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1f3478">
+<link rel="canonical" href="https://app.tsucho-scan.com/">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="移転のお知らせ｜通帳スキャン">
+<meta property="og:description" content="通帳スキャンのアプリは 2026年11月25日より app.tsucho-scan.com に移転しました。">
+<meta property="og:url" content="https://app.tsucho-scan.com/">
+<link rel="stylesheet" href="/redirect.css">
+<noscript><meta http-equiv="refresh" content="10;url=https://app.tsucho-scan.com/"></noscript>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="https://app.tsucho-scan.com/" data-go>
+      <img src="/icon.svg" width="28" height="28" alt="">
+      <span data-t="brand">通帳スキャン</span>
+    </a>
+    <nav class="langs" aria-label="Language">
+      <button type="button" data-lang="ja" aria-pressed="true">日本語</button>
+      <button type="button" data-lang="en" aria-pressed="false">English</button>
+      <button type="button" data-lang="vi" aria-pressed="false">Tiếng Việt</button>
+    </nav>
+  </header>
+
+  <main class="slip" aria-labelledby="h">
+    <div class="band">
+      <span data-t="notice">移転のお知らせ</span>
+      <time datetime="2026-11-25">2026.11.25</time>
+    </div>
+
+    <div class="body">
+      <span class="seal" aria-hidden="true">移転</span>
+      <h1 id="h" data-t="title">通帳スキャンは新しいアドレスに移りました</h1>
+      <p class="lead" data-t="lead">2026年11月25日より、通帳スキャンのアプリは下記の新しいアドレスでご提供しています。新しいアドレスでは、あらためてログインしてください。</p>
+
+      <table class="ledger">
+        <thead>
+          <tr><th scope="col" data-t="colKind">区分</th><th scope="col" data-t="colAddr">アドレス</th></tr>
+        </thead>
+        <tbody>
+          <tr class="old">
+            <th scope="row" data-t="old">旧</th>
+            <td><span class="url" id="old-url">tsucho-scan.onrender.com</span></td>
+          </tr>
+          <tr class="new">
+            <th scope="row" data-t="new">新</th>
+            <td><a class="url" id="new-url" href="https://app.tsucho-scan.com/" data-go>app.tsucho-scan.com</a></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="count" id="count" hidden>
+        <div class="bar" aria-hidden="true"><span id="bar"></span></div>
+        <p class="status">
+          <span class="num" id="num" aria-hidden="true">10</span>
+          <span id="status-text" data-t="counting">秒後に新しいアドレスへ自動で移動します</span>
+        </p>
+        <p class="sr-only" role="status" id="sr"></p>
+      </div>
+
+      <div class="actions">
+        <a class="btn primary" href="https://app.tsucho-scan.com/" data-go>
+          <span data-t="go">新しいアドレスへ移動</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <button type="button" class="btn ghost" id="pause" hidden data-t="pause">自動移動を止める</button>
+      </div>
+    </div>
+  </main>
+
+  <p class="note" data-t="note">お手数ですが、ブックマーク（お気に入り）を新しいアドレスに変更してください。</p>
+
+  <footer class="foot">
+    <span data-t="foot">移転日：2026年11月25日</span>
+    <span aria-hidden="true">·</span>
+    <a href="https://tsucho-scan.com/">tsucho-scan.com</a>
+  </footer>
+</div>
+<script src="/redirect.js"></script>
+</body>
+</html>
