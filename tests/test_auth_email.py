@@ -47,7 +47,7 @@ def dang_ky(client, email="moi@vd.com", lang="ja"):
     return r
 
 
-def xac_minh(client, email="moi@vd.com", password="matkhau123"):
+def xac_minh(client, email="moi@vd.com", password="Matkhau123"):
     r = client.post("/api/auth/verify", json={"token": token_in(mails("verify", email)[-1]), "password": password})
     assert r.status_code == 200, r.text
     return r.json()
@@ -73,14 +73,14 @@ def test_dang_ky_khong_nhan_mat_khau_gui_thu_xac_minh_va_khong_mo_phien(client):
 def test_chua_xac_minh_chua_co_mat_khau_nao_dung_nen_login_401(client):
     dang_ky(client)
     assert auth.get_by_email("moi@vd.com")[1] == "", "mật khẩu chỉ nằm trong token cho tới khi xác minh"
-    r = client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "matkhau123"})
+    r = client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "Matkhau123"})
     assert r.status_code == 401 and client.get("/api/auth/me").status_code == 401
 
 
 def test_tai_khoan_cu_co_hash_ma_chua_xac_minh_thi_403_chi_khi_dung_mat_khau(client):
-    u = auth.create_user("cu@vd.com", "matkhau123", verified=False)
-    auth.set_password(u.id, "matkhau123")
-    r = client.post("/api/auth/login", json={"email": "cu@vd.com", "password": "matkhau123"})
+    u = auth.create_user("cu@vd.com", "Matkhau123", verified=False)
+    auth.set_password(u.id, "Matkhau123")
+    r = client.post("/api/auth/login", json={"email": "cu@vd.com", "password": "Matkhau123"})
     assert r.status_code == 403 and r.json()["detail"] == {"kind": "unverified"}
     assert client.post("/api/auth/login", json={"email": "cu@vd.com", "password": "sai-be-bet"}).status_code == 401
 
@@ -88,17 +88,17 @@ def test_tai_khoan_cu_co_hash_ma_chua_xac_minh_thi_403_chi_khi_dung_mat_khau(cli
 def test_xac_minh_dat_mat_khau_dang_nhap_luon_va_token_chi_dung_mot_lan(client):
     dang_ky(client)
     token = token_in(mails("verify")[-1])
-    r = client.post("/api/auth/verify", json={"token": token, "password": "mat-khau-tu-dat-1"})
+    r = client.post("/api/auth/verify", json={"token": token, "password": "Mat-khau-tu-dat-1"})
     assert r.status_code == 200
     j = r.json()
     assert (j["email"], j["kind"], j["email_verified"], j["role"]) == ("moi@vd.com", "member", True, "user")
     assert client.get("/api/auth/me").json()["email"] == "moi@vd.com"
 
     client.post("/api/auth/logout")
-    r = client.post("/api/auth/verify", json={"token": token, "password": "mat-khau-khac-99"})     # dùng lại
+    r = client.post("/api/auth/verify", json={"token": token, "password": "Mat-khau-khac-99"})     # dùng lại
     assert r.status_code == 400 and r.json()["detail"] == {"kind": "bad_token"}
-    assert client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "mat-khau-tu-dat-1"}).status_code == 200
-    assert client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "mat-khau-khac-99"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "Mat-khau-tu-dat-1"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "moi@vd.com", "password": "Mat-khau-khac-99"}).status_code == 401
 
 
 def test_verify_mat_khau_yeu_hoac_qua_dai_bi_tu_choi_truoc_khi_dot_token(client):
@@ -109,7 +109,7 @@ def test_verify_mat_khau_yeu_hoac_qua_dai_bi_tu_choi_truoc_khi_dot_token(client)
     r = client.post("/api/auth/verify", json={"token": tk, "password": "x" * 129})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "password_too_long"
     assert client.post("/api/auth/verify", json={"token": tk}).status_code == 400          # thiếu mật khẩu
-    assert client.post("/api/auth/verify", json={"token": tk, "password": "x" * 128}).status_code == 200   # token còn nguyên
+    assert client.post("/api/auth/verify", json={"token": tk, "password": "Aa1" + "x" * 125}).status_code == 200   # token còn nguyên
 
 
 def test_token_xac_minh_het_han_48_gio(client):
@@ -119,16 +119,16 @@ def test_token_xac_minh_het_han_48_gio(client):
         exp, now = conn.execute("SELECT expires_at FROM email_tokens").fetchone()["expires_at"], time.time()
         assert 47.9 * 3600 < exp - now <= 48 * 3600
         conn.execute("UPDATE email_tokens SET expires_at = ?", (now - 1,))
-    r = client.post("/api/auth/verify", json={"token": token, "password": "matkhau123"})
+    r = client.post("/api/auth/verify", json={"token": token, "password": "Matkhau123"})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_token"
     assert auth.get_by_email("moi@vd.com")[0].email_verified is False
 
 
 def test_token_la_hoac_rong_thi_400(client):
     for t in ("", "khong-co-that", None):
-        r = client.post("/api/auth/verify", json={"token": t, "password": "matkhau123"})
+        r = client.post("/api/auth/verify", json={"token": t, "password": "Matkhau123"})
         assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_token"
-    assert client.post("/api/auth/verify", json={"password": "matkhau123"}).status_code == 400
+    assert client.post("/api/auth/verify", json={"password": "Matkhau123"}).status_code == 400
 
 
 def test_token_reset_khong_dung_duoc_nhu_token_xac_minh(client):
@@ -137,8 +137,8 @@ def test_token_reset_khong_dung_duoc_nhu_token_xac_minh(client):
     client.post("/api/auth/logout")
     client.post("/api/auth/forgot", json={"email": "an@vd.com"})
     tk = token_in(mails("reset")[-1])
-    assert client.post("/api/auth/verify", json={"token": tk, "password": "matkhau-moi"}).status_code == 400
-    assert client.post("/api/auth/reset", json={"token": tk, "password": "matkhau-moi"}).status_code == 200
+    assert client.post("/api/auth/verify", json={"token": tk, "password": "Matkhau-moi1"}).status_code == 400
+    assert client.post("/api/auth/reset", json={"token": tk, "password": "Matkhau-moi1"}).status_code == 200
 
 
 def test_dang_ky_email_da_co_gui_thu_da_co_tai_khoan_thay_vi_thu_xac_minh(client):
@@ -150,7 +150,7 @@ def test_dang_ky_email_da_co_gui_thu_da_co_tai_khoan_thay_vi_thu_xac_minh(client
     [thu] = mails("exists", "an@vd.com")
     assert "/forgot/" in thu and "token=" not in thu
     # mật khẩu người thật không bị đụng tới
-    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"}).status_code == 200
 
 
 def test_chiem_truoc_ke_xau_dang_ky_email_nan_nhan_thi_mat_khau_la_cua_nan_nhan(client):
@@ -158,15 +158,15 @@ def test_chiem_truoc_ke_xau_dang_ky_email_nan_nhan_thi_mat_khau_la_cua_nan_nhan(
     dang_ky(client, "nan@nhan.com")                                  # kẻ xấu kích hoạt (nó không có cách gửi mật khẩu)
     thu = token_in(mails("verify", "nan@nhan.com")[-1])
     assert auth.get_by_email("nan@nhan.com")[1] == "", "chưa có mật khẩu nào, kẻ xấu không đăng nhập được"
-    for mk in ("matkhau123", "mat-khau-ke-xau"):
+    for mk in ("Matkhau123", "mat-khau-ke-xau"):
         assert client.post("/api/auth/login", json={"email": "nan@nhan.com", "password": mk}).status_code == 401
 
     cu = auth.start_session(auth.get_by_email("nan@nhan.com")[0])    # phiên có sẵn (nếu có) bị xoá khi xác minh
-    r = client.post("/api/auth/verify", json={"token": thu, "password": "mat-khau-cua-nan-nhan"})
+    r = client.post("/api/auth/verify", json={"token": thu, "password": "Mat-khau-nan-nhan1"})
     assert r.status_code == 200 and auth.user_for_token(cu) is None
     client.post("/api/auth/logout")
     assert client.post("/api/auth/login", json={"email": "nan@nhan.com", "password": "mat-khau-ke-xau"}).status_code == 401
-    assert client.post("/api/auth/login", json={"email": "nan@nhan.com", "password": "mat-khau-cua-nan-nhan"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "nan@nhan.com", "password": "Mat-khau-nan-nhan1"}).status_code == 200
 
 
 def test_dang_ky_lai_khi_chua_xac_minh_thi_chi_thu_moi_nhat_dung_duoc(client):
@@ -175,8 +175,8 @@ def test_dang_ky_lai_khi_chua_xac_minh_thi_chi_thu_moi_nhat_dung_duoc(client):
     dang_ky(client, "nan@nhan.com")
     moi = token_in(mails("verify")[-1])
     assert cu != moi
-    assert client.post("/api/auth/verify", json={"token": cu, "password": "matkhau123"}).status_code == 400
-    assert client.post("/api/auth/verify", json={"token": moi, "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/verify", json={"token": cu, "password": "Matkhau123"}).status_code == 400
+    assert client.post("/api/auth/verify", json={"token": moi, "password": "Matkhau123"}).status_code == 200
 
 
 
@@ -221,8 +221,8 @@ def test_resend(client):
     assert "Confirm your email address" in mails("verify")[-1]
     moi = token_in(mails("verify")[-1])
     assert moi != cu
-    assert client.post("/api/auth/verify", json={"token": cu, "password": "matkhau123"}).status_code == 400   # bị thay
-    assert client.post("/api/auth/verify", json={"token": moi, "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/verify", json={"token": cu, "password": "Matkhau123"}).status_code == 400   # bị thay
+    assert client.post("/api/auth/verify", json={"token": moi, "password": "Matkhau123"}).status_code == 200
     # email lạ / đã xác minh: vẫn 200, không gửi thêm
     n = len(outbox())
     for email in ("la-hoac@vd.com", "moi@vd.com"):
@@ -297,26 +297,26 @@ def test_reset_doi_mat_khau_xoa_moi_phien_cu_va_mo_phien_moi(client):
     cu = client.cookies.get(auth.COOKIE)
     may_khac = TestClient(main.app)
     with may_khac:
-        may_khac.post("/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"})
+        may_khac.post("/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"})
         assert may_khac.get("/api/auth/me").status_code == 200
 
         client.post("/api/auth/forgot", json={"email": "an@vd.com"})
-        r = client.post("/api/auth/reset", json={"token": token_in(mails("reset")[-1]), "password": "mat-khau-moi-9"})
+        r = client.post("/api/auth/reset", json={"token": token_in(mails("reset")[-1]), "password": "Mat-khau-moi-9"})
         assert r.status_code == 200 and r.json()["email"] == "an@vd.com"
 
         assert may_khac.get("/api/auth/me").status_code == 401, "phiên máy khác phải bị đá ra"
         client.cookies.set(auth.COOKIE, cu)
         assert client.get("/api/auth/me").status_code == 401, "token phiên cũ vô hiệu"
     client.cookies.clear()
-    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}).status_code == 401
-    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "an@vd.com", "password": "Mat-khau-moi-9"}).status_code == 200
 
 
 def test_reset_dang_nhap_luon_bang_phien_moi(client):
     register(client, "an@vd.com")
     client.post("/api/auth/logout")
     client.post("/api/auth/forgot", json={"email": "an@vd.com"})
-    r = client.post("/api/auth/reset", json={"token": token_in(mails("reset")[-1]), "password": "mat-khau-moi-9"})
+    r = client.post("/api/auth/reset", json={"token": token_in(mails("reset")[-1]), "password": "Mat-khau-moi-9"})
     assert r.status_code == 200
     assert client.get("/api/auth/me").json()["email"] == "an@vd.com"
 
@@ -329,8 +329,8 @@ def test_reset_token_dung_lai_het_han_hoac_mat_khau_yeu(client):
 
     r = client.post("/api/auth/reset", json={"token": tk, "password": "ngan"})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"     # chưa đốt token
-    assert client.post("/api/auth/reset", json={"token": tk, "password": "mat-khau-moi-9"}).status_code == 200
-    r = client.post("/api/auth/reset", json={"token": tk, "password": "mat-khau-khac-9"})
+    assert client.post("/api/auth/reset", json={"token": tk, "password": "Mat-khau-moi-9"}).status_code == 200
+    r = client.post("/api/auth/reset", json={"token": tk, "password": "Mat-khau-khac-9"})
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_token"          # dùng lại
 
     # hết hạn 30 phút
@@ -339,7 +339,7 @@ def test_reset_token_dung_lai_het_han_hoac_mat_khau_yeu(client):
     with auth._db() as conn:
         conn.execute("UPDATE email_tokens SET expires_at = ? WHERE purpose = 'reset' AND used_at IS NULL",
                      (time.time() - 1,))
-    assert client.post("/api/auth/reset", json={"token": tk2, "password": "mat-khau-khac-9"}).status_code == 400
+    assert client.post("/api/auth/reset", json={"token": tk2, "password": "Mat-khau-khac-9"}).status_code == 400
 
 
 def test_token_reset_hieu_luc_30_phut(client):
@@ -355,8 +355,8 @@ def test_hai_lan_forgot_thi_link_cu_het_hieu_luc(client):
     client.post("/api/auth/forgot", json={"email": "an@vd.com"})
     client.post("/api/auth/forgot", json={"email": "an@vd.com"})
     cu, moi = (token_in(m) for m in mails("reset"))
-    assert client.post("/api/auth/reset", json={"token": cu, "password": "mat-khau-moi-9"}).status_code == 400
-    assert client.post("/api/auth/reset", json={"token": moi, "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/reset", json={"token": cu, "password": "Mat-khau-moi-9"}).status_code == 400
+    assert client.post("/api/auth/reset", json={"token": moi, "password": "Mat-khau-moi-9"}).status_code == 200
 
 
 # ── Hạn mức gửi thư ───────────────────────────────────────────────────
@@ -449,7 +449,7 @@ def test_header_bao_mat_moi_phan_hoi_va_no_store_cho_trang_token(client):
               client.get("/api/ws")):
         h = r.headers
         assert h["referrer-policy"] == "strict-origin-when-cross-origin" and h["x-content-type-options"] == "nosniff"
-        assert h["content-security-policy"] == "frame-ancestors 'none'" and h["x-frame-options"] == "DENY"
+        assert "frame-ancestors 'none'" in h["content-security-policy"] and h["x-frame-options"] == "DENY"
     assert "no-store" not in client.get("/api/health").headers.get("cache-control", "")
     for path in ("/verify/", "/reset/", "/forgot/"):
         r = client.get(path)
@@ -525,13 +525,13 @@ def test_trial_sai_mat_khau_bi_dem_va_khoa_nhu_login(client, trial_on):
 
 
 def test_trial_khoa_rieng_khong_khoa_email_that_cung_ten(client, trial_on):
-    register(client, "sato@vd.com", "matkhau123")
+    register(client, "sato@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     trial(client, "sato@vd.com", "dung")
     client.post("/api/auth/logout")
     for _ in range(auth.MAX_FAILS_EMAIL):
         client.post("/api/auth/trial", json={"id": "sato@vd.com", "password": "sai"})
-    assert client.post("/api/auth/login", json={"email": "sato@vd.com", "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "sato@vd.com", "password": "Matkhau123"}).status_code == 200
 
 
 def test_trial_tat_thi_404(client, monkeypatch):
@@ -556,7 +556,7 @@ def test_trial_khong_chiem_duoc_email_that(client, trial_on):
     client.post("/api/auth/logout")
 
     dang_ky(client, "chu@congty.co.jp")
-    xac_minh(client, "chu@congty.co.jp", "mat-khau-that-1")
+    xac_minh(client, "chu@congty.co.jp", "Mat-khau-that-1")
     that = client.get("/api/auth/me").json()
     assert that["id"] != ke_la["id"] and that["kind"] == "member"
     client.post("/api/auth/logout")
@@ -565,7 +565,7 @@ def test_trial_khong_chiem_duoc_email_that(client, trial_on):
     assert client.post("/api/auth/login", json={"email": "chu@congty.co.jp", "password": "ke-la"}).status_code == 401
     assert client.post("/api/auth/login", json={"email": "trial:chu@congty.co.jp", "password": "ke-la"}).status_code == 401
     # và ngược lại: mật khẩu thật không vào được tài khoản thử
-    assert client.post("/api/auth/trial", json={"id": "chu@congty.co.jp", "password": "mat-khau-that-1"}).status_code == 401
+    assert client.post("/api/auth/trial", json={"id": "chu@congty.co.jp", "password": "Mat-khau-that-1"}).status_code == 401
 
 
 def test_trial_khong_tu_noi_voi_google_hay_email_va_login_khong_dang_nhap_trial(client, trial_on):
@@ -802,7 +802,7 @@ def test_init_db_chay_hai_lan_khong_doi_gi_them(db_cu):
 
 def test_di_tru_chi_phan_loai_mot_lan_ke_ca_khi_co_nguoi_moi(db_cu):
     auth.init_db()
-    auth.create_user("moi@vd.com", "matkhau123", verified=False)       # member chưa xác minh: KHÔNG bị đổi thành trial
+    auth.create_user("moi@vd.com", "Matkhau123", verified=False)       # member chưa xác minh: KHÔNG bị đổi thành trial
     auth.init_db()
     u = auth.get_by_email("moi@vd.com")[0]
     assert (u.kind, u.email) == ("member", "moi@vd.com")
@@ -840,7 +840,7 @@ def test_login_tai_khoan_chua_co_mat_khau_van_dot_thoi_gian_nhu_email_la(client,
     n = []
     monkeypatch.setattr(auth, "burn_time", lambda: n.append(1))
     for email in ("moi@vd.com", "khong-co@vd.com"):                       # chưa đặt mật khẩu / không tồn tại
-        assert client.post("/api/auth/login", json={"email": email, "password": "matkhau123"}).status_code == 401
+        assert client.post("/api/auth/login", json={"email": email, "password": "Matkhau123"}).status_code == 401
     assert len(n) == 2
 
 

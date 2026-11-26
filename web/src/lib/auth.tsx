@@ -23,7 +23,8 @@ import {
 
 import * as api from "@/lib/api";
 import type { Me } from "@/lib/api";
-import { disableGisAutoSelect } from "@/lib/gis";
+import { TRIAL_KEY } from "@/lib/authnext";
+import { disableGisAutoSelect, resetGisInit } from "@/lib/gis";
 
 type Ctx = {
   user: Me | null;
@@ -106,6 +107,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.logout();
     } finally {
+      // (Audit 3) Xoá mật khẩu trial lưu cục bộ khi chủ động đăng xuất (tránh lộ trên máy dùng chung)
+      try {
+        localStorage.removeItem(TRIAL_KEY);
+      } catch {
+        /* trình duyệt chặn localStorage */
+      }
+      resetGisInit();
       disableGisAutoSelect();
       setUser(null);
       router.replace("/login");

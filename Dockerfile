@@ -46,6 +46,7 @@ COPY --from=web /web/out ./web/out
 
 # Ảnh sổ, file Excel và CSDL tài khoản nằm hết trong đây. Khi triển khai PHẢI
 # gắn ổ đĩa lưu trữ bền vào đúng chỗ này, nếu không deploy lại là mất sạch.
+# Lưu ý (Audit 3): khi đặt TSUCHO_PUBLIC_URL=https://..., cookie Secure tự bật theo scheme https.
 RUN mkdir -p /app/.data
 VOLUME ["/app/.data"]
 

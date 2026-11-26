@@ -78,8 +78,8 @@ def test_purge_khong_dung_trial_cu_member_demo_admin(client, monkeypatch):
     monkeypatch.setenv("TSUCHO_DEMO_ACCOUNTS", "demo@x.test:matkhau-demo")
     demo.tao_neu_thieu()
     cu = auth.create_trial_user("cu-do-di-tru", "1")                  # ephemeral=0
-    mem = auth.create_user("m@vd.com", "matkhau123", verified=True)
-    adm = auth.create_user("a@vd.com", "matkhau123", verified=True)
+    mem = auth.create_user("m@vd.com", "Matkhau123", verified=True)
+    adm = auth.create_user("a@vd.com", "Matkhau123", verified=True)
     with auth._db() as conn:
         conn.execute("UPDATE users SET role = 'admin' WHERE id = ?", (adm.id,))
     dm = auth.get_by_email("demo@x.test")[0]

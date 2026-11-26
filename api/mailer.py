@@ -45,12 +45,15 @@ def _lang(lang: str | None) -> str:
 
 _bg: list[threading.Thread] = []
 _bg_lock = threading.Lock()
+_MAIL_SEM = threading.Semaphore(8)    # (Audit 3) Giới hạn luồng gửi thư chạy đồng thời
+_MAX_PENDING = 64
 
 
 def background(fn, *args) -> None:
     def run():
         try:
-            fn(*args)
+            with _MAIL_SEM:
+                fn(*args)
         except Exception:
             log.exception("việc nền gửi thư hỏng")
 
@@ -60,6 +63,9 @@ def background(fn, *args) -> None:
     t = threading.Thread(target=run, daemon=True, name="mail-bg")
     with _bg_lock:
         _bg[:] = [x for x in _bg if x.is_alive()]
+        if len(_bg) >= _MAX_PENDING:
+            log.warning("hàng đợi gửi thư nền đầy (%d) — bỏ qua yêu cầu", _MAX_PENDING)
+            return
         _bg.append(t)
     t.start()
 
@@ -175,16 +181,28 @@ def send_reset(to: str, token: str, lang: str | None) -> None:
 
 # ── Gửi ───────────────────────────────────────────────────────────────
 
+def _allow_outbox() -> bool:
+    """(Audit 3) Chỉ ghi thư (chứa token thô) ra DATA_DIR/outbox trên localhost hoặc khi test đặt TSUCHO_MAIL_SYNC=1."""
+    from . import auth
+    return auth.public_is_local() or os.getenv("TSUCHO_MAIL_SYNC") == "1"
+
+
 def send(to: str, subject: str, text: str, html: str = "", purpose: str = "mail") -> None:
     """Gửi một thư. Không bao giờ ném lỗi ra ngoài (gửi hỏng không được làm hỏng yêu cầu đăng nhập)."""
     key = os.getenv("RESEND_API_KEY", "").strip()
     try:
         if key:
+            def run_resend():
+                with _MAIL_SEM:
+                    _send_resend(key, to, subject, text, html)
+
             threading.Thread(
-                target=_send_resend, args=(key, to, subject, text, html), daemon=True, name="mailer"
+                target=run_resend, daemon=True, name="mailer"
             ).start()
-        else:
+        elif _allow_outbox():
             _write_outbox(to, subject, text, html, purpose)
+        else:
+            log.error("Không có RESEND_API_KEY trên máy chủ công khai — bỏ qua gửi thư (%s), không ghi outbox", purpose)
     except Exception:
         log.exception("không gửi được thư (%s)", purpose)
 

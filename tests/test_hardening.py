@@ -27,11 +27,11 @@ def token_from(pattern: str) -> str:
 # ── C2: đăng nhập đúng không xoá khoá IP ──────────────────────────────
 
 def test_dang_nhap_dung_khong_xoa_bo_dem_ip(client):
-    register(client, "chinh@vd.com", "matkhau123")
+    register(client, "chinh@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     for i in range(auth.MAX_FAILS_IP - 1):
         assert client.post("/api/auth/login", json={"email": f"nan{i}@vd.com", "password": "x"}).status_code == 401
-    assert client.post("/api/auth/login", json={"email": "chinh@vd.com", "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "chinh@vd.com", "password": "Matkhau123"}).status_code == 200
     client.post("/api/auth/logout")
     assert client.post("/api/auth/login", json={"email": "nan-cuoi@vd.com", "password": "x"}).status_code == 401   # lần thứ 20
     r = client.post("/api/auth/login", json={"email": "bat-ky@vd.com", "password": "x"})
@@ -83,7 +83,7 @@ def test_than_post_auth_qua_64kb_la_413(client):
 # ── THẤP-1: đoán song song ────────────────────────────────────────────
 
 def test_20_lan_doan_dong_thoi_chi_5_lan_duoc_kiem_tra_roi_bi_khoa(client, monkeypatch):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     real = auth.verify_password
     n = []
@@ -117,7 +117,7 @@ def test_reset_thanh_cong_bo_co_legacy_roi_google_noi_duoc(client, fake):
     _legacy_admin()
     client.post("/api/auth/forgot", json={"email": "nguoi@vd.com"})
     tk = token_from("*-reset.txt")
-    assert client.post("/api/auth/reset", json={"token": tk, "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/reset", json={"token": tk, "password": "Mat-khau-moi-9"}).status_code == 200
     with auth._db() as conn:
         assert conn.execute("SELECT legacy FROM users WHERE id = 'old000000001'").fetchone()["legacy"] == 0
     client.post("/api/auth/logout")
@@ -141,7 +141,7 @@ def test_tran_thu_toan_he_thong_theo_ngay(client, monkeypatch, caplog):
     monkeypatch.setenv("TSUCHO_MAIL_DAILY_LIMIT", "2")
     monkeypatch.setattr(quota, "MAIL_PER_IP", 100)
     for i in range(4):
-        auth.create_user(f"u{i}@vd.com", "matkhau123", verified=True)
+        auth.create_user(f"u{i}@vd.com", "Matkhau123", verified=True)
     caplog.set_level(logging.WARNING)
     for i in range(4):
         client.post("/api/auth/forgot", json={"email": f"u{i}@vd.com"})
@@ -272,9 +272,9 @@ def test_ky_tu_surrogate_khong_gay_500(client, monkeypatch):
     tk = token_from("*-verify.txt")
     r = post_raw(client, "/api/auth/verify", json.dumps({"token": tk})[:-1] + ',"password":"' + bad + '"}')
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"
-    assert client.post("/api/auth/verify", json={"token": tk, "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/verify", json={"token": tk, "password": "Matkhau123"}).status_code == 200
     client.post("/api/auth/forgot", json={"email": "moi@vd.com"})
     tk2 = token_from("*-reset.txt")
     r = post_raw(client, "/api/auth/reset", json.dumps({"token": tk2})[:-1] + ',"password":"' + bad + '"}')
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"
-    assert client.post("/api/auth/reset", json={"token": tk2, "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/reset", json={"token": tk2, "password": "Mat-khau-moi-9"}).status_code == 200

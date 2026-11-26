@@ -206,7 +206,7 @@ def test_estimate_tra_han_muc_that_cho_member_va_none_cho_admin(client, model, m
     assert (body["demo_left"], body["demo_limit"]) == (30, 30)
     monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "mem@vd.com")
     client.post("/api/auth/logout")
-    client.post("/api/auth/login", json={"email": "mem@vd.com", "password": "matkhau123"})
+    client.post("/api/auth/login", json={"email": "mem@vd.com", "password": "Matkhau123"})
     ws_id = client.post("/api/ws").json()["id"]
     _them_mat(ws_id, "n", _jpeg(10))
     body = _uoc(client, ws_id, ["n"]).json()

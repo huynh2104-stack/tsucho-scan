@@ -9,6 +9,8 @@ import os
 import shutil
 import tempfile
 
+import pytest
+
 _TMP = None
 if "TSUCHO_DATA_DIR" not in os.environ:        # người chạy tự đặt thì tôn trọng
     _TMP = tempfile.mkdtemp(prefix="tsucho-test-")
@@ -26,3 +28,12 @@ for _k in ("TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "GOOGLE_CLIENT_ID", "GO
 def pytest_sessionfinish(session, exitstatus):
     if _TMP:
         shutil.rmtree(_TMP, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _fast_scrypt_in_tests(monkeypatch):
+    """(Audit 3) Hạ chi phí scrypt trong pytest để chạy nhanh; sản phẩm giữ p=5 (test_hardening_r3 kiểm riêng)."""
+    from api import auth
+
+    monkeypatch.setattr(auth, "_SCRYPT", {"n": 2**10, "r": 8, "p": 1})
+    monkeypatch.setattr(auth, "_DUMMY_HASH", None)

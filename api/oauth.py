@@ -111,12 +111,12 @@ def start(provider: str, next_path: str | None) -> tuple[str, str]:
 
 
 def _take_state(state: str, provider: str) -> dict | None:
-    """Lấy và XOÁ hàng state (dùng một lần, kể cả khi bước sau lỗi). Hết hạn/khác provider → None."""
+    """Lấy và XOÁ hàng state nguyên tử (Audit 3: DELETE ... RETURNING *, dùng đúng một lần). Hết hạn/khác provider → None."""
     if not state:
         return None
     with auth._db() as conn:
-        row = conn.execute("SELECT * FROM oauth_states WHERE state = ?", (state,)).fetchone()
-        conn.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("DELETE FROM oauth_states WHERE state = ? RETURNING *", (state,)).fetchone()
     if not row or row["provider"] != provider or row["expires_at"] < time.time():
         return None
     return dict(row)
@@ -248,6 +248,33 @@ def _google_certs(kid: str | None) -> dict:
     with _certs_lock:
         _certs.update(keys=fetched, exp=time.time() + min(max(age, 0), 86400), inflight=False)
         return dict(fetched)
+
+
+def issue_gis_nonce() -> str:
+    """(Audit 3) Cấp nonce GIS ngẫu nhiên và lưu băm SHA-256 vào SQLite (dùng một lần, hết hạn GIS_TTL)."""
+    nonce = secrets.token_urlsafe(32)
+    now = time.time()
+    with auth._db() as conn:
+        conn.execute("DELETE FROM gis_nonces WHERE expires_at < ?", (now,))
+        conn.execute(
+            "INSERT INTO gis_nonces (nonce_hash, expires_at) VALUES (?, ?)",
+            (auth._token_hash(nonce), now + GIS_TTL),
+        )
+    return nonce
+
+
+def consume_gis_nonce(nonce: object) -> bool:
+    """(Audit 3) Tiêu thụ nonce GIS nguyên tử phía máy chủ — trả True đúng một lần nếu còn hạn."""
+    if not isinstance(nonce, str) or not nonce:
+        return False
+    now = time.time()
+    with auth._db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "DELETE FROM gis_nonces WHERE nonce_hash = ? AND expires_at > ?",
+            (auth._token_hash(nonce), now),
+        )
+        return cur.rowcount == 1
 
 
 def verify_google_credential(credential: str, nonce: str) -> tuple[str, str, bool, str]:

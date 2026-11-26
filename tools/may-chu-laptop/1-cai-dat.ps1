@@ -73,7 +73,12 @@ foreach ($p in $pkgs) {
 # ── 3. Tải code ──────────────────────────────────────────────────────
 Buoc "3/8 Tải code tsucho-scan (nhánh $Branch)"
 $app = Join-Path $Root "app"
-New-Item -ItemType Directory -Force -Path $Root, (Join-Path $Root "data"), (Join-Path $Root "logs"), (Join-Path $Root "backup") | Out-Null
+$data = Join-Path $Root "data"
+$backup = Join-Path $Root "backup"
+New-Item -ItemType Directory -Force -Path $Root, $data, (Join-Path $Root "logs"), $backup | Out-Null
+# (Audit 3) Khoá quyền thư mục dữ liệu (app.db, ảnh sổ) & bản sao lưu chỉ cho Administrators và SYSTEM
+& icacls $data /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" | Out-Null
+& icacls $backup /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" | Out-Null
 if (Test-Path (Join-Path $app ".git")) {
     & git -C $app fetch origin $Branch; & git -C $app checkout $Branch; & git -C $app pull --ff-only origin $Branch
 } else {

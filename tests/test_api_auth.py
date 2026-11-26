@@ -63,6 +63,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("TURNSTILE_SITE_KEY", raising=False)
     monkeypatch.delenv("TSUCHO_ADMIN_EMAILS", raising=False)
     monkeypatch.delenv("TSUCHO_TRUST_PROXY", raising=False)
+    # (Audit 3) TestClient chạy http://testserver, nhưng nhiều test đặt TSUCHO_PUBLIC_URL=https://...
+    monkeypatch.setenv("TSUCHO_COOKIE_SECURE", "0")
     auth.init_db()
     with TestClient(main.app) as c:
         yield c
@@ -78,7 +80,7 @@ def trial(client, login_id, password="1"):
     return client.post("/api/auth/trial", json={"id": login_id, "password": password})
 
 
-def register(client, email="a@b.com", password="matkhau123"):
+def register(client, email="a@b.com", password="Matkhau123"):
     """Tạo một thành viên ĐÃ xác minh rồi đăng nhập (đường đăng ký thật qua thư: tests/test_auth_email.py)."""
     auth.create_user(email, password, verified=True)
     r = client.post("/api/auth/login", json={"email": email, "password": password})
@@ -120,12 +122,12 @@ def test_khong_xem_duoc_workspace_cua_nguoi_khac(client):
 # ── Đăng ký / đăng nhập ──────────────────────────────────────────────
 
 def test_dang_ky_roi_dang_nhap_lai(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     assert client.get("/api/auth/me").status_code == 401
 
     r = client.post(
-        "/api/auth/login", json={"email": "AN@VD.com", "password": "matkhau123"}
+        "/api/auth/login", json={"email": "AN@VD.com", "password": "Matkhau123"}
     )
     assert r.status_code == 200, "email phải không phân biệt hoa thường"
     assert client.get("/api/auth/me").json()["email"] == "an@vd.com"
@@ -141,12 +143,12 @@ def test_dang_xuat_huy_phien_that_su(client):
 
 
 def test_sai_mat_khau_va_sai_email_bao_giong_nhau(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     sai_mk = client.post(
         "/api/auth/login", json={"email": "an@vd.com", "password": "sai-be-bet"}
     )
     khong_co = client.post(
-        "/api/auth/login", json={"email": "chua@co.com", "password": "matkhau123"}
+        "/api/auth/login", json={"email": "chua@co.com", "password": "Matkhau123"}
     )
     assert sai_mk.status_code == khong_co.status_code == 401
     assert sai_mk.json()["detail"] == khong_co.json()["detail"]
@@ -177,7 +179,7 @@ def sai_mat_khau(client, email="an@vd.com", lan=1):
 
 
 def test_sai_qua_nguong_thi_bi_khoa(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
 
     assert sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL - 1).status_code == 401
@@ -185,19 +187,19 @@ def test_sai_qua_nguong_thi_bi_khoa(client):
 
     # Đã khoá: lần sau bị chặn NGAY, kể cả mật khẩu ĐÚNG — có thế mới chặn được
     # dò, vì nếu vẫn kiểm tra thì kẻ dò vẫn biết lần nào đoán trúng.
-    r = client.post("/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"})
+    r = client.post("/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"})
     assert r.status_code == 429
     assert r.json()["detail"]["kind"] == "locked"
     assert r.json()["detail"]["seconds"] > 0
 
 
 def test_dang_nhap_dung_xoa_bo_dem(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
 
     sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL - 1)
     assert client.post(
-        "/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}
+        "/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"}
     ).status_code == 200
     client.post("/api/auth/logout")
 
@@ -206,7 +208,7 @@ def test_dang_nhap_dung_xoa_bo_dem(client):
 
 
 def test_khoa_het_han_thi_vao_lai_duoc(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL)
 
@@ -215,13 +217,13 @@ def test_khoa_het_han_thi_vao_lai_duoc(client):
         conn.execute("UPDATE login_fails SET locked_until = ?", (time.time() - 1,))
 
     assert client.post(
-        "/api/auth/login", json={"email": "an@vd.com", "password": "matkhau123"}
+        "/api/auth/login", json={"email": "an@vd.com", "password": "Matkhau123"}
     ).status_code == 200
 
 
 def test_email_khong_ton_tai_cung_bi_khoa(client):
     """Nếu chỉ khoá email CÓ THẬT thì chính cái khoá lại tố cáo tài khoản nào tồn tại."""
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
 
     sai_mat_khau(client, email="chua@co.com", lan=auth.MAX_FAILS_EMAIL)
@@ -231,14 +233,14 @@ def test_email_khong_ton_tai_cung_bi_khoa(client):
 
 def test_khoa_theo_email_khong_lam_ket_nguoi_khac(client):
     """Người dùng khác trên cùng máy vẫn vào được, miễn chưa chạm ngưỡng IP."""
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
-    register(client, "binh@vd.com", "matkhau456")
+    register(client, "binh@vd.com", "Matkhau456")
     client.post("/api/auth/logout")
 
     sai_mat_khau(client, email="an@vd.com", lan=auth.MAX_FAILS_EMAIL)
     assert client.post(
-        "/api/auth/login", json={"email": "binh@vd.com", "password": "matkhau456"}
+        "/api/auth/login", json={"email": "binh@vd.com", "password": "Matkhau456"}
     ).status_code == 200
 
 
@@ -254,13 +256,13 @@ def test_khoa_theo_ip_khi_rai_qua_nhieu_email(client):
 def test_khong_tin_x_forwarded_for_khi_chua_bat(client, monkeypatch):
     """Header giả được. Chưa bật TSUCHO_TRUST_PROXY thì đổi header không thoát khoá."""
     monkeypatch.delenv("TSUCHO_TRUST_PROXY", raising=False)
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     client.post("/api/auth/logout")
     sai_mat_khau(client, lan=auth.MAX_FAILS_EMAIL)
 
     r = client.post(
         "/api/auth/login",
-        json={"email": "an@vd.com", "password": "matkhau123"},
+        json={"email": "an@vd.com", "password": "Matkhau123"},
         headers={"X-Forwarded-For": "9.9.9.9"},
     )
     assert r.status_code == 429
@@ -283,7 +285,11 @@ def test_che_do_cloudflare_dung_cf_connecting_ip(monkeypatch):
 
 def test_che_do_cu_van_doc_x_forwarded_for(monkeypatch):
     monkeypatch.setenv("TSUCHO_TRUST_PROXY", "1")
-    assert auth.client_ip(_Req({"x-forwarded-for": "5.6.7.8, 10.0.0.1"})) == "5.6.7.8"
+    assert auth.client_ip(_Req({"x-forwarded-for": "1.2.3.4, 203.0.113.7"})) == "203.0.113.7"
+    monkeypatch.setenv("TSUCHO_TRUST_PROXY", "2")
+    assert auth.client_ip(_Req({"x-forwarded-for": "1.2.3.4, 5.6.7.8, 10.0.0.1"})) == "5.6.7.8"
+    monkeypatch.setenv("TSUCHO_TRUST_PROXY", "0")
+    assert auth.client_ip(_Req({"x-forwarded-for": "5.6.7.8"})) == "127.0.0.1"
     monkeypatch.delenv("TSUCHO_TRUST_PROXY")
     assert auth.client_ip(_Req({"x-forwarded-for": "5.6.7.8", "cf-connecting-ip": "9.9.9.9"})) == "127.0.0.1"
 
@@ -291,17 +297,17 @@ def test_che_do_cu_van_doc_x_forwarded_for(monkeypatch):
 # ── Mật khẩu ─────────────────────────────────────────────────────────
 
 def test_mat_khau_khong_luu_tho(client):
-    register(client, "an@vd.com", "matkhau123")
+    register(client, "an@vd.com", "Matkhau123")
     _, stored = auth.get_by_email("an@vd.com")
-    assert "matkhau123" not in stored
+    assert "Matkhau123" not in stored
     assert stored.startswith("scrypt$")
-    assert auth.verify_password("matkhau123", stored)
-    assert not auth.verify_password("matkhau124", stored)
+    assert auth.verify_password("Matkhau123", stored)
+    assert not auth.verify_password("Matkhau124", stored)
 
 
 def test_hai_lan_bam_cung_mat_khau_ra_khac_nhau():
     """Có muối riêng từng tài khoản: hai người trùng mật khẩu vẫn khác hash."""
-    assert auth.hash_password("matkhau123") != auth.hash_password("matkhau123")
+    assert auth.hash_password("Matkhau123") != auth.hash_password("Matkhau123")
 
 
 # ── Admin do TSUCHO_ADMIN_EMAILS (không còn luật «người đầu tiên») ─────────
@@ -329,7 +335,7 @@ def test_email_trong_danh_sach_admin_thanh_admin_va_nhan_du_lieu_cu(client, monk
 
 def test_email_admin_chua_xac_minh_khong_duoc_len_admin(client, monkeypatch):
     monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "chu@vd.com")
-    user = auth.create_user("chu@vd.com", "matkhau123", verified=False)
+    user = auth.create_user("chu@vd.com", "Matkhau123", verified=False)
     assert auth.apply_admin_emails(user).role == "user"
     assert auth.get_by_id(user.id).role == "user"
     # trial mang đúng tên email đó cũng không thành admin
@@ -399,7 +405,7 @@ def test_tai_khoan_thuong_khong_bi_han_muc(client, monkeypatch):
     assert quota.limit_for(auth.get_by_id(me["id"])) == 30
     monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "that@nguoi.com")
     client.post("/api/auth/logout")
-    client.post("/api/auth/login", json={"email": "that@nguoi.com", "password": "matkhau123"})
+    client.post("/api/auth/login", json={"email": "that@nguoi.com", "password": "Matkhau123"})
     assert client.get("/api/auth/me").json()["quota"]["limit"] is None
 
 

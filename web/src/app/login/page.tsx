@@ -44,7 +44,7 @@ import {
   type DemoAccount,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { safeNext } from "@/lib/authnext";
+import { TRIAL_KEY, safeNext } from "@/lib/authnext";
 import { useT } from "@/lib/i18n";
 
 const TRANG_GIOI_THIEU = "https://tsucho-scan.com/";
@@ -151,7 +151,6 @@ function Showcase() {
 
 const PRIVACY_URL = "https://tsucho-scan.com/privacy";
 const TERMS_URL = "https://tsucho-scan.com/terms";
-const TRIAL_KEY = "tsucho.trial";
 const ERR_MARK = "mt-4 flex items-start gap-2 rounded-[3px] bg-warnbg px-3 py-2 text-t13 leading-[1.6] text-warnink";
 const LABEL = "block text-t13 font-bold text-ink2";
 const INPUT = "field mt-1.5 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16";
@@ -189,6 +188,7 @@ function LoginInner() {
   const [resent, setResent] = useState(false);
 
   const [methods, setMethods] = useState<AuthMethods | null>(null);
+  const [methodsDone, setMethodsDone] = useState(false);
   // Chống bot Cloudflare (đăng ký + gửi lại thư). Token dùng một lần: tăng capKey sau mỗi lần gửi để lấy token mới.
   const [cap, setCap] = useState<string | null>(null);
   const [capKey, setCapKey] = useState(0);
@@ -196,6 +196,8 @@ function LoginInner() {
   const capBlock = !!siteKey && !cap;
   const [demo, setDemo] = useState<{ accounts: DemoAccount[]; scan_limit: number } | null>(null);
   const [dangVao, setDangVao] = useState<string | null>(null);
+  // (Audit 3) Cho phép tài khoản trial bấm "Đăng ký miễn phí" trên TrialBar vào thẳng tab đăng ký mà không bị đá về /
+  const allowWhileTrial = sp.get("tab") === "register" && user?.kind === "trial";
 
   useEffect(() => {
     try {
@@ -208,15 +210,16 @@ function LoginInner() {
   }, []);
 
   useEffect(() => {
-    if (ready && user) router.replace(next);
-  }, [ready, user, router, next]);
+    if (ready && user && !allowWhileTrial) router.replace(next);
+  }, [ready, user, allowWhileTrial, router, next]);
 
   // Máy chủ cũ chưa có route này → bỏ qua im lặng: khung お試し hiện theo mặc định, nút Google/LINE ẩn
   useEffect(() => {
     let con = true;
     fetchAuthMethods()
       .then((m) => con && setMethods(m))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => con && setMethodsDone(true));
     fetchDemoAccounts()
       .then((d) => con && setDemo(d))
       .catch(() => {});
@@ -236,7 +239,7 @@ function LoginInner() {
   }, [wait]);
 
   async function vao(e: string, mk: string) {
-    if (mode === "up" && capBlock) return;
+    if (mode === "up" && (!methodsDone || capBlock)) return;
     setErr(null);
     setResent(false);
     setBusy(true);
@@ -263,6 +266,7 @@ function LoginInner() {
 
   /** Một chạm: có tài khoản cũ của trình duyệt này thì vào lại (không cần Turnstile); không thì máy tự tạo mới. */
   async function motCham() {
+    if (!saved && !methodsDone) return;
     setTErr(null);
     setTBusy(true);
     try {
@@ -273,7 +277,11 @@ function LoginInner() {
           return;
         } catch (loi) {
           if (!(loi instanceof Unauthorized)) throw loi;
-          forgetTrial(); // tài khoản cũ đã bị xoá → tạo mới
+          forgetTrial(); // tài khoản cũ đã bị xoá → hiện ô Turnstile (nếu có) trước khi tạo mới
+          if (siteKey && !tCap) {
+            setTBusy(false);
+            return;
+          }
         }
       }
       let cred: { id: string; password: string };
@@ -351,6 +359,12 @@ function LoginInner() {
       if (e.code === "bad_email") return t.authBadEmail;
       if (e.code === "bad_id") return t.authOpenBadId(so("max", 100));
       if (e.code === "weak_password") return t.authWeakPassword(so("min", 8));
+      if (e.code === "password_policy") return t.authPasswordPolicy;
+      if (e.code === "password_common") return t.authPasswordCommon;
+      if (e.code === "password_too_long") return t.authPasswordTooLong(so("max", 128));
+      if (e.code === "too_large") return t.authTooLarge;
+      if (e.code === "mail_off") return t.authMailOff;
+      if (e.code === "bad_origin") return t.authGenericErr;
     }
     // 401 chỉ có một nghĩa: sai email/mật khẩu (server cố ý không nói rõ cái nào). Ở khung お試し thì
     // tên lạ đã tự tạo tài khoản nên 401 chắc chắn là: ID đã có người dùng + sai mật khẩu.
@@ -563,7 +577,7 @@ function LoginInner() {
                   {mode === "up" && siteKey && <Turnstile siteKey={siteKey} onToken={setCap} resetKey={capKey} />}
                   <button
                     type="submit"
-                    disabled={busy || (mode === "up" && capBlock)}
+                    disabled={busy || (mode === "up" && (!methodsDone || capBlock))}
                     className="btn btn-primary btn-lg mt-5 w-full"
                   >
                     {busy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
@@ -591,7 +605,7 @@ function LoginInner() {
           </div>
 
           {/* Cửa cho khách xem sản phẩm: khung riêng, nền giấy nhạt, viền mảnh. KHÔNG giấu. */}
-          {showTrial && (
+          {showTrial && user?.kind !== "trial" && (
             <section data-testid="trial-box" className="mt-5 rounded-[3px] border border-rule bg-card2 px-6 pb-5 pt-4">
               <h2 className="text-t16 font-bold">{t.trialHead}</h2>
               <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.trialNote(trialLimit, keepDays)}</p>
@@ -605,7 +619,7 @@ function LoginInner() {
               <button
                 type="button"
                 data-testid="trial-onetap"
-                disabled={tBusy || tCapBlock}
+                disabled={tBusy || (!saved && !methodsDone) || tCapBlock}
                 onClick={() => void motCham()}
                 className="btn btn-primary btn-lg mt-4 w-full"
               >

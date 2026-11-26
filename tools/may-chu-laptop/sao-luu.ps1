@@ -9,6 +9,20 @@ $zip = Join-Path $dst ("data-{0}.zip" -f (Get-Date -Format "yyyyMMdd-HHmm"))
 # Chép sang thư mục tạm trước rồi mới nén: máy chủ đang ghi file thì Compress-Archive báo «file đang mở» và hỏng cả bản
 $tmp = Join-Path $env:TEMP ("tsucho-bk-" + [guid]::NewGuid().ToString("N"))
 & robocopy $data $tmp /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+# CSDL tài khoản chạy chế độ WAL: thay bản chép thô bằng ảnh chụp nhất quán (lỗi thì giữ bản chép thô)
+$py = Join-Path $Root "venv\Scripts\python.exe"; $db = Join-Path $data "app.db"
+if ((Test-Path $py) -and (Test-Path $db)) {
+    $snap = Join-Path $tmp "app.db.snap"
+    & $py -I (Join-Path $PSScriptRoot "sao-luu-db.py") $db $snap
+    if ($LASTEXITCODE -eq 0 -and (Test-Path $snap)) {
+        $out = Join-Path $tmp "app.db"
+        Remove-Item -Force -ErrorAction SilentlyContinue $out, "$out-wal", "$out-shm"
+        Move-Item $snap $out
+    } else {
+        Remove-Item -Force -ErrorAction SilentlyContinue $snap
+        Write-Host "! Không chụp được app.db nhất quán — giữ bản chép thô" -ForegroundColor Yellow
+    }
+}
 Compress-Archive -Path (Join-Path $tmp "*") -DestinationPath $zip -Force
 Remove-Item -Recurse -Force $tmp
 Get-ChildItem $dst -Filter "data-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -Skip $Keep | Remove-Item -Force

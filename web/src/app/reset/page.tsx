@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import AuthShell from "@/components/ui/AuthShell";
-import { CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
+import { CheckCircle, CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { takeTokenFromUrl } from "@/lib/authnext";
+import { checkPasswordRules, takeTokenFromUrl } from "@/lib/authnext";
 import { useT } from "@/lib/i18n";
 
 export default function ResetPage() {
@@ -28,16 +28,34 @@ export default function ResetPage() {
     setToken(takeTokenFromUrl());
   }, []);
 
+  const rules = checkPasswordRules(pw);
+
   function errText(e: unknown): string {
     if (e instanceof ApiError) {
       if (e.code === "weak_password") return t.authWeakPassword(Number(e.info?.min ?? 8));
+      if (e.code === "password_policy") return t.authPasswordPolicy;
+      if (e.code === "password_common") return t.authPasswordCommon;
+      if (e.code === "password_too_long") return t.authPasswordTooLong(Number(e.info?.max ?? 128));
       if (e.code === "bad_token") return t.verifyInvalid;
+      if (e.code === "too_large") return t.authTooLarge;
     }
     return e instanceof Error ? e.message : String(e);
   }
 
   async function gui() {
     setErr(null);
+    if (pw.length < 8) {
+      setErr(new ApiError("weak_password", 400, "weak_password", { min: 8 }));
+      return;
+    }
+    if (pw.length > 128) {
+      setErr(new ApiError("password_too_long", 400, "password_too_long", { max: 128 }));
+      return;
+    }
+    if (!rules.ok) {
+      setErr(new ApiError("password_policy", 400, "password_policy"));
+      return;
+    }
     if (pw !== pw2) {
       setErr(new Error(t.authPwMismatch));
       return;
@@ -85,7 +103,21 @@ export default function ResetPage() {
             onChange={(e) => setPw(e.target.value)}
             className="field mt-1 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16"
           />
-          <p className="mt-1.5 text-t12 text-ink2">{t.authPasswordHint}</p>
+          <ul aria-live="polite" className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-t12">
+            {(
+              [
+                [rules.len, t.pwRuleLen],
+                [rules.upper, t.pwRuleUpper],
+                [rules.lower, t.pwRuleLower],
+                [rules.digit, t.pwRuleDigit],
+              ] as const
+            ).map(([ok, label]) => (
+              <li key={label} className={`flex items-center gap-1.5 ${ok ? "font-bold text-okink" : "text-ink3"}`}>
+                <CheckCircle size={13} aria-hidden className="flex-none" />
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
           <label className="mt-3.5 block text-t13 font-bold text-ink2" htmlFor="pw2">
             {t.authPwAgain}
           </label>

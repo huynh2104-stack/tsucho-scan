@@ -13,7 +13,7 @@ import re
 import secrets
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -120,13 +120,27 @@ def health() -> dict:
 # ── Lớp bảo vệ chung cho mọi phản hồi ────────────────────────────────
 
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
-_NO_STORE_PREFIXES = ("/verify", "/reset", "/forgot")      # trang nhận token trong URL: không cho cache
+_NO_STORE_PAGES = ("/verify", "/reset", "/forgot")         # trang nhận token trong URL: không cache & no-referrer
 # GIS (nút Google) cần Referrer-Policy strict-origin-when-cross-origin; trang nhận token trong URL vẫn no-referrer
 _REFERRER_DEFAULT = (b"referrer-policy", b"strict-origin-when-cross-origin")
 _REFERRER_NONE = (b"referrer-policy", b"no-referrer")
+# (Audit 3) CSP đầy đủ cho trang app + GIS + Turnstile, giữ nguyên frame-ancestors 'none'
+_CSP = (
+    b"default-src 'self'; "
+    b"script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client https://challenges.cloudflare.com; "
+    b"style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; "
+    b"img-src 'self' data: blob: https://*.googleusercontent.com; "
+    b"font-src 'self' data:; "
+    b"connect-src 'self' https://accounts.google.com/gsi/ https://challenges.cloudflare.com; "
+    b"frame-src https://accounts.google.com/gsi/ https://challenges.cloudflare.com; "
+    b"object-src 'none'; "
+    b"base-uri 'self'; "
+    b"form-action 'self'; "
+    b"frame-ancestors 'none'"
+)
 _SECURITY_HEADERS = [
     (b"x-content-type-options", b"nosniff"),
-    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"content-security-policy", _CSP),
     (b"x-frame-options", b"DENY"),
 ]
 _LOCAL_ORIGIN = re.compile(r"http://(localhost|127\.0\.0\.1)(:\d+)?")
@@ -151,9 +165,10 @@ def _origin_allowed(origin: str) -> bool:
 
 
 class SecurityMiddleware:
-    """ASGI thuần (không đụng luồng SSE): (1) kiểm `Origin` mọi POST/PUT/PATCH/DELETE dưới /api/ — không có `Origin`
-    (test, dòng lệnh) thì cho qua; (2) thêm header bảo mật vào MỌI phản hồi; (3) `Cache-Control: no-store` cho
-    /verify/, /reset/, /forgot/; (4) trang tĩnh `no-cache`, /_next/static/ giữ lâu (tên file đã có mã băm)."""
+    """ASGI thuần (không đụng luồng SSE): (1) kiểm `Origin` / `Sec-Fetch-Site` / `Referer` mọi POST/PUT/PATCH/DELETE
+    dưới /api/; (2) chặn thân POST /api/auth/* vượt 64KB kể cả chunked; (3) thêm header bảo mật + CSP vào MỌI phản hồi;
+    (4) `Cache-Control: no-store` cho /verify/, /reset/, /forgot/ và toàn bộ /api/auth/*; (5) trang tĩnh `no-cache`,
+    /_next/static/ giữ lâu (tên file đã có mã băm)."""
 
     def __init__(self, app):
         self.app = app
@@ -165,13 +180,23 @@ class SecurityMiddleware:
         path = scope.get("path", "")
         headers = dict(scope.get("headers") or [])
         origin = headers.get(b"origin")
-        if (
-            scope.get("method") in _UNSAFE and path.startswith("/api/")
-            and origin is not None and not _origin_allowed(origin.decode("latin-1"))
-        ):
-            resp = JSONResponse({"detail": {"kind": "bad_origin"}}, status_code=403)
-            await self._with_headers(resp, path)(scope, receive, send)
-            return
+        if scope.get("method") in _UNSAFE and path.startswith("/api/"):
+            bad = False
+            if origin is not None:
+                bad = not _origin_allowed(origin.decode("latin-1"))
+            else:
+                # (Audit 3) Không có Origin: kiểm thêm Sec-Fetch-Site và Referer nếu trình duyệt gửi kèm
+                sfs = headers.get(b"sec-fetch-site")
+                if sfs is not None and sfs.decode("latin-1").strip().lower() not in ("same-origin", "none"):
+                    bad = True
+                elif (ref := headers.get(b"referer")) is not None:
+                    u = urlsplit(ref.decode("latin-1"))
+                    if u.scheme and u.netloc and not _origin_allowed(f"{u.scheme}://{u.netloc}"):
+                        bad = True
+            if bad:
+                resp = JSONResponse({"detail": {"kind": "bad_origin"}}, status_code=403)
+                await self._with_headers(resp, path)(scope, receive, send)
+                return
         if scope.get("method") == "POST" and path.startswith("/api/auth/"):
             try:
                 too_big = int(headers.get(b"content-length", b"0") or 0) > _MAX_AUTH_BODY
@@ -181,13 +206,43 @@ class SecurityMiddleware:
                 resp = JSONResponse({"detail": {"kind": "too_large"}}, status_code=413)
                 await self._with_headers(resp, path)(scope, receive, send)
                 return
-        no_store = path.startswith(_NO_STORE_PREFIXES)
+            # (Audit 3) Đếm byte thực tế để chặn Transfer-Encoding: chunked không khai Content-Length
+            chunks: list[bytes] = []
+            total = 0
+            more = True
+            while more:
+                msg = await receive()
+                if msg["type"] == "http.disconnect":
+                    return
+                if msg["type"] == "http.request":
+                    part = msg.get("body", b"")
+                    total += len(part)
+                    if total > _MAX_AUTH_BODY:
+                        resp = JSONResponse({"detail": {"kind": "too_large"}}, status_code=413)
+                        await self._with_headers(resp, path)(scope, receive, send)
+                        return
+                    chunks.append(part)
+                    more = bool(msg.get("more_body", False))
+            full_body = b"".join(chunks)
+            sent_body = False
+            orig_receive = receive        # giữ hàm gốc: lần đọc thứ hai (chờ ngắt kết nối…) phải đi tới máy khách thật
+
+            async def replay_receive():
+                nonlocal sent_body
+                if not sent_body:
+                    sent_body = True
+                    return {"type": "http.request", "body": full_body, "more_body": False}
+                return await orig_receive()
+
+            receive = replay_receive
+        no_store_page = path.startswith(_NO_STORE_PAGES)
+        no_store = no_store_page or path.startswith("/api/auth/")
         hsts = os.getenv("TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://")
 
         async def send_wrapped(message):
             if message["type"] == "http.response.start":
                 hs = [(k, v) for k, v in message.get("headers", []) if k.lower() not in {h for h, _ in _SECURITY_HEADERS} | {b"referrer-policy"}]
-                hs += _SECURITY_HEADERS + [_REFERRER_NONE if no_store else _REFERRER_DEFAULT]
+                hs += _SECURITY_HEADERS + [_REFERRER_NONE if no_store_page else _REFERRER_DEFAULT]
                 if hsts:
                     hs.append((b"strict-transport-security", b"max-age=31536000"))
                 if no_store:
@@ -209,12 +264,18 @@ class SecurityMiddleware:
     @staticmethod
     def _with_headers(resp, path):
         async def call(scope, receive, send):
+            no_store_page = path.startswith(_NO_STORE_PAGES)
+            no_store = no_store_page or path.startswith("/api/auth/")
+
             async def send_wrapped(message):
                 if message["type"] == "http.response.start":
-                    extra = [(b"strict-transport-security", b"max-age=31536000")] if os.getenv(
-                        "TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://") else []
-                    message = {**message, "headers": list(message.get("headers", [])) + _SECURITY_HEADERS
-                                          + [_REFERRER_NONE if path.startswith(_NO_STORE_PREFIXES) else _REFERRER_DEFAULT] + extra}
+                    hs = [(k, v) for k, v in message.get("headers", []) if k.lower() not in {h for h, _ in _SECURITY_HEADERS} | {b"referrer-policy"}]
+                    hs += _SECURITY_HEADERS + [_REFERRER_NONE if no_store_page else _REFERRER_DEFAULT]
+                    if os.getenv("TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://"):
+                        hs.append((b"strict-transport-security", b"max-age=31536000"))
+                    if no_store:
+                        hs = [(k, v) for k, v in hs if k.lower() != b"cache-control"] + [(b"cache-control", b"no-store")]
+                    message = {**message, "headers": hs}
                 await send(message)
 
             await resp(scope, receive, send_wrapped)
@@ -232,8 +293,25 @@ def _auth_error(e: auth.AuthError) -> HTTPException:
     return HTTPException(400, {"kind": e.code, **e.info})
 
 
-def _login_response(response: Response, user: auth.User) -> auth.User:
+def _str_field(body: object, key: str) -> str:
+    """(Audit 3) Chỉ nhận chuỗi thuần từ JSON body, không ép kiểu list/dict/None thành str(...)."""
+    if not isinstance(body, dict):
+        return ""
+    val = body.get(key)
+    return val if isinstance(val, str) else ""
+
+
+def _require_mail_delivery() -> None:
+    """(Audit 3) Nếu máy chủ công khai chưa cấu hình RESEND_API_KEY thì từ chối 503 thay vì nhận 200 giả."""
+    if not mailer.can_deliver() and os.getenv("TSUCHO_MAIL_SYNC") != "1":
+        raise HTTPException(503, {"kind": "mail_off"})
+
+
+def _login_response(response: Response, user: auth.User, old_session: str | None = None) -> auth.User:
     """Mở phiên cho người đã được xác thực; nâng admin nếu email nằm trong TSUCHO_ADMIN_EMAILS."""
+    # (Audit 3) Thu hồi phiên cũ nếu trình duyệt đang giữ cookie cũ (tránh tích luỹ phiên mồ côi)
+    if old_session:
+        auth.end_session(old_session)
     user = auth.apply_admin_emails(user)
     auth.set_cookie(response, auth.start_session(user))
     return user
@@ -266,6 +344,8 @@ def trial_new(request: Request, response: Response, body: dict = Body(default={}
     if not quota.trial_new_allowed(auth.client_ip(request)):      # chặn một IP tạo tài khoản thử hàng loạt
         raise HTTPException(429, {"kind": "trial_new_limit"})
     user, guest_id, password = auth.new_guest()
+    if old := request.cookies.get(auth.COOKIE):
+        auth.end_session(old)
     auth.set_cookie(response, auth.start_session(user))
     return {**user.to_json(), "trial_id": guest_id, "trial_password": password}
 
@@ -276,19 +356,19 @@ def trial_login(request: Request, response: Response, body: dict = Body(...)) ->
     KHÔNG còn tự tạo tài khoản (muốn tạo mới: /api/auth/trial/new)."""
     if not auth.OPEN_LOGIN:
         raise HTTPException(404, {"kind": "trial_off"})
-    login_id = str(body.get("id", ""))
-    password = str(body.get("password", ""))
+    login_id = _str_field(body, "id")
+    password = _str_field(body, "password")
     if len(password) > auth.MAX_PASSWORD:
         raise HTTPException(400, {"kind": "password_too_long", "max": auth.MAX_PASSWORD})
     if not auth.encodable(password):
         raise HTTPException(400, {"kind": "weak_password", "min": 1})
     if len(login_id) > auth.OPEN_ID_MAX or not auth.encodable(login_id):
-        auth.burn_time()                              # ID quá dài/hỏng: trả như sai mật khẩu, KHÔNG ghi khoá đếm
+        # (Audit 3) Không chạy burn_time() cho ID quá dài/hỏng để tránh DoS CPU/RAM không qua khoá IP
         raise HTTPException(401, "Email hoặc mật khẩu không đúng")
     # Khoá đếm sai RIÊNG cho ID thử ("e:" + băm của "trial:<id>"): gõ nhầm ID thử không làm khoá đăng nhập của email
     # thật trùng tên.
     keys = auth.attempt_keys(auth.TRIAL_PREFIX + login_id, auth.client_ip(request))
-    with auth.attempt_lock(keys[0]):                 # đoán song song không vượt ngưỡng
+    with auth.attempt_locks(keys):                   # (Audit 3) khoá cả email lẫn IP tránh đoán song song
         wait = auth.lock_remaining(keys)
         if wait:
             raise HTTPException(429, {"kind": "locked", "seconds": wait})
@@ -300,13 +380,17 @@ def trial_login(request: Request, response: Response, body: dict = Body(...)) ->
             auth.record_failure(keys)
             raise HTTPException(401, "Email hoặc mật khẩu không đúng")
         auth.clear_failures(auth.email_keys(keys))       # CHỈ khoá email; khoá IP phải tự hết hạn
+        if auth.needs_rehash(found[1]):
+            auth.set_password(found[0].id, password)
+    if old := request.cookies.get(auth.COOKIE):
+        auth.end_session(old)
     auth.set_cookie(response, auth.start_session(found[0]))
     return found[0].to_json()
 
 
 def _check_captcha(request: Request, body: dict) -> None:
     """Turnstile (nếu máy chủ có TURNSTILE_SECRET_KEY): kiểm ĐỒNG BỘ trước mọi việc khác, độc lập với email."""
-    if not captcha.verify(body.get("captcha"), auth.client_ip(request)):
+    if not captcha.verify(body.get("captcha") if isinstance(body, dict) else None, auth.client_ip(request)):
         raise HTTPException(400, {"kind": "captcha"})
 
 
@@ -319,13 +403,24 @@ def _register_job(email: str, ip: str, lang: str) -> None:
     """Chạy nền (xem `mailer.background`). Mọi nhánh trông như nhau từ bên ngoài."""
     found = auth.get_by_email(email)
     if found is None:
+        # (Audit 3) Kiểm hạn mức thư TRƯỚC khi chèn vào bảng users để không phình tài khoản chưa xác minh
+        if not quota.mail_allowed(email, ip, "verify"):
+            return
         try:
             user = auth.create_user(email)                  # chưa xác minh, CHƯA có mật khẩu
         except auth.AuthError:                              # đua với một lần đăng ký khác cùng email → coi như đã có
             found = auth.get_by_email(email)
         else:
-            _send_verify_mail(user, ip, lang)
+            mailer.send_verify(user.email, auth.create_email_token(user.id, "verify"), lang)
             return
+        if found is None:
+            return
+        user = found[0]
+        if user.kind == "member" and not user.email_verified:
+            mailer.send_verify(user.email, auth.create_email_token(user.id, "verify"), lang)
+        else:
+            mailer.send_exists(email, lang)
+        return
     user = found[0]
     if user.kind == "member" and not user.email_verified:
         _send_verify_mail(user, ip, lang)
@@ -340,26 +435,28 @@ def register(request: Request, body: dict = Body(...)) -> dict:
 
     Luôn `{ok, sent}` (email đã có cũng vậy — không lộ ai đã đăng ký); mọi việc sau khi kiểm email chạy nền.
     """
+    _require_mail_delivery()
     _check_captcha(request, body)
     try:
-        email = auth.check_email(str(body.get("email", "")))
+        email = auth.check_email(_str_field(body, "email"))
     except auth.AuthError as e:
         raise _auth_error(e) from e
-    mailer.background(_register_job, email, auth.client_ip(request), str(body.get("lang", "ja")))
+    lang = _str_field(body, "lang") or "ja"
+    mailer.background(_register_job, email, auth.client_ip(request), lang)
     return {"ok": True, "sent": True}
 
 
 @app.post("/api/auth/login")
 def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
     """Đăng nhập email + mật khẩu — chỉ cho `member`/`demo` (không bao giờ trúng tài khoản `trial`)."""
-    email = str(body.get("email", ""))
-    password = str(body.get("password", ""))
+    email = _str_field(body, "email")
+    password = _str_field(body, "password")
     if len(email.strip()) > auth.MAX_EMAIL or not auth.encodable(email):
-        auth.burn_time()          # email quá dài/hỏng: 401 như sai mật khẩu, KHÔNG ghi khoá đếm (chặn phình bảng)
+        # (Audit 3) Không chạy burn_time() cho email quá dài/hỏng để tránh DoS CPU/RAM không qua khoá IP
         raise HTTPException(401, "Email hoặc mật khẩu không đúng")
     keys = auth.attempt_keys(email, auth.client_ip(request))
 
-    with auth.attempt_lock(keys[0]):         # đoán song song không vượt ngưỡng
+    with auth.attempt_locks(keys):           # (Audit 3) khoá cả email lẫn IP tránh đoán song song
         # Đang bị khoá thì KHÔNG kiểm tra mật khẩu. Kiểm tra rồi mới từ chối là vô
         # nghĩa: kẻ dò cứ gọi tiếp và vẫn biết được lần đoán nào đúng.
         wait = auth.lock_remaining(keys)
@@ -381,29 +478,32 @@ def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
             raise HTTPException(401, "Email hoặc mật khẩu không đúng")
 
         auth.clear_failures(auth.email_keys(keys))      # CHỈ khoá email; khoá IP phải tự hết hạn
+        if auth.needs_rehash(found[1]):
+            auth.set_password(found[0].id, password)
     user = found[0]
     # Chỉ nói «chưa xác minh» SAU KHI mật khẩu đúng (người ngoài không dò được email nào đã đăng ký)
     if user.kind != "demo" and not user.email_verified:
         raise HTTPException(403, {"kind": "unverified"})
-    user = _login_response(response, user)
+    user = _login_response(response, user, request.cookies.get(auth.COOKIE))
     return user.to_json()
 
 
 @app.post("/api/auth/verify")
-def verify_email(response: Response, body: dict = Body(...)) -> dict:
+def verify_email(request: Request, response: Response, body: dict = Body(...)) -> dict:
     """Bấm link trong thư xác minh + TỰ ĐẶT mật khẩu: đánh dấu đã xác minh, huỷ token verify khác và mọi phiên cũ,
     rồi đăng nhập. Mật khẩu yếu/quá dài bị từ chối TRƯỚC khi đốt token (người dùng gõ lại được)."""
-    password = str(body.get("password", ""))
+    password = _str_field(body, "password")
     try:
         auth.check_password_strength(password)
     except auth.AuthError as e:
         raise _auth_error(e) from e
-    user = auth.consume_email_token(str(body.get("token", "")), "verify")
+    user = auth.consume_email_token(_str_field(body, "token"), "verify")
     if not user:
         raise HTTPException(400, {"kind": "bad_token"})
     auth.finish_verification(user.id, password)
+    auth.clear_failures(auth.email_keys(auth.attempt_keys(user.email, "")))
     user.email_verified = True
-    return _login_response(response, user).to_json()
+    return _login_response(response, user, request.cookies.get(auth.COOKIE)).to_json()
 
 
 def _resend_job(email: str, ip: str, lang: str) -> None:
@@ -415,9 +515,10 @@ def _resend_job(email: str, ip: str, lang: str) -> None:
 @app.post("/api/auth/resend")
 def resend_verify(request: Request, body: dict = Body(...)) -> dict:
     """Gửi lại thư xác minh (token mới) cho member chưa xác minh. Luôn 200, trả lời ngay, việc làm nền."""
+    _require_mail_delivery()
     _check_captcha(request, body)
-    mailer.background(_resend_job, auth.normalize_email(str(body.get("email", ""))), auth.client_ip(request),
-                      str(body.get("lang", "ja")))
+    mailer.background(_resend_job, auth.normalize_email(_str_field(body, "email")), auth.client_ip(request),
+                      _str_field(body, "lang") or "ja")
     return {"ok": True, "sent": True}
 
 
@@ -432,21 +533,22 @@ def _forgot_job(email: str, ip: str, lang: str) -> None:
 @app.post("/api/auth/forgot")
 def forgot_password(request: Request, body: dict = Body(...)) -> dict:
     """Quên mật khẩu: có `member` đã xác minh thì gửi link đặt lại (hạn 30 phút). Luôn 200, trả lời ngay."""
+    _require_mail_delivery()
     _check_captcha(request, body)
-    mailer.background(_forgot_job, auth.normalize_email(str(body.get("email", ""))), auth.client_ip(request),
-                      str(body.get("lang", "ja")))
+    mailer.background(_forgot_job, auth.normalize_email(_str_field(body, "email")), auth.client_ip(request),
+                      _str_field(body, "lang") or "ja")
     return {"ok": True, "sent": True}
 
 
 @app.post("/api/auth/reset")
-def reset_password(response: Response, body: dict = Body(...)) -> dict:
+def reset_password(request: Request, response: Response, body: dict = Body(...)) -> dict:
     """Đặt mật khẩu mới bằng link trong thư: xoá MỌI phiên cũ rồi mở phiên mới."""
-    password = str(body.get("password", ""))
+    password = _str_field(body, "password")
     try:
         auth.check_password_strength(password)       # kiểm trước khi đốt token để người dùng gõ lại được
     except auth.AuthError as e:
         raise _auth_error(e) from e
-    user = auth.consume_email_token(str(body.get("token", "")), "reset")
+    user = auth.consume_email_token(_str_field(body, "token"), "reset")
     if not user:
         raise HTTPException(400, {"kind": "bad_token"})
     auth.set_password(user.id, password)
@@ -455,7 +557,7 @@ def reset_password(response: Response, body: dict = Body(...)) -> dict:
     auth.end_all_sessions(user.id)
     auth.clear_legacy(user.id)                        # chủ hộp thư đã chứng minh → không còn là tài khoản legacy
     auth.clear_failures(auth.email_keys(auth.attempt_keys(user.email, "")))
-    return _login_response(response, user).to_json()
+    return _login_response(response, user, request.cookies.get(auth.COOKIE)).to_json()
 
 
 # ── Đăng nhập Google / LINE (api/oauth.py) ────────────────────────────
@@ -466,9 +568,14 @@ def _oauth_provider(provider: str) -> str:
     return provider
 
 
+def _OAUTH_STATE_FLAGS() -> dict:
+    """(Audit 3) Cờ cookie state OAuth — dùng chung khi đặt và xoá."""
+    return {**auth._cookie_flags(), "samesite": "lax"}
+
+
 def _login_redirect(code: str) -> RedirectResponse:
     r = RedirectResponse(f"/login/?auth_error={code}", status_code=302)
-    r.delete_cookie(oauth.STATE_COOKIE, path=oauth.COOKIE_PATH, **auth._cookie_flags())
+    r.delete_cookie(oauth.STATE_COOKIE, path=oauth.COOKIE_PATH, httponly=True, **_OAUTH_STATE_FLAGS())
     return r
 
 
@@ -481,12 +588,14 @@ def _GIS_FLAGS() -> dict:
 
 
 @app.get("/api/auth/google/nonce")
-def google_nonce(response: Response) -> dict:
-    """Nonce cho nút Google (GIS): cấp ngẫu nhiên, buộc vào trình duyệt bằng cookie HttpOnly; credential gửi lên
-    phải mang đúng nonce này. Không lưu DB."""
+def google_nonce(request: Request, response: Response) -> dict:
+    """Nonce cho nút Google (GIS): cấp ngẫu nhiên, lưu băm phía máy chủ (dùng một lần) và buộc vào trình duyệt
+    bằng cookie HttpOnly; credential gửi lên phải mang đúng nonce này. Có hạn mức theo IP vì mỗi lần cấp ghi CSDL."""
     if not oauth.configured("google"):
         raise HTTPException(404, {"kind": "google_off"})
-    nonce = secrets.token_urlsafe(32)
+    if not quota.gis_nonce_allowed(auth.client_ip(request)):
+        raise HTTPException(429, {"kind": "rate_limited"})
+    nonce = oauth.issue_gis_nonce()
     response.set_cookie(oauth.GIS_COOKIE, nonce, max_age=oauth.GIS_TTL, httponly=True, path=_GIS_PATH, **_GIS_FLAGS())
     response.headers["Cache-Control"] = "no-store"
     return {"nonce": nonce}
@@ -494,38 +603,47 @@ def google_nonce(response: Response) -> dict:
 
 @app.post("/api/auth/google/credential")
 def google_credential(request: Request, response: Response, body: dict = Body(...)) -> dict:
-    """ID token từ nút «Sign in with Google»: kiểm chữ ký + nonce rồi vào CÙNG đường nối tài khoản với luồng chuyển hướng."""
+    """ID token từ nút «Sign in with Google»: kiểm chữ ký + nonce (cả cookie lẫn DB dùng một lần) rồi vào CÙNG
+    đường nối tài khoản với luồng chuyển hướng."""
     if not oauth.configured("google"):
         raise HTTPException(404, {"kind": "google_off"})
     keys = [f"gis:{auth.ip_bucket(auth.client_ip(request))}"]
-    wait = auth.lock_remaining(keys)
-    if wait:
-        raise HTTPException(429, {"kind": "locked", "seconds": wait})
     nonce = request.cookies.get(oauth.GIS_COOKIE)
     if not nonce:                                   # không tính vào khoá: xảy ra vô tình (hai tab), kẻ gian cần token Google thật
         raise HTTPException(400, {"kind": "state"})
-    try:
-        identity = oauth.verify_google_credential(body.get("credential"), nonce)
-    except oauth.OAuthError as e:
-        oauth.log.warning("nút Google lỗi %s: %s", e.code, e)
-        if e.code != "state":                       # lệch nonce cũng vô tình (hai tab) → không tính; sai chữ ký/trường mới tính
-            auth.record_failure(keys)
-        raise HTTPException(400, {"kind": e.code}) from e
+    with auth.attempt_locks(keys):
+        wait = auth.lock_remaining(keys)
+        if wait:
+            raise HTTPException(429, {"kind": "locked", "seconds": wait})
+        try:
+            identity = oauth.verify_google_credential(body.get("credential") if isinstance(body, dict) else None, nonce)
+        except oauth.OAuthError as e:
+            oauth.log.warning("nút Google lỗi %s: %s", e.code, e)
+            if e.code != "state":                       # lệch nonce cũng vô tình (hai tab) → không tính; sai chữ ký/trường mới tính
+                auth.record_failure(keys)
+            raise HTTPException(400, {"kind": e.code}) from e
+        user = auth.login_with_identity("google", *identity)   # lỗi ở đây thì nonce còn nguyên, bấm lại được
+        # (Audit 3) Tiêu thụ nonce nguyên tử phía máy chủ TRƯỚC khi mở phiên — chặn replay kể cả khi kẻ gian tự
+        # giữ/đặt lại cookie; hai yêu cầu cùng nonce chỉ một cái qua.
+        if not oauth.consume_gis_nonce(nonce):
+            raise HTTPException(400, {"kind": "state"})
     response.delete_cookie(oauth.GIS_COOKIE, path=_GIS_PATH, httponly=True, **_GIS_FLAGS())    # dùng một lần
-    return _login_response(response, auth.login_with_identity("google", *identity)).to_json()
+    return _login_response(response, user, request.cookies.get(auth.COOKIE)).to_json()
 
 
 @app.get("/api/auth/{provider}/start")
-def oauth_start(provider: str, next: str = "/") -> RedirectResponse:
+def oauth_start(provider: str, request: Request, next: str = "/") -> RedirectResponse:
     """Nút «Googleでログイン» / «LINEでログイン» (một thẻ <a>). Chưa cấu hình khoá → về /login/ báo `provider`."""
     _oauth_provider(provider)
     if not oauth.configured(provider):
+        return _login_redirect("provider")
+    if not quota.oauth_start_allowed(auth.client_ip(request)):
         return _login_redirect("provider")
     url, state = oauth.start(provider, next)
     r = RedirectResponse(url, status_code=302)
     # Cookie buộc người bấm nút và người quay về là CÙNG một trình duyệt; chỉ gửi kèm các route /api/auth/
     r.set_cookie(oauth.STATE_COOKIE, state, max_age=oauth.STATE_TTL, httponly=True, path=oauth.COOKIE_PATH,
-                 **{**auth._cookie_flags(), "samesite": "lax"})
+                 **_OAUTH_STATE_FLAGS())
     return r
 
 
@@ -537,10 +655,9 @@ def oauth_callback(
     _oauth_provider(provider)
     try:
         user, next_path = oauth.finish(provider, code, state, request.cookies.get(oauth.STATE_COOKIE), error)
-        user = auth.apply_admin_emails(user)
         r = RedirectResponse(next_path, status_code=302)
-        auth.set_cookie(r, auth.start_session(user))
-        r.delete_cookie(oauth.STATE_COOKIE, path=oauth.COOKIE_PATH, **auth._cookie_flags())
+        _login_response(r, user, request.cookies.get(auth.COOKIE))
+        r.delete_cookie(oauth.STATE_COOKIE, path=oauth.COOKIE_PATH, httponly=True, **_OAUTH_STATE_FLAGS())
         return r
     except oauth.OAuthError as e:
         oauth.log.warning("đăng nhập %s lỗi %s: %s", provider, e.code, e)

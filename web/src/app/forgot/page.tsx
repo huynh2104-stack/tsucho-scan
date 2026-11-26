@@ -17,6 +17,7 @@ export default function ForgotPage() {
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [siteKey, setSiteKey] = useState<string | null>(null);
+  const [methodsDone, setMethodsDone] = useState(false);
   const [cap, setCap] = useState<string | null>(null);
   const [capKey, setCapKey] = useState(0);
 
@@ -24,14 +25,25 @@ export default function ForgotPage() {
     let con = true;
     fetchAuthMethods()
       .then((m) => con && setSiteKey(m.turnstile_site_key ?? null))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => con && setMethodsDone(true));
     return () => {
       con = false;
     };
   }, []);
 
+  function errText(e: unknown): string {
+    if (e instanceof ApiError) {
+      if (e.code === "captcha") return t.authCaptchaFail;
+      if (e.code === "mail_off") return t.authMailOff;
+      if (e.code === "too_large") return t.authTooLarge;
+      if (e.code === "bad_email") return t.authBadEmail;
+    }
+    return t.authGenericErr;
+  }
+
   async function gui() {
-    if (siteKey && !cap) return;
+    if (!methodsDone || (siteKey && !cap)) return;
     setErr(null);
     setBusy(true);
     try {
@@ -78,10 +90,10 @@ export default function ForgotPage() {
           {err !== null && (
             <p role="alert" className="mt-4 flex items-start gap-2 rounded-[3px] bg-warnbg px-3 py-2 text-t13 leading-[1.6] text-warnink">
               <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
-              <span>{err instanceof ApiError && err.code === "captcha" ? t.authCaptchaFail : t.authBadEmail}</span>
+              <span>{errText(err)}</span>
             </p>
           )}
-          <button type="submit" disabled={busy || (!!siteKey && !cap)} className="btn btn-primary btn-lg mt-5 w-full">
+          <button type="submit" disabled={busy || !methodsDone || (!!siteKey && !cap)} className="btn btn-primary btn-lg mt-5 w-full">
             {busy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
             {busy ? t.authWorking : t.forgotSend}
           </button>

@@ -103,7 +103,7 @@ def test_replay_sau_khi_thanh_cong_that_bai(client, gis):
 
 
 def test_noi_vao_member_da_xac_minh(client, gis):
-    register(client, "Nguoi@vd.com", "matkhau123")
+    register(client, "Nguoi@vd.com", "Matkhau123")
     uid = me(client)["id"]
     client.post("/api/auth/logout")
     assert post(client, token(get_nonce(client))).status_code == 200

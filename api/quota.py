@@ -33,6 +33,8 @@ GLOBAL_DEFAULT = 300    # tổng mặt quét thật/ngày của MỌI tài kho�
 MAIL_PER_EMAIL = 3      # thư/giờ cho mỗi email
 MAIL_PER_IP = 10        # thư/giờ cho mỗi IP
 MAIL_DAILY_DEFAULT = 90  # thư/ngày toàn hệ thống
+OAUTH_START_PER_IP = 60  # (Audit 3) lượt mở OAuth/giờ mỗi IP (chống phình bảng oauth_states)
+GIS_NONCE_PER_IP = 120   # lượt cấp nonce nút Google/giờ mỗi IP (chống phình bảng gis_nonces)
 log = logging.getLogger("tsucho.quota")
 
 _lock = threading.Lock()
@@ -168,6 +170,27 @@ def refund(keys: list[str], n: int, day: str | None = None) -> None:
 def trial_new_allowed(ip: str) -> bool:
     """Mỗi IP tạo tối đa TSUCHO_TRIAL_NEW_PER_IP (mặc định 10) tài khoản trial MỚI/ngày (khoá `tn:<ip>`)."""
     return _reserve_items([(f"tn:{auth.ip_bucket(ip)}", _env_int("TSUCHO_TRIAL_NEW_PER_IP", 10))], 1, today())
+
+
+def oauth_start_allowed(ip: str) -> bool:
+    """(Audit 3) Giới hạn mở /api/auth/{provider}/start theo giờ mỗi IP (tránh spam bảng oauth_states)."""
+    hour = time.strftime("%Y-%m-%dT%H", time.localtime())
+    return _reserve_items(
+        [(f"os:{auth.ip_bucket(ip)}", _env_int("TSUCHO_OAUTH_START_PER_IP", OAUTH_START_PER_IP))],
+        1,
+        hour,
+    )
+
+
+def gis_nonce_allowed(ip: str) -> bool:
+    """Giới hạn cấp nonce nút Google theo giờ mỗi IP: mỗi lần cấp ghi một hàng `gis_nonces`, không giới hạn thì
+    gọi dồn dập làm phình CSDL. Vượt → giao diện giữ nút Google chuyển hướng thường (vẫn đăng nhập được)."""
+    hour = time.strftime("%Y-%m-%dT%H", time.localtime())
+    return _reserve_items(
+        [(f"gn:{auth.ip_bucket(ip)}", _env_int("TSUCHO_GIS_NONCE_PER_IP", GIS_NONCE_PER_IP))],
+        1,
+        hour,
+    )
 
 
 # ── Hạn mức gửi thư (theo GIỜ) ───────────────────────────────────────

@@ -101,10 +101,13 @@ và giao diện dễ hiểu nhất cho người mới.
    > nhiều lần. App đếm số lần sai theo địa chỉ IP; nhưng trên Render mọi lượt
    > truy cập đều đi qua máy trung gian, nên nếu không bật biến này thì **cả
    > thế giới bị đếm chung một IP** — một người gõ sai nhiều là mọi người khác
-   > bị khoá theo. Bật biến này thì app đọc IP thật từ header của Render.
+   > bị khoá theo. Bật biến này thì app đọc IP thật từ phía **bên phải** header
+   > `X-Forwarded-For` do proxy tin cậy gắn vào (đặt `=1` cho 1 lớp proxy, `=2`
+   > nếu qua 2 lớp proxy, hoặc `=cloudflare` nếu qua Cloudflare Tunnel).
    >
-   > Ngược lại, chạy ở máy nhà **đừng bật** — lúc đó header ấy do trình duyệt
-   > gửi nên giả được, kẻ dò mật khẩu chỉ cần đổi header là thoát khoá.
+   > Ngược lại, chạy trực tiếp ở máy nhà **đừng bật** (hoặc đặt `=0`) — lúc đó
+   > header ấy do trình duyệt gửi nên giả được, kẻ dò mật khẩu chỉ cần đổi header
+   > là thoát khoá. (Audit 3 cũng tự bật cookie `Secure` khi `TSUCHO_PUBLIC_URL` là `https://`.)
 
 6. Bấm **Create Web Service**. Render bắt đầu build (~5–10 phút lần đầu).
 

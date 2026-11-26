@@ -208,9 +208,9 @@ def test_tai_khoan_chi_co_google_quen_mat_khau_dat_mat_khau_roi_dang_nhap_email(
     outbox = sorted((workspace.DATA_DIR / "outbox").glob("*-reset.txt"))
     assert len(outbox) == 1
     tk = outbox[0].read_text(encoding="utf-8").split("#token=")[1].split()[0]
-    assert client.post("/api/auth/reset", json={"token": tk, "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/reset", json={"token": tk, "password": "Mat-khau-moi-9"}).status_code == 200
     client.post("/api/auth/logout")
-    assert client.post("/api/auth/login", json={"email": "nguoi@vd.com", "password": "mat-khau-moi-9"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "nguoi@vd.com", "password": "Mat-khau-moi-9"}).status_code == 200
 
 
 # ── state / lỗi ───────────────────────────────────────────────────────
@@ -326,13 +326,13 @@ def test_post_form_that_loi_mang_duoc_bao_boc(monkeypatch):
 # ── Nối / tạo tài khoản (§3.3) ────────────────────────────────────────
 
 def test_noi_google_vao_member_da_xac_minh_cung_email(client, fake):
-    register(client, "Nguoi@vd.com", "matkhau123")
+    register(client, "Nguoi@vd.com", "Matkhau123")
     uid = me(client)["id"]
     client.post("/api/auth/logout")
     ok(login_google(client, fake)[0])
     assert me(client)["id"] == uid and me(client)["providers"] == ["google"]
     client.post("/api/auth/logout")
-    assert client.post("/api/auth/login", json={"email": "nguoi@vd.com", "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "nguoi@vd.com", "password": "Matkhau123"}).status_code == 200
     assert auth.count_users() == 1
 
 
@@ -392,7 +392,7 @@ def test_member_chua_xac_minh_nhung_da_co_du_lieu_thi_giu_nguyen_va_dung_google_
 
 
 def test_member_chua_xac_minh_dang_co_phien_hoac_mat_khau_cung_khong_bi_xoa(client, fake):
-    u = auth.create_user("nguoi@vd.com", "matkhau123", verified=False)               # có mật khẩu (tài khoản cũ)
+    u = auth.create_user("nguoi@vd.com", "Matkhau123", verified=False)               # có mật khẩu (tài khoản cũ)
     ok(login_google(client, fake)[0])
     assert auth.get_by_id(u.id) is not None and me(client)["id"] != u.id
 
@@ -420,7 +420,7 @@ def test_line_khong_ten_khong_email_hien_LINE(client, fake):
 
 
 def test_line_co_email_trung_member_khong_noi_chi_hien_thi(client, fake):
-    register(client, "nguoi@vd.com", "matkhau123")
+    register(client, "nguoi@vd.com", "Matkhau123")
     uid = me(client)["id"]
     client.post("/api/auth/logout")
     s = begin(client, "line")

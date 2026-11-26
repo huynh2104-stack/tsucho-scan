@@ -30,7 +30,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 from fastapi import Cookie, Depends, HTTPException, Response
@@ -64,8 +64,16 @@ def encodable(text: str) -> bool:
     except UnicodeEncodeError:
         return False
 
-# Băm scrypt: n=2^14, r=8, p=1 → ~16MB RAM, ~50–100ms mỗi lần thử.
-_SCRYPT = dict(n=2**14, r=8, p=1)
+# Băm scrypt (Audit 3): nâng p=1 → p=5 theo ngưỡng tối thiểu OWASP (~16MB RAM, an toàn trên máy chủ 512MB).
+# Tài khoản cũ dùng p=1 vẫn đăng nhập được và tự nâng cấp hash khi đăng nhập lại (`needs_rehash`).
+_SCRYPT_PROD = dict(n=2**14, r=8, p=5)
+_SCRYPT = dict(_SCRYPT_PROD)
+_COMMON_PASSWORDS = frozenset({
+    "password", "password1", "password123", "12345678", "123456789", "1234567890",
+    "qwertyui", "qwerty123", "abcdefgh", "00000000", "11111111", "admin123",
+    "letmein1", "welcome1", "iloveyou", "iloveyou1", "abc12345", "abcd1234",
+    "pass1234", "tsucho123",
+})
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -211,6 +219,11 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     next_path  TEXT NOT NULL DEFAULT '/',
     expires_at REAL NOT NULL
 );
+-- (Audit 3) Nonce dùng một lần của nút Google (GIS): lưu băm SHA-256 phía máy chủ để chặn replay token
+CREATE TABLE IF NOT EXISTS gis_nonces (
+    nonce_hash TEXT PRIMARY KEY,
+    expires_at REAL NOT NULL
+);
 -- Hạn mức chung (api/quota.py): key 'u:<id>' | 'ip:<ip>' | 'trial-all' | 'm:<email>' | 'mi:<ip>'
 CREATE TABLE IF NOT EXISTS usage_counters (
     key TEXT NOT NULL, day TEXT NOT NULL, faces INTEGER NOT NULL DEFAULT 0,
@@ -233,6 +246,8 @@ def _db():
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10)
+    # (Audit 3) Giảm lỗi "database is locked" khi nhiều luồng đăng nhập/đếm sai đồng thời
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -253,6 +268,8 @@ def demo_emails() -> set[str]:
 
 def init_db() -> None:
     with _db() as conn:
+        # (Audit 3) Bật WAL để đọc/ghi song song không chặn nhau
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
         # Di trú: `CREATE TABLE IF NOT EXISTS` KHÔNG thêm cột vào bảng đã tồn tại, nên CSDL đang chạy thật
         # sinh ra trước các task sau sẽ thiếu cột. Thiếu thì thêm; người cũ nhận giá trị mặc định.
@@ -327,24 +344,41 @@ def _row_to_user(row: sqlite3.Row) -> User:
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
-    dk = hashlib.scrypt(password.encode(), salt=salt, dklen=32, **_SCRYPT)
+    dk = hashlib.scrypt(password.encode(), salt=salt, dklen=32, maxmem=64 * 1024 * 1024, **_SCRYPT)
     return f"scrypt${_SCRYPT['n']}${_SCRYPT['r']}${_SCRYPT['p']}${salt.hex()}${dk.hex()}"
 
 
 def verify_password(password: str, stored: str) -> bool:
     try:
-        algo, n, r, p, salt_hex, hash_hex = stored.split("$")
+        algo, n_s, r_s, p_s, salt_hex, hash_hex = stored.split("$")
         if algo != "scrypt":
+            return False
+        n, r, p = int(n_s), int(r_s), int(p_s)
+        dklen = len(hash_hex) // 2
+        # (Audit 3) Giới hạn tham số an toàn trước khi cấp phát RAM trong OpenSSL scrypt
+        if not (1 <= n <= 2**18 and 1 <= r <= 16 and 1 <= p <= 16 and 1 <= dklen <= 64):
             return False
         dk = hashlib.scrypt(
             password.encode(),
             salt=bytes.fromhex(salt_hex),
-            n=int(n), r=int(r), p=int(p),
-            dklen=len(hash_hex) // 2,
+            n=n, r=r, p=p,
+            dklen=dklen,
+            maxmem=64 * 1024 * 1024,
         )
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(dk.hex(), hash_hex)
+
+
+def needs_rehash(stored: str) -> bool:
+    """(Audit 3) True nếu hash đang dùng tham số scrypt cũ (vd p=1) cần băm lại khi đăng nhập đúng."""
+    try:
+        algo, n_s, r_s, p_s, _, _ = stored.split("$")
+        if algo != "scrypt":
+            return False
+        return (int(n_s), int(r_s), int(p_s)) != (_SCRYPT["n"], _SCRYPT["r"], _SCRYPT["p"])
+    except (ValueError, TypeError):
+        return False
 
 
 # ── Chống dò mật khẩu ────────────────────────────────────────────────
@@ -407,6 +441,15 @@ def attempt_lock(key: str):
                 _attempt_locks.pop(key, None)
 
 
+@contextmanager
+def attempt_locks(keys: list[str]):
+    """(Audit 3) Khoá nhiều key theo thứ tự sắp xếp cố định (tránh deadlock) — tuần tự hoá cả khoá email lẫn IP."""
+    with ExitStack() as stack:
+        for k in sorted(set(keys)):
+            stack.enter_context(attempt_lock(k))
+        yield
+
+
 def _limit_for(key: str) -> int:
     return MAX_FAILS_EMAIL if key.startswith("e:") else MAX_FAILS_IP
 
@@ -440,22 +483,24 @@ def lock_remaining(keys: list[str]) -> int:
 
 
 def record_failure(keys: list[str]) -> None:
+    """(Audit 3) Ghi nhận lần sai nguyên tử bằng BEGIN IMMEDIATE + SQL upsert để tránh lost update khi đoán song song."""
     now = time.time()
     with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         _cleanup(conn, now)
         for key in keys:
-            old = conn.execute(
-                "SELECT fails, first_at FROM login_fails WHERE key = ?", (key,)
-            ).fetchone()
-            fails = (old["fails"] + 1) if old else 1
-            first_at = old["first_at"] if old else now
-            locked = now + LOCK_SECONDS if fails >= _limit_for(key) else 0
+            lim = _limit_for(key)
+            locked_val = now + LOCK_SECONDS
             conn.execute(
                 "INSERT INTO login_fails (key, fails, first_at, locked_until)"
-                " VALUES (?, ?, ?, ?)"
-                " ON CONFLICT(key) DO UPDATE SET fails = excluded.fails,"
-                " locked_until = excluded.locked_until",
-                (key, fails, first_at, locked),
+                " VALUES (?, 1, ?, CASE WHEN 1 >= ? THEN ? ELSE 0 END)"
+                " ON CONFLICT(key) DO UPDATE SET"
+                " fails = login_fails.fails + 1,"
+                " locked_until = CASE"
+                "   WHEN login_fails.fails + 1 >= ? THEN MAX(login_fails.locked_until, ?)"
+                "   ELSE login_fails.locked_until"
+                " END",
+                (key, now, lim, locked_val, lim, locked_val),
             )
 
 
@@ -489,10 +534,15 @@ def client_ip(request) -> str:
         cf = request.headers.get("cf-connecting-ip", "").strip()
         if cf:
             return cf
-    elif mode in ("1", "true", "yes"):
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded.strip():
-            return forwarded.split(",")[0].strip()
+    elif mode in ("1", "true", "yes") or mode.isdigit():
+        hops = int(mode) if mode.isdigit() else 1
+        if hops >= 1:
+            forwarded = request.headers.get("x-forwarded-for", "")
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                # (Audit 3) Đọc từ BÊN PHẢI theo số hop proxy tin cậy — proxy nối IP thật vào cuối chuỗi;
+                # đọc parts[0] như trước cho phép client tự bịa phần đầu để vượt khoá IP.
+                return parts[-hops] if len(parts) >= hops else parts[0]
     return request.client.host if request.client else "?"
 
 
@@ -552,16 +602,35 @@ def get_by_id(user_id: str) -> User | None:
 
 
 def check_password_strength(password: str) -> None:
+    """(Audit 3) Quy tắc mật khẩu chuẩn: 8–128 ký tự, ít nhất 1 chữ in hoa (A–Z), 1 chữ thường (a–z), 1 chữ số (0–9),
+    và chặn mật khẩu quá phổ biến/lặp ký tự. Trả mã lỗi riêng (`weak_password` / `password_policy` / `password_common`)
+    để giao diện báo đúng lý do (không còn báo nhầm «phải 8+ ký tự» khi người dùng gõ «12345678»)."""
     if not encodable(password):
         raise AuthError("weak_password", "Mật khẩu chứa ký tự không hợp lệ", min=MIN_PASSWORD)
     if len(password) > MAX_PASSWORD:
         raise AuthError("password_too_long", f"Mật khẩu tối đa {MAX_PASSWORD} ký tự", max=MAX_PASSWORD)
-    if len(password) < MIN_PASSWORD:
+    if len(password) < MIN_PASSWORD or not password.strip():
         raise AuthError(
             "weak_password",
             f"Mật khẩu phải từ {MIN_PASSWORD} ký tự trở lên",
             min=MIN_PASSWORD,
         )
+    missing: list[str] = []
+    if not re.search(r"[A-Z]", password):
+        missing.append("upper")
+    if not re.search(r"[a-z]", password):
+        missing.append("lower")
+    if not re.search(r"[0-9]", password):
+        missing.append("digit")
+    if missing:
+        raise AuthError(
+            "password_policy",
+            "Mật khẩu phải gồm ít nhất 1 chữ in hoa, 1 chữ thường và 1 chữ số",
+            missing=missing,
+            min=MIN_PASSWORD,
+        )
+    if password.strip().lower() in _COMMON_PASSWORDS or len(set(password)) <= 2:
+        raise AuthError("password_common", "Mật khẩu này quá phổ biến hoặc dễ đoán, hãy chọn mật khẩu khác")
 
 
 def check_email(email: str) -> str:
@@ -690,8 +759,9 @@ def apply_admin_emails(user: User) -> User:
     return user
 
 
-def _unverified_is_empty(conn, user_id: str) -> bool:
-    """Tài khoản email chưa xác minh có xoá được không: chưa mật khẩu, chưa phiên, chưa nối nhà cung cấp, chưa hồ sơ."""
+def _unverified_is_empty(conn, user_id: str, owners: set[str] | None = None) -> bool:
+    """Tài khoản email chưa xác minh có xoá được không: chưa mật khẩu, chưa phiên, chưa nối nhà cung cấp, chưa hồ sơ.
+    `owners` (chủ các hồ sơ, đọc sẵn) cho người gọi lặp nhiều tài khoản khỏi quét đĩa lại mỗi lần."""
     row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
     if row is None or row["password_hash"]:
         return False
@@ -699,6 +769,8 @@ def _unverified_is_empty(conn, user_id: str) -> bool:
         return False
     if conn.execute("SELECT 1 FROM identities WHERE user_id = ?", (user_id,)).fetchone():
         return False
+    if owners is not None:
+        return user_id not in owners
     for ws_id in _workspace.all_ids():
         ws = _workspace.load(ws_id)
         if ws and ws.owner == user_id:
@@ -788,6 +860,11 @@ def create_email_token(user_id: str, purpose: str) -> str:
     now = time.time()
     ttl = VERIFY_HOURS * 3600 if purpose == "verify" else RESET_MINUTES * 60
     with _db() as conn:
+        # (Audit 3) Dọn bớt token hết hạn hoặc đã dùng cũ quá 24 giờ
+        conn.execute(
+            "DELETE FROM email_tokens WHERE expires_at < ? OR (used_at IS NOT NULL AND used_at < ?)",
+            (now, now - 86400),
+        )
         conn.execute(
             "UPDATE email_tokens SET used_at = ? WHERE user_id = ? AND purpose = ? AND used_at IS NULL",
             (now, user_id, purpose),
@@ -941,6 +1018,42 @@ def json_owner(ws_id: str) -> str:
     return json.loads((_workspace.WS_DIR / ws_id / "meta.json").read_text(encoding="utf-8")).get("owner", "")
 
 
+def purge_stale_unverified(days: int = 7) -> int:
+    """(Audit 3) Dọn `email_tokens` hết hạn/đã dùng và tài khoản `member` chưa xác minh rỗng quá `days` ngày."""
+    now = time.time()
+    cutoff = now - days * 86400
+    n = 0
+    with _db() as conn:
+        conn.execute(
+            "DELETE FROM email_tokens WHERE expires_at < ? OR (used_at IS NOT NULL AND used_at < ?)",
+            (now, now - 86400),
+        )
+        rows = conn.execute(
+            "SELECT id FROM users WHERE kind = 'member' AND email_verified = 0 AND created_at < ?",
+            (cutoff,),
+        ).fetchall()
+    if not rows:
+        return 0
+    # Đọc chủ hồ sơ trên đĩa MỘT lần, NGOÀI khoá ghi: quét đĩa trong BEGIN IMMEDIATE làm đăng nhập phải chờ khoá
+    owners = {ws.owner for ws_id in _workspace.all_ids() if (ws := _workspace.load(ws_id))}
+    for r in rows:
+        uid = r["id"]
+        try:
+            with _db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                still = conn.execute(
+                    "SELECT 1 FROM users WHERE id = ? AND kind = 'member' AND email_verified = 0",
+                    (uid,),
+                ).fetchone()
+                if still and _unverified_is_empty(conn, uid, owners):
+                    conn.execute("DELETE FROM email_tokens WHERE user_id = ?", (uid,))
+                    conn.execute("DELETE FROM users WHERE id = ? AND kind = 'member' AND email_verified = 0", (uid,))
+                    n += 1
+        except Exception:
+            log.exception("không xoá được tài khoản chưa xác minh cũ %s", uid)
+    return n
+
+
 def start_purge_thread(interval_hours: float = 6.0, stop: threading.Event | None = None) -> threading.Thread:
     """Dọn một lần lúc khởi động (luồng nền, không chặn) rồi lặp mỗi `interval_hours` giờ. `stop` (cho test) dừng
     vòng lặp gọn gàng thay vì phải ném ngoại lệ trong luồng."""
@@ -952,6 +1065,10 @@ def start_purge_thread(interval_hours: float = 6.0, stop: threading.Event | None
                 purge_expired_trials()
             except Exception:
                 log.exception("dọn tài khoản thử hỏng")
+            try:
+                purge_stale_unverified()
+            except Exception:
+                log.exception("dọn tài khoản chưa xác minh hỏng")
             stop.wait(interval_hours * 3600)
 
     t = threading.Thread(target=loop, daemon=True, name="purge-trials")
@@ -964,9 +1081,18 @@ def start_purge_thread(interval_hours: float = 6.0, stop: threading.Event | None
 def _cookie_flags() -> dict:
     """Khi frontend và API khác TÊN MIỀN (Vercel ↔ Render) thì bắt buộc
     `SameSite=None; Secure`, còn chạy localhost thì `Lax` là đủ và không cần
-    HTTPS. Đặt qua biến môi trường để không phải sửa code lúc triển khai."""
+    HTTPS. Đặt qua biến môi trường để không phải sửa code lúc triển khai.
+
+    (Audit 3) Nếu TSUCHO_COOKIE_SECURE không đặt, tự bật Secure=True khi TSUCHO_PUBLIC_URL là https://.
+    """
     samesite = os.getenv("TSUCHO_COOKIE_SAMESITE", "lax").lower()
-    secure = os.getenv("TSUCHO_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+    raw_secure = os.getenv("TSUCHO_COOKIE_SECURE", "").strip().lower()
+    if raw_secure in ("0", "false", "no"):
+        secure = False
+    elif raw_secure in ("1", "true", "yes"):
+        secure = True
+    else:
+        secure = os.getenv("TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://")
     return {"samesite": samesite, "secure": secure or samesite == "none"}
 
 
@@ -981,7 +1107,7 @@ def set_cookie(response: Response, token: str) -> None:
 
 
 def clear_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE, path="/", **_cookie_flags())
+    response.delete_cookie(COOKIE, path="/", httponly=True, **_cookie_flags())
 
 
 # ── Dependency dùng ở route ──────────────────────────────────────────

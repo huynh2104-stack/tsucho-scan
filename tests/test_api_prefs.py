@@ -112,7 +112,7 @@ def test_dang_xuat_dang_nhap_lai_van_con_cai_dat(client):
     client.put("/api/me/prefs", json={"fontScale": 1.15})
     client.post("/api/auth/logout")
     assert client.get("/api/me/prefs").status_code == 401
-    assert client.post("/api/auth/login", json={"email": "a@b.com", "password": "matkhau123"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "a@b.com", "password": "Matkhau123"}).status_code == 200
     assert client.get("/api/me/prefs").json()["fontScale"] == 1.15
 
 
