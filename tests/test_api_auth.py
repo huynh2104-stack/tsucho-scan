@@ -29,6 +29,8 @@ PUBLIC = {
     "/api/auth/forgot",
     "/api/auth/reset",
     "/api/auth/methods",
+    "/api/auth/google/nonce",
+    "/api/auth/google/credential",
     "/api/auth/{provider}/start",
     "/api/auth/{provider}/callback",
     # Danh sách tài khoản dùng thử: cố ý công khai — người chưa đăng nhập phải

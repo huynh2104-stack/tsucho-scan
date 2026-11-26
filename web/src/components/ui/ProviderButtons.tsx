@@ -1,5 +1,6 @@
 "use client";
 
+import GoogleSignIn from "@/components/ui/GoogleSignIn";
 import { useT } from "@/lib/i18n";
 
 /** Nút Google + LINE: THẺ <a> (chuyển trang toàn phần sang nhà cung cấp), không fetch. */
@@ -21,28 +22,39 @@ function GoogleG() {
 export default function ProviderButtons({
   next,
   google,
+  googleClientId,
+  onError,
   line,
 }: {
   /** Đường dẫn nội bộ đã qua `safeNext` */
   next: string;
   google: boolean;
+  /** Có → dùng nút Google chính thức (cá nhân hoá), nút chuyển hướng làm dự phòng */
+  googleClientId?: string | null;
+  onError?: (e: unknown) => void;
   line: boolean;
 }) {
   const { t } = useT();
   if (!google && !line) return null;
   const q = `?next=${encodeURIComponent(next)}`;
+  const googleLink = (
+    <a
+      href={`/api/auth/google/start${q}`}
+      data-testid="btn-google"
+      className={`${BASE} border border-[#747775] bg-white text-[#1f1f1f]`}
+    >
+      <GoogleG />
+      {t.authGoogle}
+    </a>
+  );
   return (
     <div className="grid gap-2.5">
-      {google && (
-        <a
-          href={`/api/auth/google/start${q}`}
-          data-testid="btn-google"
-          className={`${BASE} border border-[#747775] bg-white text-[#1f1f1f]`}
-        >
-          <GoogleG />
-          {t.authGoogle}
-        </a>
-      )}
+      {google &&
+        (googleClientId ? (
+          <GoogleSignIn clientId={googleClientId} next={next} fallback={googleLink} onError={onError ?? (() => {})} />
+        ) : (
+          googleLink
+        ))}
       {line && (
         <a href={`/api/auth/line/start${q}`} data-testid="btn-line" className={`${BASE} bg-[#06C755] text-white`}>
           {/* TODO: thay ô vuông tạm này bằng logo LINE chính thức tải từ LINE Developers (quy định thương hiệu LINE). */}

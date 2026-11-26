@@ -341,6 +341,9 @@ function LoginInner() {
       const so = (k: string, mac: number) => Number(e.info?.[k] ?? mac);
       if (e.code === "locked") return t.authLocked(Math.max(1, Math.ceil(so("seconds", 0) / 60)));
       if (e.code === "unverified") return t.authUnverified;
+      if (e.code === "state") return t.authErrState;
+      if (e.code === "provider") return t.authErrProvider;
+      if (e.code === "email_unverified") return t.authErrEmailUnverified;
       if (e.code === "captcha") return t.authCaptchaFail;
       if (e.code === "trial_off") return t.authTrialOff;
       if (e.code === "trial_new_limit") return t.authTrialNewLimit;
@@ -446,7 +449,13 @@ function LoginInner() {
                   </p>
                 )}
 
-                <ProviderButtons next={next} google={!!methods?.google} line={!!methods?.line} />
+                <ProviderButtons
+                  next={next}
+                  google={!!methods?.google}
+                  googleClientId={methods?.google_client_id}
+                  onError={setErr}
+                  line={!!methods?.line}
+                />
 
                 {(methods?.google || methods?.line) && (
                   <div className="my-4 flex items-center gap-3 text-t13 text-ink3" role="separator">

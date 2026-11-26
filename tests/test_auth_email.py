@@ -448,7 +448,7 @@ def test_header_bao_mat_moi_phan_hoi_va_no_store_cho_trang_token(client):
               client.post("/api/auth/forgot", json={"email": "x@y.com"}, headers={"Origin": "https://evil.example.com"}),
               client.get("/api/ws")):
         h = r.headers
-        assert h["referrer-policy"] == "no-referrer" and h["x-content-type-options"] == "nosniff"
+        assert h["referrer-policy"] == "strict-origin-when-cross-origin" and h["x-content-type-options"] == "nosniff"
         assert h["content-security-policy"] == "frame-ancestors 'none'" and h["x-frame-options"] == "DENY"
     assert "no-store" not in client.get("/api/health").headers.get("cache-control", "")
     for path in ("/verify/", "/reset/", "/forgot/"):
@@ -597,7 +597,7 @@ def test_methods(client, monkeypatch):
     monkeypatch.setattr(auth, "OPEN_LOGIN", True)
     assert client.get("/api/auth/methods").json() == {
         "google": False, "line": False, "email": True, "trial": True, "trial_limit": 5, "trial_keep_days": 7, "member_limit": 30,
-        "turnstile_site_key": None,
+        "turnstile_site_key": None, "google_client_id": None,
     }
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "id")                       # thiếu secret → vẫn ẩn
     assert client.get("/api/auth/methods").json()["google"] is False
@@ -609,7 +609,7 @@ def test_methods(client, monkeypatch):
     monkeypatch.setattr(auth, "OPEN_LOGIN", False)
     assert client.get("/api/auth/methods").json() == {
         "google": True, "line": True, "email": True, "trial": False, "trial_limit": 7, "trial_keep_days": 7, "member_limit": 40,
-        "turnstile_site_key": None,
+        "turnstile_site_key": None, "google_client_id": "id",
     }
 
 

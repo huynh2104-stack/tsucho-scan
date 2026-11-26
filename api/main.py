@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -120,8 +121,10 @@ def health() -> dict:
 
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 _NO_STORE_PREFIXES = ("/verify", "/reset", "/forgot")      # trang nhận token trong URL: không cho cache
+# GIS (nút Google) cần Referrer-Policy strict-origin-when-cross-origin; trang nhận token trong URL vẫn no-referrer
+_REFERRER_DEFAULT = (b"referrer-policy", b"strict-origin-when-cross-origin")
+_REFERRER_NONE = (b"referrer-policy", b"no-referrer")
 _SECURITY_HEADERS = [
-    (b"referrer-policy", b"no-referrer"),
     (b"x-content-type-options", b"nosniff"),
     (b"content-security-policy", b"frame-ancestors 'none'"),
     (b"x-frame-options", b"DENY"),
@@ -183,8 +186,8 @@ class SecurityMiddleware:
 
         async def send_wrapped(message):
             if message["type"] == "http.response.start":
-                hs = [(k, v) for k, v in message.get("headers", []) if k.lower() not in {h for h, _ in _SECURITY_HEADERS}]
-                hs += _SECURITY_HEADERS
+                hs = [(k, v) for k, v in message.get("headers", []) if k.lower() not in {h for h, _ in _SECURITY_HEADERS} | {b"referrer-policy"}]
+                hs += _SECURITY_HEADERS + [_REFERRER_NONE if no_store else _REFERRER_DEFAULT]
                 if hsts:
                     hs.append((b"strict-transport-security", b"max-age=31536000"))
                 if no_store:
@@ -210,7 +213,8 @@ class SecurityMiddleware:
                 if message["type"] == "http.response.start":
                     extra = [(b"strict-transport-security", b"max-age=31536000")] if os.getenv(
                         "TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://") else []
-                    message = {**message, "headers": list(message.get("headers", [])) + _SECURITY_HEADERS + extra}
+                    message = {**message, "headers": list(message.get("headers", [])) + _SECURITY_HEADERS
+                                          + [_REFERRER_NONE if path.startswith(_NO_STORE_PREFIXES) else _REFERRER_DEFAULT] + extra}
                 await send(message)
 
             await resp(scope, receive, send_wrapped)
@@ -240,6 +244,7 @@ def auth_methods() -> dict:
     """Nút đăng nhập nào hiện: thiếu khoá cấu hình thì tự ẩn. Công khai."""
     return {
         "google": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")),
+        "google_client_id": oauth.google_client_id(),    # công khai; null = dùng nút chuyển hướng thường
         "line": bool(os.getenv("LINE_CHANNEL_ID") and os.getenv("LINE_CHANNEL_SECRET")),
         "email": mailer.can_deliver(),
         "trial": auth.OPEN_LOGIN,
@@ -465,6 +470,49 @@ def _login_redirect(code: str) -> RedirectResponse:
     r = RedirectResponse(f"/login/?auth_error={code}", status_code=302)
     r.delete_cookie(oauth.STATE_COOKIE, path=oauth.COOKIE_PATH, **auth._cookie_flags())
     return r
+
+
+_GIS_PATH = "/api/auth/google"
+
+
+def _GIS_FLAGS() -> dict:
+    """Cờ cookie nonce GIS — dùng chung cho đặt và xoá để hai bên luôn khớp."""
+    return {**auth._cookie_flags(), "samesite": "lax"}
+
+
+@app.get("/api/auth/google/nonce")
+def google_nonce(response: Response) -> dict:
+    """Nonce cho nút Google (GIS): cấp ngẫu nhiên, buộc vào trình duyệt bằng cookie HttpOnly; credential gửi lên
+    phải mang đúng nonce này. Không lưu DB."""
+    if not oauth.configured("google"):
+        raise HTTPException(404, {"kind": "google_off"})
+    nonce = secrets.token_urlsafe(32)
+    response.set_cookie(oauth.GIS_COOKIE, nonce, max_age=oauth.GIS_TTL, httponly=True, path=_GIS_PATH, **_GIS_FLAGS())
+    response.headers["Cache-Control"] = "no-store"
+    return {"nonce": nonce}
+
+
+@app.post("/api/auth/google/credential")
+def google_credential(request: Request, response: Response, body: dict = Body(...)) -> dict:
+    """ID token từ nút «Sign in with Google»: kiểm chữ ký + nonce rồi vào CÙNG đường nối tài khoản với luồng chuyển hướng."""
+    if not oauth.configured("google"):
+        raise HTTPException(404, {"kind": "google_off"})
+    keys = [f"gis:{auth.ip_bucket(auth.client_ip(request))}"]
+    wait = auth.lock_remaining(keys)
+    if wait:
+        raise HTTPException(429, {"kind": "locked", "seconds": wait})
+    nonce = request.cookies.get(oauth.GIS_COOKIE)
+    if not nonce:                                   # không tính vào khoá: xảy ra vô tình (hai tab), kẻ gian cần token Google thật
+        raise HTTPException(400, {"kind": "state"})
+    try:
+        identity = oauth.verify_google_credential(body.get("credential"), nonce)
+    except oauth.OAuthError as e:
+        oauth.log.warning("nút Google lỗi %s: %s", e.code, e)
+        if e.code != "state":                       # lệch nonce cũng vô tình (hai tab) → không tính; sai chữ ký/trường mới tính
+            auth.record_failure(keys)
+        raise HTTPException(400, {"kind": e.code}) from e
+    response.delete_cookie(oauth.GIS_COOKIE, path=_GIS_PATH, httponly=True, **_GIS_FLAGS())    # dùng một lần
+    return _login_response(response, auth.login_with_identity("google", *identity)).to_json()
 
 
 @app.get("/api/auth/{provider}/start")

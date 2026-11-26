@@ -203,3 +203,15 @@ Thiếu khoá nào thì nút tương ứng tự ẩn — app không sập. Nâng
 | E | Kiểm cuối: pytest, npm test, tsc, E2E, bấm thử thật cả 3 cách; rồi commit + đưa lên laptop + trang giới thiệu | — | Claude |
 
 Thước đo xong: đăng nhập Google/LINE/email chạy thật trên `app.tsucho-scan.com`; ô «お試し» vẫn vào được và bị chặn đúng ở mặt thứ 6; người cũ vẫn vào được bằng ID cũ; không test nào cũ bị hỏng.
+
+## 10. Nút «Sign in with Google» cá nhân hoá (GIS)
+
+Nút chính thức của Google (Google Identity Services): người từng đăng nhập Google trên site này thấy «Sign in as <tên> / <email>» kèm ảnh đại diện; người mới thấy nút Google thường. Luồng chuyển hướng cũ (`/api/auth/google/start` → `/callback`) **giữ nguyên** và là nút dự phòng khi script GIS không nạp được (mạng, trình chặn quảng cáo, quá 8 giây). Không bao giờ hiện cả hai nút.
+
+- **Cấu hình**: `GET /api/auth/methods` trả thêm `google_client_id` (công khai; `null` nếu Google chưa cấu hình đủ id + secret) → giao diện dùng GIS khi có.
+- **Nonce**: `GET /api/auth/google/nonce` cấp `secrets.token_urlsafe(32)`, đặt cookie HttpOnly `tsucho_gis` (SameSite=Lax, Secure theo `_cookie_flags`, Max-Age 1800, path `/api/auth/google`) và trả `{nonce}` (`Cache-Control: no-store`). Không lưu DB; trình duyệt đưa nonce cho `google.accounts.id.initialize`, ID token mang lại nonce đó. Gọi `initialize` đúng một lần mỗi lần tải trang (`web/src/lib/gis.ts`).
+- **Đăng nhập**: `POST /api/auth/google/credential {credential}` — kiểm RS256 bằng chứng chỉ Google (`google.auth.jwt.decode`), `aud` = client id, `iss` hợp lệ, `exp`, nonce khớp cookie (`hmac.compare_digest`), `sub` không rỗng, email đã xác minh; rồi vào CÙNG `auth.login_with_identity` + `_login_response` với luồng chuyển hướng (cùng quy tắc nối tài khoản / `TSUCHO_ADMIN_EMAILS`). Thành công thì xoá cookie nonce (dùng một lần). Sai nhiều: khoá theo IP (`gis:` + IP, 20 lần / cửa sổ chung của `auth.py`) → 429 `locked`. Lỗi: 400 `state` (thiếu/lệch nonce) hoặc `provider` (token hỏng) hoặc `email_unverified`.
+- **Chứng chỉ**: `oauth._google_certs` cache trong bộ nhớ theo `Cache-Control: max-age` của `https://www.googleapis.com/oauth2/v1/certs` (mặc định 3600, tối đa 86400); gặp `kid` lạ thì tải lại, tối đa một lần mỗi 60 giây.
+- **Referrer-Policy**: mặc định nay là `strict-origin-when-cross-origin` (GIS cần); riêng `/verify`, `/reset`, `/forgot` (token trong URL) vẫn `no-referrer`.
+- **Phụ thuộc**: `google-auth>=2.30.0` (đã khai trong `requirements.txt`).
+- **Việc người vận hành**: Google Cloud Console → APIs & Services → Credentials → OAuth client (Web) → **承認済みの JavaScript 生成元** phải có `https://app.tsucho-scan.com`, `http://localhost`, `http://localhost:8000`. Thiếu thì nút Google báo lỗi origin và giao diện giữ nút dự phòng/hiện lỗi.

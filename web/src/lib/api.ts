@@ -325,6 +325,8 @@ export type AuthMethods = {
   /** null/thiếu → không hiện ô chống bot */
   turnstile_site_key?: string | null;
   trial_keep_days?: number;
+  /** Client ID công khai của Google → hiện nút «Sign in with Google» cá nhân hoá; null/thiếu → nút chuyển hướng thường */
+  google_client_id?: string | null;
 };
 export const fetchAuthMethods = async () =>
   asJson<AuthMethods>(await fetch(`${API}/api/auth/methods`, CRED));
@@ -354,6 +356,13 @@ export const resetPassword = (token: string, password: string) =>
 
 export const login = (email: string, password: string) =>
   jsonPost<Me>("/api/auth/login", { email, password });
+
+/** Nút Google (GIS): nonce buộc vào trình duyệt qua cookie HttpOnly, rồi gửi ID token để máy chủ kiểm. */
+export const googleNonce = () =>
+  fetch(`${API}/api/auth/google/nonce`, { ...CRED, cache: "no-store" }).then(asJson<{ nonce: string }>);
+
+export const googleCredential = (credential: string) =>
+  jsonPost<Me>("/api/auth/google/credential", { credential });
 
 export const logout = () => jsonPost<{ ok: true }>("/api/auth/logout", {});
 

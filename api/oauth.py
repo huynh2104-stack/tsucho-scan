@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +32,10 @@ COOKIE_PATH = "/api/auth/"
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
+GOOGLE_CERTS = "https://www.googleapis.com/oauth2/v1/certs"
+GIS_COOKIE = "tsucho_gis"                  # nonce của nút Google (GIS) buộc vào trình duyệt, HttpOnly
+GIS_TTL = 1800
+GOOGLE_ISS = ("accounts.google.com", "https://accounts.google.com")
 LINE_AUTH = "https://access.line.me/oauth2/v2.1/authorize"
 LINE_TOKEN = "https://api.line.me/oauth2/v2.1/token"
 LINE_VERIFY = "https://api.line.me/oauth2/v2.1/verify"
@@ -55,6 +60,11 @@ def _keys(provider: str) -> tuple[str, str]:
 def configured(provider: str) -> bool:
     cid, secret = _keys(provider)
     return bool(cid and secret)
+
+
+def google_client_id() -> str | None:
+    """Client ID công khai cho nút GIS; None khi Google chưa cấu hình đủ."""
+    return _keys("google")[0] if configured("google") else None
 
 
 def safe_next(value: str | None) -> str:
@@ -159,23 +169,104 @@ def _google_identity(code: str, st: dict) -> tuple[str, str, bool, str]:
     id_token = tok.get("id_token")
     if not isinstance(id_token, str):
         raise OAuthError("provider", "thiếu id_token")
-    c = _jwt_claims(id_token)
+    return _google_claims(_jwt_claims(id_token), cid, st["nonce"])
+
+
+def _google_claims(c: dict, cid: str, nonce: str, nonce_code: str = "provider") -> tuple[str, str, bool, str]:
+    """Kiểm các trường của id_token Google (dùng chung luồng chuyển hướng và nút GIS) → (sub, email, verified, name).
+    Chữ ký do người gọi lo: luồng chuyển hướng nhận token trực tiếp từ Google qua HTTPS, nút GIS thì kiểm RS256."""
     aud = c.get("aud")
-    if c.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+    if c.get("iss") not in GOOGLE_ISS:
         raise OAuthError("provider", "iss sai")
     if not (aud == cid or (isinstance(aud, list) and cid in aud)):
         raise OAuthError("provider", "aud sai")
     exp = c.get("exp")
     if not isinstance(exp, (int, float)) or exp + 60 <= time.time():
         raise OAuthError("provider", "id_token hết hạn")
-    if not _same(c.get("nonce"), st["nonce"]):
-        raise OAuthError("provider", "nonce sai")
+    if not _same(c.get("nonce"), nonce):
+        raise OAuthError(nonce_code, "nonce sai")
     sub = c.get("sub")
     if not isinstance(sub, str) or not sub:
         raise OAuthError("provider", "thiếu sub")
     if c.get("email_verified") not in (True, "true") or not c.get("email"):
         raise OAuthError("email_unverified", "email chưa xác minh")
     return sub, str(c["email"]), True, str(c.get("name") or "")
+
+
+# ── Nút «Sign in with Google» (GIS): trình duyệt gửi ID token, máy chủ tự kiểm chữ ký ──
+
+_CERTS_MAX_BYTES = 65536
+_certs: dict = {"keys": {}, "exp": 0.0, "fetched": 0.0, "failed_at": -1e9, "inflight": False}
+_certs_lock = threading.Lock()
+
+
+def _fetch_google_certs() -> tuple[dict, int]:
+    """Tải chứng chỉ công khai của Google: ({kid: PEM}, max-age giây). Tách riêng để test thay được."""
+    req = urllib.request.Request(GOOGLE_CERTS, headers={"User-Agent": "tsucho-scan/1.0"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        raw = resp.read(_CERTS_MAX_BYTES + 1)
+        cc = resp.headers.get("Cache-Control", "") or ""
+    if len(raw) > _CERTS_MAX_BYTES:
+        raise ValueError("phản hồi chứng chỉ quá lớn")
+    keys = json.loads(raw.decode("utf-8"))
+    m = re.search(r"max-age=(\d+)", cc)
+    return keys, int(m.group(1)) if m else 3600
+
+
+def _google_certs(kid: str | None) -> dict:
+    """Chứng chỉ đang cache. Hết hạn thì tải lại; `kid` lạ thì tải lại tối đa một lần mỗi 60 giây. Tải NGOÀI khoá, chỉ
+    một luồng tải mỗi lúc (single-flight). Tải lỗi → nghỉ 30 giây: còn chứng chỉ cũ thì dùng tiếp (gia hạn 300 giây),
+    chưa có gì thì báo lỗi ngay, không gọi mạng."""
+    now = time.time()
+    with _certs_lock:
+        keys = dict(_certs["keys"])
+        stale = now >= _certs["exp"]
+        unknown = bool(kid) and kid not in keys and now - _certs["fetched"] >= 60
+        if not (stale or unknown):
+            return keys
+        if now - _certs.get("failed_at", -1e9) < 30 or _certs.get("inflight"):
+            if stale and keys:
+                _certs["exp"] = max(_certs["exp"], now + 300)
+            if keys:
+                return keys
+            raise OAuthError("provider", "chưa có chứng chỉ Google")
+        _certs["inflight"] = True
+        _certs["fetched"] = now
+    try:
+        fetched, age = _fetch_google_certs()
+        if not isinstance(fetched, dict):
+            raise ValueError("certs không phải object")
+    except Exception as e:
+        log.warning("tải chứng chỉ Google thất bại: %s", type(e).__name__)
+        with _certs_lock:
+            _certs["inflight"] = False
+            _certs["failed_at"] = time.time()
+            if _certs["keys"]:
+                _certs["exp"] = max(_certs["exp"], time.time() + 300)
+                return dict(_certs["keys"])
+        raise OAuthError("provider", "không tải được chứng chỉ Google") from e
+    with _certs_lock:
+        _certs.update(keys=fetched, exp=time.time() + min(max(age, 0), 86400), inflight=False)
+        return dict(fetched)
+
+
+def verify_google_credential(credential: str, nonce: str) -> tuple[str, str, bool, str]:
+    """Kiểm ID token từ nút Google → (sub, email, verified, name), cùng dạng luồng chuyển hướng. Sai → OAuthError."""
+    cid, _ = _keys("google")
+    if not isinstance(credential, str) or not credential or len(credential) > 4096 or not cid:
+        raise OAuthError("provider", "credential hỏng")
+    if not isinstance(nonce, str) or not nonce:
+        raise OAuthError("state", "thiếu nonce")
+    try:
+        from google.auth import jwt as gjwt
+
+        kid = gjwt.decode_header(credential).get("kid")
+        claims = gjwt.decode(credential, certs=_google_certs(kid), audience=cid, clock_skew_in_seconds=60)
+    except OAuthError:
+        raise
+    except Exception as e:
+        raise OAuthError("provider", f"id_token sai: {type(e).__name__}") from e
+    return _google_claims(dict(claims), cid, nonce, "state")
 
 
 def _line_identity(code: str, st: dict) -> tuple[str, str, bool, str]:

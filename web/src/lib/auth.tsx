@@ -23,6 +23,7 @@ import {
 
 import * as api from "@/lib/api";
 import type { Me } from "@/lib/api";
+import { disableGisAutoSelect } from "@/lib/gis";
 
 type Ctx = {
   user: Me | null;
@@ -36,6 +37,8 @@ type Ctx = {
   /** Dùng cho /verify và /reset: thành công là đã đăng nhập. */
   verify: (token: string, password: string) => Promise<void>;
   reset: (token: string, password: string) => Promise<void>;
+  /** Nút Google (GIS): gửi ID token, thành công là đã đăng nhập. */
+  google: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -48,6 +51,7 @@ const AuthCtx = createContext<Ctx>({
   trialNew: async () => ({ id: "", password: "" }),
   verify: async () => {},
   reset: async () => {},
+  google: async () => {},
   logout: async () => {},
 });
 
@@ -94,17 +98,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await api.resetPassword(token, password));
   }, []);
 
+  const google = useCallback(async (credential: string) => {
+    setUser(await api.googleCredential(credential));
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.logout();
     } finally {
+      disableGisAutoSelect();
       setUser(null);
       router.replace("/login");
     }
   }, [router]);
 
   return (
-    <AuthCtx.Provider value={{ user, ready, login, register, trial, trialNew, verify, reset, logout }}>
+    <AuthCtx.Provider value={{ user, ready, login, register, trial, trialNew, verify, reset, google, logout }}>
       {children}
     </AuthCtx.Provider>
   );
