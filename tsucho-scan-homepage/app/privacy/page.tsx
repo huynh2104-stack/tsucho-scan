@@ -12,7 +12,7 @@ export const metadata: Metadata = {
  * Mọi câu phải ĐÚNG với hệ thống đang chạy — đổi máy chủ / đổi dịch vụ thì sửa trang này cùng lúc. */
 export default function PrivacyPage() {
   return (
-    <LegalPage title="プライバシーポリシー" updated="制定日：2026年11月25日">
+    <LegalPage title="プライバシーポリシー" updated="制定日：2026年11月25日　改定日：2026年11月26日">
       <p>
         通帳スキャン（以下「本サービス」）を運営する NGUYEN DAN HUYNH（個人。以下「運営者」）は、本サービスで取り扱う個人情報を、
         個人情報の保護に関する法律（以下「個人情報保護法」）その他の関係法令に従い、以下のとおり取り扱います。
@@ -89,15 +89,24 @@ export default function PrivacyPage() {
           </tr>
           <tr>
             <td>Cloudflare, Inc.</td>
-            <td>本サービスとの通信全般（暗号化された通信の中継、ドメイン管理、メールの転送、Cookie を使わないアクセス解析）。</td>
+            <td>本サービスとの通信全般（暗号化された通信の中継、ドメイン管理、メールの転送、Cookie を使わないアクセス解析、登録画面などでの自動操作の防止「Turnstile」）。</td>
           </tr>
           <tr>
             <td>Resend（Plus Five Five, Inc.）</td>
             <td>確認メール・パスワード再設定メールの送信先アドレスと本文。メール送信のため。</td>
           </tr>
           <tr>
-            <td>Google LLC / LY株式会社</td>
-            <td>Google または LINE でログインを選んだ場合のみ、ログイン処理のため。</td>
+            <td>Google LLC（Google ログイン）</td>
+            <td>
+              ログイン画面では「Google でログイン」ボタンを表示するため、Google のプログラムを読み込みます。このとき、
+              IP アドレスなどのアクセス情報が Google に送られます。Google アカウントにログイン中の方には、ボタンに
+              お名前とメールアドレスが表示されますが、ボタンを押すまで本サービスには送られません。ボタンを押した場合は、
+              ログイン処理のため。
+            </td>
+          </tr>
+          <tr>
+            <td>LY株式会社（LINE ログイン）</td>
+            <td>LINE でログインを選んだ場合のみ、ログイン処理のため。</td>
           </tr>
         </tbody>
       </table>
