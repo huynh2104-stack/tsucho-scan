@@ -16,6 +16,7 @@ Bảng này cũng đếm số thư gửi theo GIỜ (`m:<email>`, `mi:<ip>`) —
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -31,6 +32,8 @@ GLOBAL_DEFAULT = 300    # tổng mặt quét thật/ngày của MỌI tài kho�
 
 MAIL_PER_EMAIL = 3      # thư/giờ cho mỗi email
 MAIL_PER_IP = 10        # thư/giờ cho mỗi IP
+MAIL_DAILY_DEFAULT = 90  # thư/ngày toàn hệ thống
+log = logging.getLogger("tsucho.quota")
 
 _lock = threading.Lock()
 
@@ -121,19 +124,21 @@ def left(user: auth.User, ip: str) -> int | None:
     return None if st is None else st["left"]
 
 
-def _reserve_items(items: list[tuple[str, int]], n: int, day: str) -> bool:
-    """Cộng `n` vào MỌI khoá nếu tất cả còn đủ; không thì không đổi gì."""
+def _reserve_items(items: list[tuple], n: int, day: str) -> bool:
+    """Cộng `n` vào MỌI khoá nếu tất cả còn đủ; không thì không đổi gì. Mục có thể là (khoá, trần) hoặc
+    (khoá, trần, kỳ) khi khoá đó đếm theo kỳ riêng (vd. `mail-all` theo ngày trong khi `m:` theo giờ)."""
     with _lock, auth._db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        for key, limit in items:
-            if _used(conn, key, day) + n > limit:
+        full = [(it[0], it[1], it[2] if len(it) > 2 else day) for it in items]
+        for key, limit, d in full:
+            if _used(conn, key, d) + n > limit:
                 conn.rollback()
                 return False
-        for key, _ in items:
+        for key, _, d in full:
             conn.execute(
                 "INSERT INTO usage_counters (key, day, faces) VALUES (?, ?, ?)"
                 " ON CONFLICT(key, day) DO UPDATE SET faces = faces + excluded.faces",
-                (key, day, n),
+                (key, d, n),
             )
         return True
 
@@ -175,7 +180,15 @@ def mail_allowed(email: str, ip: str, purpose: str) -> bool:
     True = được gửi (đã ghi nhận); False = vượt → im lặng không gửi (người gọi vẫn trả 200).
     """
     hour = time.strftime("%Y-%m-%dT%H", time.localtime())
-    ok = _reserve_items([(f"m:{purpose}:{auth.normalize_email(email)}", MAIL_PER_EMAIL), (f"mi:{auth.ip_bucket(ip)}", MAIL_PER_IP)], 1, hour)
+    limit_all = _env_int("TSUCHO_MAIL_DAILY_LIMIT", MAIL_DAILY_DEFAULT)
+    ok = _reserve_items([
+        (f"m:{purpose}:{auth.normalize_email(email)}", MAIL_PER_EMAIL), (f"mi:{auth.ip_bucket(ip)}", MAIL_PER_IP),
+        ("mail-all", limit_all, today()),                  # trần toàn hệ thống/ngày (Resend miễn phí 100 thư/ngày)
+    ], 1, hour)
+    if not ok:
+        with auth._db() as conn:
+            if _used(conn, "mail-all", today()) >= limit_all:
+                log.warning("ĐÃ ĐẠT trần %d thư/ngày toàn hệ thống (TSUCHO_MAIL_DAILY_LIMIT): không gửi thêm", limit_all)
     # Dọn hàng quá 2 ngày (khoá ngày dạng 'YYYY-MM-DD', khoá giờ 'YYYY-MM-DDTHH': cùng so sánh theo chuỗi)
     old = time.strftime("%Y-%m-%d", time.localtime(time.time() - 2 * 86400))
     with auth._db() as conn:

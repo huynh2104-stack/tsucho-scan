@@ -71,7 +71,7 @@ class Peak:
 
 def measure(mode: str, server_python: str, port: int) -> dict:
     tmp = tempfile.mkdtemp(prefix="tsucho-ram-")
-    env = {**os.environ, "TSUCHO_DATA_DIR": tmp, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
+    env = {**{k: ('' if any(x in k.upper() for x in ("TURNSTILE", "GOOGLE_", "LINE_CHANNEL", "RESEND", "TSUCHO_MAIL")) else v) for k, v in os.environ.items()}, "TURNSTILE_SITE_KEY": "", "TURNSTILE_SECRET_KEY": "", "GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": "", "LINE_CHANNEL_ID": "", "LINE_CHANNEL_SECRET": "", "RESEND_API_KEY": "", "TSUCHO_DATA_DIR": tmp, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
            "TSUCHO_LOCAL_OCR": "0" if mode == "off" else "1"}
     if mode == "tess":
         fake = Path(tmp) / "fake"            # module giả: import RapidOCR là ImportError
@@ -105,7 +105,7 @@ def measure(mode: str, server_python: str, port: int) -> dict:
         out["rss_khoi_dong_mb"] = round(rss_mb(p))
 
         c = httpx.Client(base_url=base, timeout=180)
-        assert c.post("/api/auth/trial", json={"id": "ram@test.local", "password": "matkhau123"}).status_code == 200
+        assert c.post("/api/auth/trial/new", json={}).status_code == 200
         ws = c.post("/api/ws").json()["id"]
         data = c.post(f"/api/ws/{ws}/sample").json()
         sheets = data["sheets"]

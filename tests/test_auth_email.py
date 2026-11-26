@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import auth, mailer, main, quota, workspace
-from test_api_auth import client, register  # noqa: F401 — fixture dùng chung: CSDL tạm
+from test_api_auth import client, register, trial  # noqa: F401 — fixture dùng chung: CSDL tạm
 
 
 # ── Công cụ ───────────────────────────────────────────────────────────
@@ -239,28 +239,34 @@ def test_resend_van_gui_khi_token_cu_het_han(client):
 
 
 def test_trial_moi_toi_da_10_moi_ip_moi_ngay_dang_nhap_lai_khong_tinh(client, trial_on, monkeypatch):
+    mat_khau = []
     for i in range(10):
-        assert client.post("/api/auth/trial", json={"id": f"kh{i}", "password": "1"}).status_code == 200
+        r = client.post("/api/auth/trial/new", json={})
+        assert r.status_code == 200
+        mat_khau.append((r.json()["trial_id"], r.json()["trial_password"]))
         client.post("/api/auth/logout")
-    r = client.post("/api/auth/trial", json={"id": "kh10", "password": "1"})
+    r = client.post("/api/auth/trial/new", json={})
     assert r.status_code == 429 and r.json()["detail"] == {"kind": "trial_new_limit"}
-    assert auth.get_trial("kh10") is None
-    # vào lại tài khoản cũ không tính, kể cả khi đã chạm trần
-    assert client.post("/api/auth/trial", json={"id": "kh3", "password": "1"}).status_code == 200
+    # vào lại tài khoản cũ qua /trial: không tính vào trần tạo mới
+    assert client.post("/api/auth/trial", json={"id": mat_khau[3][0], "password": mat_khau[3][1]}).status_code == 200
     # IP khác thì tạo được; biến môi trường đổi được trần
     client.post("/api/auth/logout")
     monkeypatch.setenv("TSUCHO_TRUST_PROXY", "cloudflare")
-    r = client.post("/api/auth/trial", json={"id": "kh10", "password": "1"}, headers={"CF-Connecting-IP": "198.51.100.1"})
+    r = client.post("/api/auth/trial/new", json={}, headers={"CF-Connecting-IP": "198.51.100.1"})
     assert r.status_code == 200
     monkeypatch.setenv("TSUCHO_TRIAL_NEW_PER_IP", "11")
     client.post("/api/auth/logout")
-    assert client.post("/api/auth/trial", json={"id": "kh11", "password": "1"}).status_code == 200
+    monkeypatch.delenv("TSUCHO_TRUST_PROXY")
+    assert client.post("/api/auth/trial/new", json={}).status_code == 200
 
 
-def test_trial_id_hong_khong_an_vao_han_muc_tao_moi(client, trial_on, monkeypatch):
+def test_trial_vao_lai_khong_dung_han_muc_tao_moi(client, trial_on, monkeypatch):
     monkeypatch.setenv("TSUCHO_TRIAL_NEW_PER_IP", "1")
-    assert client.post("/api/auth/trial", json={"id": "  ", "password": "1"}).status_code == 400
-    assert client.post("/api/auth/trial", json={"id": "ok", "password": "1"}).status_code == 200
+    trial(client, "da-co")
+    for _ in range(3):
+        assert client.post("/api/auth/trial", json={"id": "da-co", "password": "1"}).status_code == 200
+    with auth._db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM usage_counters WHERE key LIKE 'tn:%'").fetchone()["n"] == 0
 
 
 def test_xac_minh_email_admin_thanh_admin_va_nhan_du_lieu_cu(client, monkeypatch):
@@ -457,26 +463,60 @@ def trial_on(monkeypatch):
     monkeypatch.setattr(auth, "OPEN_LOGIN", True)
 
 
-def test_trial_tao_va_vao_lai(client, trial_on):
-    r = client.post("/api/auth/trial", json={"id": " Tanaka ", "password": "1"})
+def test_trial_mot_cham_tao_ngau_nhien_va_vao_lai_bang_trial(client, trial_on):
+    r = client.post("/api/auth/trial/new", json={})
     assert r.status_code == 200, r.text
     j = r.json()
-    assert j["created"] is True and j["kind"] == "trial" and j["role"] == "user"
-    assert j["email"] == "tanaka", "email trả về KHÔNG có tiền tố trial:"
+    assert j["kind"] == "trial" and j["role"] == "user" and j["ephemeral"] is True
+    assert re.fullmatch(r"guest-[a-z2-7]{10}", j["trial_id"]) and j["email"] == j["trial_id"]
+    assert len(j["trial_password"]) >= 30 and "created" not in j
     with auth._db() as conn:
-        assert conn.execute("SELECT email FROM users").fetchone()["email"] == "trial:tanaka"
-    assert client.get("/api/auth/me").json()["email"] == "tanaka"
+        row = conn.execute("SELECT email, ephemeral, last_seen FROM users").fetchone()
+    assert row["email"] == "trial:" + j["trial_id"] and row["ephemeral"] == 1 and row["last_seen"] > 0
+    assert client.get("/api/auth/me").json()["ephemeral"] is True
 
     client.post("/api/auth/logout")
-    r = client.post("/api/auth/trial", json={"id": "TANAKA", "password": "1"})
-    assert r.status_code == 200 and "created" not in r.json()
-    assert r.json()["id"] == j["id"]
+    r2 = client.post("/api/auth/trial", json={"id": j["trial_id"], "password": j["trial_password"]})
+    assert r2.status_code == 200 and r2.json()["id"] == j["id"] and "trial_password" not in r2.json()
+    assert "created" not in r2.json()
     client.post("/api/auth/logout")
-    assert client.post("/api/auth/trial", json={"id": "tanaka", "password": "sai"}).status_code == 401
+    other = client.post("/api/auth/trial/new", json={}).json()
+    assert other["trial_id"] != j["trial_id"] and other["trial_password"] != j["trial_password"] and other["id"] != j["id"]
+
+
+def test_trial_id_la_khong_tao_moi_chi_401_nhu_sai_mat_khau(client, trial_on, monkeypatch):
+    n = []
+    monkeypatch.setattr(auth, "burn_time", lambda: n.append(1))
+    r = client.post("/api/auth/trial", json={"id": "chua-co", "password": "1"})
+    assert r.status_code == 401 and r.json()["detail"] == "Email hoặc mật khẩu không đúng"
+    assert auth.count_users() == 0 and n == [1]
+    with auth._db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM login_fails").fetchone()["n"] == 2      # có đếm khoá như sai mật khẩu
+    trial(client, "co-san")
+    sai = client.post("/api/auth/trial", json={"id": "co-san", "password": "sai"})
+    assert sai.status_code == 401 and sai.json() == r.json()
+
+
+def test_trial_mot_cham_bat_buoc_captcha_khi_da_cau_hinh(client, trial_on, monkeypatch):
+    from api import captcha
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "s")
+    monkeypatch.setenv("TURNSTILE_SITE_KEY", "k")
+    monkeypatch.setenv("TSUCHO_PUBLIC_URL", "https://app.tsucho-scan.com")
+    monkeypatch.setattr(captcha, "_post_form", lambda url, data: {"success": True, "hostname": "app.tsucho-scan.com"})
+    r = client.post("/api/auth/trial/new", json={})
+    assert r.status_code == 400 and r.json()["detail"] == {"kind": "captcha"} and auth.count_users() == 0
+    assert client.post("/api/auth/trial/new", json={"captcha": "tok"}).status_code == 200
+
+
+def test_trial_mot_cham_tat_thi_404(client, monkeypatch):
+    monkeypatch.setattr(auth, "OPEN_LOGIN", False)
+    r = client.post("/api/auth/trial/new", json={})
+    assert r.status_code == 404 and r.json()["detail"] == {"kind": "trial_off"}
+    assert client.post("/api/auth/trial/new").status_code == 404 and auth.count_users() == 0
 
 
 def test_trial_sai_mat_khau_bi_dem_va_khoa_nhu_login(client, trial_on):
-    client.post("/api/auth/trial", json={"id": "sato", "password": "dung"})
+    trial(client, "sato", "dung")
     client.post("/api/auth/logout")
     for _ in range(auth.MAX_FAILS_EMAIL):
         assert client.post("/api/auth/trial", json={"id": "sato", "password": "sai"}).status_code == 401
@@ -487,7 +527,7 @@ def test_trial_sai_mat_khau_bi_dem_va_khoa_nhu_login(client, trial_on):
 def test_trial_khoa_rieng_khong_khoa_email_that_cung_ten(client, trial_on):
     register(client, "sato@vd.com", "matkhau123")
     client.post("/api/auth/logout")
-    client.post("/api/auth/trial", json={"id": "sato@vd.com", "password": "dung"})
+    trial(client, "sato@vd.com", "dung")
     client.post("/api/auth/logout")
     for _ in range(auth.MAX_FAILS_EMAIL):
         client.post("/api/auth/trial", json={"id": "sato@vd.com", "password": "sai"})
@@ -501,23 +541,22 @@ def test_trial_tat_thi_404(client, monkeypatch):
     assert auth.count_users() == 0
 
 
-def test_trial_khong_nhan_id_hoac_mat_khau_rong_hay_qua_dai(client, trial_on):
-    r = client.post("/api/auth/trial", json={"id": "  ", "password": "1"})
-    assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_id"
+def test_trial_id_rong_qua_dai_hay_mat_khau_hong(client, trial_on):
+    assert client.post("/api/auth/trial", json={"id": "  ", "password": "1"}).status_code == 401
     r = client.post("/api/auth/trial", json={"id": "a" * (auth.OPEN_ID_MAX + 1), "password": "1"})
-    assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_id"
-    r = client.post("/api/auth/trial", json={"id": "abc", "password": ""})
-    assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"
+    assert r.status_code == 401            # ID quá dài: 401 như sai mật khẩu, không ghi khoá đếm
+    r = client.post("/api/auth/trial", json={"id": "a", "password": "x" * 129})
+    assert r.status_code == 400 and r.json()["detail"]["kind"] == "password_too_long"
     assert auth.count_users() == 0
 
 
 def test_trial_khong_chiem_duoc_email_that(client, trial_on):
     """Người lạ tạo ID thử trùng email thật thì chủ email vẫn đăng ký được, và hai tài khoản tách hẳn nhau."""
-    ke_la = client.post("/api/auth/trial", json={"id": "chu@congty.co.jp", "password": "ke-la"}).json()
+    ke_la = trial(client, "chu@congty.co.jp", "ke-la").json()
     client.post("/api/auth/logout")
 
-    dang_ky(client, "chu@congty.co.jp", "mat-khau-that-1")
-    xac_minh(client, "chu@congty.co.jp")
+    dang_ky(client, "chu@congty.co.jp")
+    xac_minh(client, "chu@congty.co.jp", "mat-khau-that-1")
     that = client.get("/api/auth/me").json()
     assert that["id"] != ke_la["id"] and that["kind"] == "member"
     client.post("/api/auth/logout")
@@ -530,7 +569,7 @@ def test_trial_khong_chiem_duoc_email_that(client, trial_on):
 
 
 def test_trial_khong_tu_noi_voi_google_hay_email_va_login_khong_dang_nhap_trial(client, trial_on):
-    client.post("/api/auth/trial", json={"id": "x@vd.com", "password": "1"})
+    trial(client, "x@vd.com")
     client.post("/api/auth/logout")
     assert auth.get_by_email("x@vd.com") is None and auth.get_by_email("trial:x@vd.com") is None
     assert client.post("/api/auth/login", json={"email": "x@vd.com", "password": "1"}).status_code == 401
@@ -557,7 +596,8 @@ def test_methods(client, monkeypatch):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(auth, "OPEN_LOGIN", True)
     assert client.get("/api/auth/methods").json() == {
-        "google": False, "line": False, "email": True, "trial": True, "trial_limit": 5, "member_limit": 30,
+        "google": False, "line": False, "email": True, "trial": True, "trial_limit": 5, "trial_keep_days": 7, "member_limit": 30,
+        "turnstile_site_key": None,
     }
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "id")                       # thiếu secret → vẫn ẩn
     assert client.get("/api/auth/methods").json()["google"] is False
@@ -568,7 +608,8 @@ def test_methods(client, monkeypatch):
     monkeypatch.setenv("TSUCHO_MEMBER_SCAN_LIMIT", "40")
     monkeypatch.setattr(auth, "OPEN_LOGIN", False)
     assert client.get("/api/auth/methods").json() == {
-        "google": True, "line": True, "email": True, "trial": False, "trial_limit": 7, "member_limit": 40,
+        "google": True, "line": True, "email": True, "trial": False, "trial_limit": 7, "trial_keep_days": 7, "member_limit": 40,
+        "turnstile_site_key": None,
     }
 
 
@@ -580,7 +621,7 @@ def test_me_co_kind_quota_va_providers(client, trial_on):
     assert {"id", "email", "role", "kind", "email_verified", "display_name", "providers", "quota"} <= set(j)
 
     client.post("/api/auth/logout")
-    client.post("/api/auth/trial", json={"id": "kh", "password": "1"})
+    trial(client, "kh")
     j = client.get("/api/auth/me").json()
     assert (j["kind"], j["email"], j["quota"]) == ("trial", "kh", {"limit": 5, "used": 0, "left": 5})
 

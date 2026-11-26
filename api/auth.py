@@ -18,13 +18,16 @@ Ba loại tài khoản (cột `kind`): `member` (đăng ký email đã xác minh
 `trial:<id>` để không chiếm được email thật), `demo` (TSUCHO_DEMO_ACCOUNTS). Xem docs/KE_HOACH_DANG_NHAP.md.
 """
 
+import base64
 import hashlib
 import hmac
 import ipaddress
+import logging
 import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -39,10 +42,27 @@ DB_PATH = DATA_DIR / "app.db"
 
 COOKIE = "tsucho_session"
 SESSION_DAYS = 14
+LAST_SEEN_STEP = 3600        # ghi `last_seen` tối đa mỗi giờ một lần
 MIN_PASSWORD = 8
 MAX_PASSWORD = 128
 MAX_EMAIL = 254
-_EMAIL_BAD = re.compile(r'[\x00-\x20\x7f<>,;"()\[\]\\]')
+_EMAIL_BAD = re.compile(r'[\x00-\x20\x7f<>,;:"()\[\]\\]')      # có `:` → không bao giờ trùng tiền tố trial:/google:/line:
+_LOCAL_URL = re.compile(r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)")
+
+
+def public_is_local() -> bool:
+    """TSUCHO_PUBLIC_URL không đặt hoặc trỏ về localhost = máy phát triển."""
+    url = os.getenv("TSUCHO_PUBLIC_URL", "").strip().lower()
+    return not url or bool(_LOCAL_URL.match(url))
+
+
+def encodable(text: str) -> bool:
+    """Chuỗi mã hoá được UTF-8 (JSON `\\ud800` đơn độc thì không → sqlite/băm sẽ ném lỗi 500)."""
+    try:
+        text.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
 
 # Băm scrypt: n=2^14, r=8, p=1 → ~16MB RAM, ~50–100ms mỗi lần thử.
 _SCRYPT = dict(n=2**14, r=8, p=1)
@@ -93,6 +113,7 @@ class User:
     email_verified: bool = False
     display_name: str = ""
     scan_limit: int | None = None  # None = theo mặc định của loại tài khoản (xem quota.py)
+    ephemeral: bool = False        # tài khoản «お試し» một chạm do máy tạo: tự xoá sau TSUCHO_TRIAL_KEEP_DAYS ngày không dùng
     identity_email: str = ""       # email nhà cung cấp (Google/LINE) — chỉ để HIỂN THỊ cho tài khoản `google:`/`line:`
 
     @property
@@ -110,6 +131,7 @@ class User:
         return {
             "id": self.id, "email": self.login_id, "role": self.role, "kind": self.kind,
             "email_verified": bool(self.email_verified), "display_name": self.display_name,
+            "ephemeral": bool(self.ephemeral),
         }
 
 
@@ -127,7 +149,9 @@ CREATE TABLE IF NOT EXISTS users (
     email_verified INTEGER NOT NULL DEFAULT 0,
     display_name  TEXT NOT NULL DEFAULT '',
     scan_limit    INTEGER,
-    legacy        INTEGER NOT NULL DEFAULT 0
+    legacy        INTEGER NOT NULL DEFAULT 0,
+    ephemeral     INTEGER NOT NULL DEFAULT 0,
+    last_seen     REAL
 );
 -- Từ điển sửa lỗi theo từng người dùng (task 3.3); `wrong_key` chỉ để so khớp. Bảng MỚI nên CREATE IF NOT EXISTS
 -- là đủ cho cả CSDL cũ (không cần ALTER).
@@ -245,6 +269,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN scan_limit INTEGER")
         if "legacy" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
+        if "ephemeral" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0")
+        if "last_seen" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN last_seen REAL")
         _classify_old_accounts(conn)
 
 
@@ -290,6 +318,7 @@ def _row_to_user(row: sqlite3.Row) -> User:
         email_verified=bool(row["email_verified"]),
         display_name=row["display_name"],
         scan_limit=row["scan_limit"],
+        ephemeral=bool(row["ephemeral"]),
         identity_email=shown,
     )
 
@@ -345,7 +374,37 @@ def ip_bucket(ip: str) -> str:
 
 
 def attempt_keys(email: str, ip: str) -> list[str]:
-    return [f"e:{normalize_email(email)}", f"i:{ip_bucket(ip)}"]
+    """Khoá đếm sai: `e:` + băm SHA-256 (cắt 24) của email/ID chuẩn hoá — không dùng chuỗi thô để bảng không phình
+    theo độ dài đầu vào; `i:` + IP (IPv6 gom /64)."""
+    digest = hashlib.sha256(normalize_email(email).encode("utf-8", "replace")).hexdigest()[:24]
+    return [f"e:{digest}", f"i:{ip_bucket(ip)}"]
+
+
+def email_keys(keys: list[str]) -> list[str]:
+    """Chỉ các khoá theo email/ID. Đăng nhập ĐÚNG chỉ được xoá bộ đếm này — xoá cả khoá IP thì kẻ có một tài khoản
+    của riêng mình xen một lần đăng nhập đúng giữa các lần đoán để phun mật khẩu không giới hạn."""
+    return [k for k in keys if k.startswith("e:")]
+
+
+_attempt_locks: dict[str, list] = {}
+_attempt_guard = threading.Lock()
+
+
+@contextmanager
+def attempt_lock(key: str):
+    """Khoá theo email/ID bao quanh «kiểm khoá → băm mật khẩu → ghi sai/xoá»: đoán song song không vượt ngưỡng.
+    Khoá tự dọn khi không còn ai giữ/chờ."""
+    with _attempt_guard:
+        entry = _attempt_locks.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _attempt_guard:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _attempt_locks.pop(key, None)
 
 
 def _limit_for(key: str) -> int:
@@ -493,6 +552,8 @@ def get_by_id(user_id: str) -> User | None:
 
 
 def check_password_strength(password: str) -> None:
+    if not encodable(password):
+        raise AuthError("weak_password", "Mật khẩu chứa ký tự không hợp lệ", min=MIN_PASSWORD)
     if len(password) > MAX_PASSWORD:
         raise AuthError("password_too_long", f"Mật khẩu tối đa {MAX_PASSWORD} ký tự", max=MAX_PASSWORD)
     if len(password) < MIN_PASSWORD:
@@ -509,7 +570,7 @@ def check_email(email: str) -> str:
     ≤ 254 ký tự, không khoảng trắng/ký tự điều khiển và không có các dấu < > , ; " ( ) [ ] (chống chèn tiêu đề thư/HTML)."""
     email = normalize_email(email)
     if (
-        not email or len(email) > MAX_EMAIL or not EMAIL_RE.match(email) or _EMAIL_BAD.search(email)
+        not email or not encodable(email) or len(email) > MAX_EMAIL or not EMAIL_RE.match(email) or _EMAIL_BAD.search(email)
         or email.startswith(TRIAL_PREFIX)
     ):
         raise AuthError("bad_email", "Email không hợp lệ")
@@ -543,29 +604,43 @@ def create_user(
     return user
 
 
-def create_trial_user(login_id: str, password: str) -> User:
+def create_trial_user(login_id: str, password: str, ephemeral: bool = False) -> User:
     """Tạo tài khoản «お試し»: ID tuỳ ý, mật khẩu ít nhất 1 ký tự. Lưu email = `trial:<id>`, role 'user'."""
     login_id = normalize_email(login_id)
-    if not login_id or len(login_id) > OPEN_ID_MAX:
+    if not login_id or len(login_id) > OPEN_ID_MAX or not encodable(login_id):
         raise AuthError("bad_id", "Tên đăng nhập không hợp lệ", max=OPEN_ID_MAX)
-    if not password:
+    if not password or not encodable(password):
         raise AuthError("weak_password", "Hãy nhập mật khẩu", min=1)
     if len(password) > MAX_PASSWORD:
         raise AuthError("password_too_long", f"Mật khẩu tối đa {MAX_PASSWORD} ký tự", max=MAX_PASSWORD)
     user = User(
         id=uuid.uuid4().hex[:12], email=TRIAL_PREFIX + login_id, role="user", created_at=time.time(),
-        kind="trial",
+        kind="trial", ephemeral=ephemeral,
     )
     try:
         with _db() as conn:
             conn.execute(
-                "INSERT INTO users (id, email, password_hash, role, created_at, kind)"
-                " VALUES (?, ?, ?, ?, ?, 'trial')",
-                (user.id, user.email, hash_password(password), user.role, user.created_at),
+                "INSERT INTO users (id, email, password_hash, role, created_at, kind, ephemeral, last_seen)"
+                " VALUES (?, ?, ?, ?, ?, 'trial', ?, ?)",
+                (user.id, user.email, hash_password(password), user.role, user.created_at, int(ephemeral),
+                 user.created_at),
             )
     except sqlite3.IntegrityError as e:
         raise AuthError("email_taken", "Tên này đã có tài khoản") from e
     return user
+
+
+def new_guest() -> tuple[User, str, str]:
+    """«お試し» một chạm: tài khoản trial NGẪU NHIÊN (`guest-` + 10 ký tự base32 thường, mật khẩu `token_urlsafe(24)`),
+    đánh dấu `ephemeral` để tự xoá khi bỏ không dùng. Trả (user, id, mật khẩu thô) — mật khẩu chỉ lộ ra lần này."""
+    for _ in range(5):
+        guest_id = "guest-" + base64.b32encode(secrets.token_bytes(7)).decode().lower()[:10]
+        password = secrets.token_urlsafe(24)
+        try:
+            return create_trial_user(guest_id, password, ephemeral=True), guest_id, password
+        except AuthError:                               # trùng ID (xác suất ~0): thử lại
+            continue
+    raise RuntimeError("không tạo được ID thử")
 
 
 def set_password(user_id: str, password: str) -> None:
@@ -576,6 +651,12 @@ def set_password(user_id: str, password: str) -> None:
 def mark_verified(user_id: str) -> None:
     with _db() as conn:
         conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+
+
+def clear_legacy(user_id: str) -> None:
+    """Chủ hộp thư đã chứng minh (bấm link đặt lại mật khẩu) → không còn là tài khoản `legacy` (email tự gõ)."""
+    with _db() as conn:
+        conn.execute("UPDATE users SET legacy = 0 WHERE id = ?", (user_id,))
 
 
 def set_scan_limit(email: str, limit: int | None) -> bool:
@@ -656,6 +737,15 @@ def login_with_identity(provider: str, subject: str, email: str, email_verified:
                     "SELECT id FROM users WHERE email = ? AND kind = 'member' AND email_verified = 1 AND legacy = 0",
                     (email,),
                 ).fetchone()
+                if link is None and email in admin_emails():
+                    # Admin cũ (legacy=1) mà người vận hành tự khai email trong TSUCHO_ADMIN_EMAILS: Google chứng minh
+                    # chủ hộp thư → nối vào đúng tài khoản đó và bỏ cờ legacy. Legacy không nằm trong danh sách: KHÔNG nối.
+                    link = conn.execute(
+                        "SELECT id FROM users WHERE email = ? AND kind = 'member' AND email_verified = 1 AND legacy = 1",
+                        (email,),
+                    ).fetchone()
+                    if link:
+                        conn.execute("UPDATE users SET legacy = 0 WHERE id = ?", (link["id"],))
             if link:
                 user_id = link["id"]
             else:                                                                      # c.
@@ -755,6 +845,7 @@ def start_session(user: User) -> str:
     now = time.time()
     with _db() as conn:
         conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+        conn.execute("UPDATE users SET last_seen = ? WHERE id = ?", (now, user.id))
         conn.execute(
             "INSERT INTO sessions (token_hash, user_id, created_at, expires_at)"
             " VALUES (?, ?, ?, ?)",
@@ -769,12 +860,103 @@ def end_session(token: str) -> None:
 
 
 def user_for_token(token: str) -> User | None:
+    now = time.time()
     with _db() as conn:
         row = conn.execute(
             "SELECT user_id FROM sessions WHERE token_hash = ? AND expires_at > ?",
-            (_token_hash(token), time.time()),
+            (_token_hash(token), now),
         ).fetchone()
+        if row:      # hoạt động gần nhất: chỉ ghi khi đã cũ hơn 1 giờ (không ghi mỗi yêu cầu)
+            conn.execute(
+                "UPDATE users SET last_seen = ? WHERE id = ? AND (last_seen IS NULL OR last_seen < ?)",
+                (now, row["user_id"], now - LAST_SEEN_STEP),
+            )
     return get_by_id(row["user_id"]) if row else None
+
+
+# ── Dọn tài khoản «お試し» một chạm bỏ không ─────────────────────────
+
+log = logging.getLogger("tsucho.auth")
+
+
+def trial_keep_days() -> int:
+    try:
+        return max(1, int(os.getenv("TSUCHO_TRIAL_KEEP_DAYS", "7")))
+    except ValueError:
+        return 7
+
+
+def purge_expired_trials(days: int | None = None) -> int:
+    """Xoá tài khoản trial MỘT CHẠM (`ephemeral=1`) không hoạt động quá `days` ngày (mặc định TSUCHO_TRIAL_KEEP_DAYS=7)
+    cùng mọi dữ liệu của nó: hồ sơ trên đĩa, phiên, bộ đếm sai, hạn mức, từ điển sửa lỗi, danh tính, token thư.
+    KHÔNG đụng trial cũ do di trú (ephemeral=0), member, demo, admin. Trả số tài khoản đã xoá. Một tài khoản lỗi
+    (vd. hồ sơ không xoá được) thì bỏ qua lượt này, thử lại lượt sau — để không để hồ sơ mồ côi bị `claim_ownerless` nhận."""
+    days = trial_keep_days() if days is None else days
+    cutoff = time.time() - days * 86400
+    with _db() as conn:
+        victims = [
+            (r["id"], r["email"]) for r in conn.execute(
+                "SELECT id, email FROM users WHERE kind = 'trial' AND ephemeral = 1"
+                " AND COALESCE(last_seen, created_at) < ?", (cutoff,))
+        ]
+    if not victims:
+        return 0
+    owners = {uid for uid, _ in victims}
+    failed: set[str] = set()
+    for ws_id in _workspace.all_ids():
+        try:
+            ws = _workspace.load(ws_id)
+            if ws and ws.owner in owners:
+                _workspace.delete(ws)
+        except Exception:
+            log.exception("không xoá được hồ sơ %s của tài khoản thử hết hạn", ws_id)
+            try:
+                failed.add(json_owner(ws_id))
+            except Exception:
+                failed |= owners                          # không biết của ai: giữ hết, lượt sau thử lại
+    n = 0
+    for uid, email in victims:
+        if uid in failed:
+            continue
+        try:
+            with _db() as conn:
+                conn.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM login_fails WHERE key = ?", (attempt_keys(email, "")[0],))
+                conn.execute("DELETE FROM usage_counters WHERE key = ?", (f"u:{uid}",))
+                conn.execute("DELETE FROM dict_entries WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM identities WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM email_tokens WHERE user_id = ?", (uid,))
+                conn.execute("DELETE FROM users WHERE id = ? AND kind = 'trial' AND ephemeral = 1", (uid,))
+            n += 1
+        except Exception:
+            log.exception("không xoá được tài khoản thử %s", uid)
+    if n:
+        log.warning("đã xoá %d tài khoản «お試し» hết hạn (không dùng quá %d ngày)", n, days)
+    return n
+
+
+def json_owner(ws_id: str) -> str:
+    """Chủ của hồ sơ đọc thẳng từ meta.json (khi `load` hỏng)."""
+    import json
+    return json.loads((_workspace.WS_DIR / ws_id / "meta.json").read_text(encoding="utf-8")).get("owner", "")
+
+
+def start_purge_thread(interval_hours: float = 6.0, stop: threading.Event | None = None) -> threading.Thread:
+    """Dọn một lần lúc khởi động (luồng nền, không chặn) rồi lặp mỗi `interval_hours` giờ. `stop` (cho test) dừng
+    vòng lặp gọn gàng thay vì phải ném ngoại lệ trong luồng."""
+    stop = stop or threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            try:
+                purge_expired_trials()
+            except Exception:
+                log.exception("dọn tài khoản thử hỏng")
+            stop.wait(interval_hours * 3600)
+
+    t = threading.Thread(target=loop, daemon=True, name="purge-trials")
+    t.start()
+    return t
 
 
 # ── Cookie ───────────────────────────────────────────────────────────

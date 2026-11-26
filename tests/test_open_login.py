@@ -1,6 +1,6 @@
 """Bản demo cho khách Nhật (03/11/2026): đăng nhập mở, cài đặt theo máy cho tài khoản chung, sổ mẫu thật.
 
-- «お試し» (/api/auth/trial): ID tuỳ ý + mật khẩu tuỳ ý; ID mới tự tạo tài khoản trial (role user), ID cũ vẫn phải đúng mật khẩu.
+- «お試し» (/api/auth/trial): ID tuỳ ý + mật khẩu tuỳ ý; chỉ vào lại tài khoản đã có (tạo mới: /api/auth/trial/new, xem test_auth_email.py).
 - Tài khoản dùng thử là tài khoản CHUNG ⇒ ngôn ngữ/giao diện không lưu lên máy chủ (người trước không áp lên người sau).
 - Sổ mẫu thật (samples/*.jpg): thêm vào chưa quét; quét đúng ảnh mẫu thì dùng kết quả đọc sẵn, KHÔNG gọi mô hình,
   không tính vào hạn mức dùng thử.
@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import extract
 from api import auth, demo, imgjobs, main, quota, workspace
+from test_api_auth import trial
 
 
 @pytest.fixture
@@ -43,31 +44,30 @@ def no_model(monkeypatch):
 
 # ── Đăng nhập mở ──────────────────────────────────────────────────────
 
-def test_ten_moi_tu_tao_tai_khoan_va_vao_luon(client):
+def test_vao_lai_tai_khoan_thu_khong_phan_biet_hoa_thuong_va_khoang_trang(client):
+    u = auth.create_trial_user(" Tanaka ", "1")
     r = client.post("/api/auth/trial", json={"id": " Tanaka ", "password": "1"})
     assert r.status_code == 200, r.text
-    assert r.json()["created"] is True
+    assert r.json()["id"] == u.id and "created" not in r.json()
     assert r.json()["role"] == "user"                  # không bao giờ thành admin dù là người đầu tiên
     assert client.get("/api/auth/me").json()["email"] == "tanaka"
 
     client.post("/api/auth/logout")
     r = client.post("/api/auth/trial", json={"id": "TANAKA", "password": "1"})
-    assert r.status_code == 200 and "created" not in r.json()
+    assert r.status_code == 200 and r.json()["id"] == u.id
 
 
 def test_ten_da_co_van_phai_dung_mat_khau(client):
-    assert client.post("/api/auth/trial", json={"id": "sato", "password": "abc"}).status_code == 200
+    assert trial(client, "sato", "abc").status_code == 200
     client.post("/api/auth/logout")
     r = client.post("/api/auth/trial", json={"id": "sato", "password": "sai"})
     assert r.status_code == 401
     assert client.get("/api/auth/me").status_code == 401
 
 
-def test_khong_nhan_ten_hoac_mat_khau_rong(client):
-    r = client.post("/api/auth/trial", json={"id": "   ", "password": "1"})
-    assert r.status_code == 400 and r.json()["detail"]["kind"] == "bad_id"
-    r = client.post("/api/auth/trial", json={"id": "abc", "password": ""})
-    assert r.status_code == 400 and r.json()["detail"]["kind"] == "weak_password"
+def test_id_la_hoac_rong_khong_tao_gi_ca(client):
+    assert client.post("/api/auth/trial", json={"id": "   ", "password": "1"}).status_code == 401
+    assert client.post("/api/auth/trial", json={"id": "abc", "password": ""}).status_code == 401
     assert auth.count_users() == 0
 
 
@@ -99,7 +99,7 @@ def test_tai_khoan_dung_thu_khong_luu_ngon_ngu_giao_dien(client, monkeypatch):
 
 
 def test_tai_khoan_rieng_van_luu_ngon_ngu(client):
-    client.post("/api/auth/trial", json={"id": "rieng", "password": "1"})
+    trial(client, "rieng")
     client.put("/api/me/prefs", json={"lang": "vi", "theme": "dark"})
     got = client.get("/api/me/prefs").json()
     assert got["lang"] == "vi" and got["theme"] == "dark"

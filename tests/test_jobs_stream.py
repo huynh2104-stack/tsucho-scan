@@ -146,6 +146,13 @@ def test_active_for_chi_tra_job_dang_chay(sach_jobs):
     assert jobs.active_for("w1") is None
 
 
+def _trial(client, login_id, password="1"):
+    """Tạo tài khoản «お試し» (nếu chưa có) rồi vào bằng /api/auth/trial — /trial không còn tự tạo."""
+    if not auth.get_trial(login_id):
+        auth.create_trial_user(login_id, password)
+    return client.post("/api/auth/trial", json={"id": login_id, "password": password})
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace, "DATA_DIR", tmp_path)
@@ -160,7 +167,7 @@ def client(tmp_path, monkeypatch):
 
 
 def test_route_jobs_active(client, sach_jobs):
-    client.post("/api/auth/trial", json={"id": "chu", "password": "1"})
+    _trial(client, "chu", "1")
     ws_id = client.post("/api/ws").json()["id"]
     url = f"/api/ws/{ws_id}/jobs/active"
     assert client.get(url).json() == {"job": None}
@@ -177,10 +184,10 @@ def test_route_jobs_active(client, sach_jobs):
 
 
 def test_route_jobs_active_nguoi_khac_404(client, sach_jobs):
-    client.post("/api/auth/trial", json={"id": "chu", "password": "1"})
+    _trial(client, "chu", "1")
     ws_id = client.post("/api/ws").json()["id"]
     client.post("/api/auth/logout")
-    client.post("/api/auth/trial", json={"id": "ke-la", "password": "1"})
+    _trial(client, "ke-la", "1")
     assert client.get(f"/api/ws/{ws_id}/jobs/active").status_code == 404
     client.post("/api/auth/logout")
     assert client.get(f"/api/ws/{ws_id}/jobs/active").status_code == 401

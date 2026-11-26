@@ -306,6 +306,8 @@ export type Me = {
   /** member = tài khoản thật · trial = «お試し» · demo = tài khoản dùng chung */
   kind?: "member" | "trial" | "demo";
   email_verified?: boolean;
+  /** tài khoản thử: dữ liệu tự xoá sau N ngày không dùng */
+  ephemeral?: boolean;
   display_name?: string;
   providers?: string[];
   /** limit/left = null: không giới hạn */
@@ -320,13 +322,20 @@ export type AuthMethods = {
   trial: boolean;
   trial_limit: number;
   member_limit: number;
+  /** null/thiếu → không hiện ô chống bot */
+  turnstile_site_key?: string | null;
+  trial_keep_days?: number;
 };
 export const fetchAuthMethods = async () =>
   asJson<AuthMethods>(await fetch(`${API}/api/auth/methods`, CRED));
 
 /** Đăng ký KHÔNG tạo phiên: máy chủ gửi thư xác minh và luôn trả `sent` (kể cả email đã có). */
-export const registerEmail = (email: string, lang: string) =>
-  jsonPost<{ ok: true; sent: true }>("/api/auth/register", { email, lang });
+export const registerEmail = (email: string, lang: string, captcha?: string) =>
+  jsonPost<{ ok: true; sent: true }>("/api/auth/register", { email, lang, ...(captcha ? { captcha } : {}) });
+
+/** «Dùng thử» một chạm: máy chủ tự tạo tài khoản thử ngẫu nhiên và trả ID + mật khẩu để trình duyệt nhớ. */
+export const trialNew = (captcha?: string) =>
+  jsonPost<Me & { trial_id: string; trial_password: string }>("/api/auth/trial/new", captcha ? { captcha } : {});
 
 export const trialLogin = (id: string, password: string) =>
   jsonPost<Me>("/api/auth/trial", { id, password });
@@ -334,11 +343,11 @@ export const trialLogin = (id: string, password: string) =>
 export const verifyEmail = (token: string, password: string) =>
   jsonPost<Me>("/api/auth/verify", { token, password });
 
-export const resendVerify = (email: string, lang: string) =>
-  jsonPost<{ ok: true }>("/api/auth/resend", { email, lang });
+export const resendVerify = (email: string, lang: string, captcha?: string) =>
+  jsonPost<{ ok: true }>("/api/auth/resend", { email, lang, ...(captcha ? { captcha } : {}) });
 
-export const forgotPassword = (email: string, lang: string) =>
-  jsonPost<{ ok: true }>("/api/auth/forgot", { email, lang });
+export const forgotPassword = (email: string, lang: string, captcha?: string) =>
+  jsonPost<{ ok: true }>("/api/auth/forgot", { email, lang, ...(captcha ? { captcha } : {}) });
 
 export const resetPassword = (token: string, password: string) =>
   jsonPost<Me>("/api/auth/reset", { token, password });

@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 
 import AuthShell from "@/components/ui/AuthShell";
 import { CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
-import { ApiError, resendVerify } from "@/lib/api";
+import Turnstile from "@/components/ui/Turnstile";
+import { ApiError, fetchAuthMethods, resendVerify } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { takeTokenFromUrl } from "@/lib/authnext";
 import { useT } from "@/lib/i18n";
@@ -32,9 +33,16 @@ export default function VerifyPage() {
   const [email, setEmail] = useState("");
   const [wait, setWait] = useState(0);
   const [resent, setResent] = useState(false);
+  const [siteKey, setSiteKey] = useState<string | null>(null);
+  const [cap, setCap] = useState<string | null>(null);
+  const [capKey, setCapKey] = useState(0);
+  const [capFail, setCapFail] = useState(false);
 
   useEffect(() => {
     setToken(takeTokenFromUrl());
+    fetchAuthMethods()
+      .then((m) => setSiteKey(m.turnstile_site_key ?? null))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -61,12 +69,21 @@ export default function VerifyPage() {
   }
 
   async function guiLai() {
+    if (siteKey && !cap) return;
+    setCapFail(false);
     setWait(60);
     setResent(true);
     try {
-      await resendVerify(email.trim(), lang);
-    } catch {
-      /* máy chủ luôn trả 200 */
+      await resendVerify(email.trim(), lang, cap ?? undefined);
+    } catch (e) {
+      // Máy chủ luôn trả 200, trừ khi chống bot từ chối
+      if (e instanceof ApiError && e.code === "captcha") {
+        setWait(0);
+        setResent(false);
+        setCapFail(true);
+      }
+    } finally {
+      setCapKey((k) => k + 1);
     }
   }
 
@@ -113,7 +130,14 @@ export default function VerifyPage() {
             onChange={(e) => setEmail(e.target.value)}
             className={INPUT}
           />
-          <button type="submit" disabled={wait > 0} className="btn btn-primary btn-lg mt-4 w-full">
+          {siteKey && <Turnstile siteKey={siteKey} onToken={setCap} resetKey={capKey} />}
+          {capFail && (
+            <p role="alert" className={ERR_BOX}>
+              <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+              <span className="min-w-0">{t.authCaptchaFail}</span>
+            </p>
+          )}
+          <button type="submit" disabled={wait > 0 || (!!siteKey && !cap)} className="btn btn-primary btn-lg mt-4 w-full">
             {wait > 0 ? t.authResendWait(wait) : t.authResend}
           </button>
           {resent && wait > 0 && (

@@ -23,6 +23,7 @@ PUBLIC = {
     "/api/auth/login",
     "/api/auth/logout",
     "/api/auth/trial",
+    "/api/auth/trial/new",
     "/api/auth/verify",
     "/api/auth/resend",
     "/api/auth/forgot",
@@ -56,6 +57,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TSUCHO_MAIL_SYNC", "1")               # việc gửi thư chạy nền → đồng bộ cho test
     monkeypatch.delenv("TSUCHO_PUBLIC_URL", raising=False)
     monkeypatch.delenv("TSUCHO_ORIGINS", raising=False)
+    monkeypatch.delenv("TURNSTILE_SECRET_KEY", raising=False)   # .env của máy dev có thể đặt; test mặc định không bật captcha
+    monkeypatch.delenv("TURNSTILE_SITE_KEY", raising=False)
     monkeypatch.delenv("TSUCHO_ADMIN_EMAILS", raising=False)
     monkeypatch.delenv("TSUCHO_TRUST_PROXY", raising=False)
     auth.init_db()
@@ -64,6 +67,13 @@ def client(tmp_path, monkeypatch):
     # Nhập file xử lý ở luồng nền: đợi xong TRƯỚC khi monkeypatch trả lại thư mục dữ liệu,
     # không thì việc nền chạy nhầm sang thư mục của test khác.
     imgjobs.wait_idle()
+
+
+def trial(client, login_id, password="1"):
+    """Tạo tài khoản «お試し» (nếu chưa có) rồi vào bằng /api/auth/trial — /trial không còn tự tạo."""
+    if not auth.get_trial(login_id):
+        auth.create_trial_user(login_id, password)
+    return client.post("/api/auth/trial", json={"id": login_id, "password": password})
 
 
 def register(client, email="a@b.com", password="matkhau123"):
@@ -322,7 +332,7 @@ def test_email_admin_chua_xac_minh_khong_duoc_len_admin(client, monkeypatch):
     assert auth.get_by_id(user.id).role == "user"
     # trial mang đúng tên email đó cũng không thành admin
     monkeypatch.setattr(auth, "OPEN_LOGIN", True)
-    r = client.post("/api/auth/trial", json={"id": "chu@vd.com", "password": "x"})
+    r = trial(client, "chu@vd.com", "x")
     assert r.json()["role"] == "user"
 
 

@@ -39,7 +39,7 @@ def main() -> int:
     args = ap.parse_args()
 
     tmp = Path(tempfile.mkdtemp(prefix="tsucho-perf-"))
-    env = {**os.environ, "TSUCHO_DATA_DIR": str(tmp / "data"), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    env = {**{k: ('' if any(x in k.upper() for x in ("TURNSTILE", "GOOGLE_", "LINE_CHANNEL", "RESEND", "TSUCHO_MAIL")) else v) for k, v in os.environ.items()}, "TURNSTILE_SITE_KEY": "", "TURNSTILE_SECRET_KEY": "", "GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": "", "LINE_CHANNEL_ID": "", "LINE_CHANNEL_SECRET": "", "RESEND_API_KEY": "", "TSUCHO_DATA_DIR": str(tmp / "data"), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     log = open(tmp / "uvicorn.log", "w", encoding="utf-8")
     server = subprocess.Popen(
         [os.path.abspath(args.server_python), "-W", "ignore", "-m", "uvicorn", "api.main:app", "--port", str(args.port)],
@@ -62,9 +62,7 @@ def main() -> int:
             pg.set_default_timeout(30000)
             pg.goto(f"{base}/login/")
             pg.locator("[data-testid=trial-box]").wait_for()
-            pg.fill("#trial-id", EMAIL)
-            pg.fill("#trial-password", PASSWORD)
-            pg.click("[data-testid=trial-submit]")
+            pg.click("[data-testid=trial-onetap]")
             pg.locator('[data-tour="drop"]').wait_for()
             pg.get_by_role("button", name="Bỏ qua").click()
 

@@ -25,14 +25,25 @@ from core import estimate_pages_usd
 from extract import _resolve_model, cache_status
 
 from . import (
-    auth, autofix, corrections, demo, export_csv, imgjobs, jobs, mailer, oauth, prefs, quota, results, rowmap, rowanchors,
+    auth, autofix, captcha, corrections, demo, export_csv, imgjobs, jobs, mailer, oauth, prefs, quota, results, rowmap, rowanchors,
     sample, workspace,
 )
 
-app = FastAPI(title="tsucho-scan API", version="0.3.0")
+def _docs_enabled() -> bool:
+    """/docs, /redoc, /openapi.json chỉ bật ở máy phát triển (TSUCHO_PUBLIC_URL không đặt hoặc là localhost)."""
+    return auth.public_is_local()
+
+
+def _app_kwargs() -> dict:
+    return {} if _docs_enabled() else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+app = FastAPI(title="tsucho-scan API", version="0.3.0", **_app_kwargs())
 
 auth.init_db()
 mailer.warn_if_unconfigured()
+captcha.warn_if_unconfigured()
+auth.start_purge_thread()          # dọn tài khoản «お試し» một chạm bỏ không (lúc khởi động + mỗi 6 giờ)
 # Tài khoản dùng thử (nếu máy chủ có khai báo TSUCHO_DEMO_ACCOUNTS)
 demo.tao_neu_thieu()
 
@@ -43,23 +54,24 @@ demo.tao_neu_thieu()
 #
 # ⚠ TUYỆT ĐỐI không để "*": API này nhận cookie phiên, mở cho mọi trang web
 # nghĩa là bất kỳ site nào cũng đọc được sổ ngân hàng của người đang đăng nhập.
-_ORIGINS = [
-    o.strip()
-    for o in os.getenv(
-        "TSUCHO_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
-    ).split(",")
-    if o.strip() and o.strip() != "*"
-]
+def _cors_origins() -> list[str]:
+    """Máy thật (TSUCHO_PUBLIC_URL không phải localhost) mà không khai TSUCHO_ORIGINS → KHÔNG mở CORS cho localhost:3000."""
+    default = "http://localhost:3000,http://127.0.0.1:3000" if auth.public_is_local() else ""
+    return [o.strip() for o in os.getenv("TSUCHO_ORIGINS", default).split(",") if o.strip() and o.strip() != "*"]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    # Không expose thì JS không đọc được tên file đính kèm khi tải về
-    expose_headers=["Content-Disposition"],
-)
+
+_ORIGINS = _cors_origins()
+
+if _ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # Không expose thì JS không đọc được tên file đính kèm khi tải về
+        expose_headers=["Content-Disposition"],
+    )
 
 
 # Mọi route đụng tới dữ liệu sổ đều nhận `user: CurrentUser` — chưa đăng nhập
@@ -115,6 +127,7 @@ _SECURITY_HEADERS = [
     (b"x-frame-options", b"DENY"),
 ]
 _LOCAL_ORIGIN = re.compile(r"http://(localhost|127\.0\.0\.1)(:\d+)?")
+_MAX_AUTH_BODY = 64 * 1024                     # thân POST /api/auth/* tối đa 64KB (413)
 
 
 def _origin_allowed(origin: str) -> bool:
@@ -137,7 +150,7 @@ def _origin_allowed(origin: str) -> bool:
 class SecurityMiddleware:
     """ASGI thuần (không đụng luồng SSE): (1) kiểm `Origin` mọi POST/PUT/PATCH/DELETE dưới /api/ — không có `Origin`
     (test, dòng lệnh) thì cho qua; (2) thêm header bảo mật vào MỌI phản hồi; (3) `Cache-Control: no-store` cho
-    /verify/, /reset/, /forgot/."""
+    /verify/, /reset/, /forgot/; (4) trang tĩnh `no-cache`, /_next/static/ giữ lâu (tên file đã có mã băm)."""
 
     def __init__(self, app):
         self.app = app
@@ -156,14 +169,35 @@ class SecurityMiddleware:
             resp = JSONResponse({"detail": {"kind": "bad_origin"}}, status_code=403)
             await self._with_headers(resp, path)(scope, receive, send)
             return
+        if scope.get("method") == "POST" and path.startswith("/api/auth/"):
+            try:
+                too_big = int(headers.get(b"content-length", b"0") or 0) > _MAX_AUTH_BODY
+            except ValueError:
+                too_big = True
+            if too_big:
+                resp = JSONResponse({"detail": {"kind": "too_large"}}, status_code=413)
+                await self._with_headers(resp, path)(scope, receive, send)
+                return
         no_store = path.startswith(_NO_STORE_PREFIXES)
+        hsts = os.getenv("TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://")
 
         async def send_wrapped(message):
             if message["type"] == "http.response.start":
                 hs = [(k, v) for k, v in message.get("headers", []) if k.lower() not in {h for h, _ in _SECURITY_HEADERS}]
                 hs += _SECURITY_HEADERS
+                if hsts:
+                    hs.append((b"strict-transport-security", b"max-age=31536000"))
                 if no_store:
                     hs = [(k, v) for k, v in hs if k.lower() != b"cache-control"] + [(b"cache-control", b"no-store")]
+                elif path.startswith("/_next/static/") and message.get("status") == 200:
+                    # Tên file có mã băm nội dung: không bao giờ đổi → giữ lâu, khỏi hỏi lại
+                    hs = [(k, v) for k, v in hs if k.lower() != b"cache-control"] + [
+                        (b"cache-control", b"public, max-age=31536000, immutable")]
+                elif not path.startswith("/api/") and not any(k.lower() == b"cache-control" for k, _ in hs):
+                    # Trang HTML + file gốc (icon, manifest): luôn hỏi lại máy chủ (ETag → 304 nếu không đổi).
+                    # Thiếu dòng này trình duyệt tự đoán «còn tươi» hàng giờ → sau khi cập nhật người dùng vẫn chạy
+                    # JS cũ (vd. form đăng ký chưa có ô Turnstile mà máy chủ đã đòi → báo lỗi khó hiểu).
+                    hs += [(b"cache-control", b"no-cache")]
                 message = {**message, "headers": hs}
             await send(message)
 
@@ -174,7 +208,9 @@ class SecurityMiddleware:
         async def call(scope, receive, send):
             async def send_wrapped(message):
                 if message["type"] == "http.response.start":
-                    message = {**message, "headers": list(message.get("headers", [])) + _SECURITY_HEADERS}
+                    extra = [(b"strict-transport-security", b"max-age=31536000")] if os.getenv(
+                        "TSUCHO_PUBLIC_URL", "").strip().lower().startswith("https://") else []
+                    message = {**message, "headers": list(message.get("headers", [])) + _SECURITY_HEADERS + extra}
                 await send(message)
 
             await resp(scope, receive, send_wrapped)
@@ -207,45 +243,66 @@ def auth_methods() -> dict:
         "line": bool(os.getenv("LINE_CHANNEL_ID") and os.getenv("LINE_CHANNEL_SECRET")),
         "email": mailer.can_deliver(),
         "trial": auth.OPEN_LOGIN,
+        "turnstile_site_key": captcha.site_key(),      # null = không hiện ô Turnstile
         "trial_limit": quota.trial_limit(),
+        "trial_keep_days": auth.trial_keep_days(),
         "member_limit": quota.member_default_limit(),
     }
 
 
+@app.post("/api/auth/trial/new")
+def trial_new(request: Request, response: Response, body: dict = Body(default={})) -> dict:
+    """«お試し» MỘT CHẠM: máy tạo tài khoản trial ngẫu nhiên và mở phiên. Trả user + `trial_id` + `trial_password`
+    (mật khẩu chỉ lộ ra lần này — giao diện cất vào localStorage để lần sau vào lại bằng /trial). Dữ liệu tự xoá
+    sau TSUCHO_TRIAL_KEEP_DAYS ngày không dùng."""
+    if not auth.OPEN_LOGIN:
+        raise HTTPException(404, {"kind": "trial_off"})
+    _check_captcha(request, body if isinstance(body, dict) else {})
+    if not quota.trial_new_allowed(auth.client_ip(request)):      # chặn một IP tạo tài khoản thử hàng loạt
+        raise HTTPException(429, {"kind": "trial_new_limit"})
+    user, guest_id, password = auth.new_guest()
+    auth.set_cookie(response, auth.start_session(user))
+    return {**user.to_json(), "trial_id": guest_id, "trial_password": password}
+
+
 @app.post("/api/auth/trial")
 def trial_login(request: Request, response: Response, body: dict = Body(...)) -> dict:
-    """«お試し»: ID + mật khẩu tuỳ ý. ID chưa có ⇒ tạo tài khoản `trial` rồi vào luôn; đã có ⇒ phải đúng mật khẩu."""
+    """Vào lại tài khoản «お試し» đã có (một chạm hoặc tài khoản cũ do di trú). ID chưa có ⇒ 401 y như sai mật khẩu —
+    KHÔNG còn tự tạo tài khoản (muốn tạo mới: /api/auth/trial/new)."""
     if not auth.OPEN_LOGIN:
         raise HTTPException(404, {"kind": "trial_off"})
     login_id = str(body.get("id", ""))
     password = str(body.get("password", ""))
     if len(password) > auth.MAX_PASSWORD:
         raise HTTPException(400, {"kind": "password_too_long", "max": auth.MAX_PASSWORD})
-    # Khoá đếm sai RIÊNG cho ID thử ("e:trial:<id>"): gõ nhầm ID thử không làm khoá đăng nhập của email thật trùng tên.
-    keys = auth.attempt_keys(auth.TRIAL_PREFIX + login_id, auth.client_ip(request))
-    wait = auth.lock_remaining(keys)
-    if wait:
-        raise HTTPException(429, {"kind": "locked", "seconds": wait})
-
-    found = auth.get_trial(login_id)
-    if not found:
-        ip = auth.client_ip(request)
-        if not quota.trial_new_allowed(ip):          # chặn một IP tạo tài khoản thử hàng loạt
-            raise HTTPException(429, {"kind": "trial_new_limit"})
-        try:
-            user = auth.create_trial_user(login_id, password)
-        except auth.AuthError as e:
-            quota.refund([f"tn:{auth.ip_bucket(ip)}"], 1)
-            raise _auth_error(e) from e
-        auth.clear_failures(keys)
-        auth.set_cookie(response, auth.start_session(user))
-        return {**user.to_json(), "created": True}
-    if not auth.verify_password(password, found[1]):
-        auth.record_failure(keys)
+    if not auth.encodable(password):
+        raise HTTPException(400, {"kind": "weak_password", "min": 1})
+    if len(login_id) > auth.OPEN_ID_MAX or not auth.encodable(login_id):
+        auth.burn_time()                              # ID quá dài/hỏng: trả như sai mật khẩu, KHÔNG ghi khoá đếm
         raise HTTPException(401, "Email hoặc mật khẩu không đúng")
-    auth.clear_failures(keys)
+    # Khoá đếm sai RIÊNG cho ID thử ("e:" + băm của "trial:<id>"): gõ nhầm ID thử không làm khoá đăng nhập của email
+    # thật trùng tên.
+    keys = auth.attempt_keys(auth.TRIAL_PREFIX + login_id, auth.client_ip(request))
+    with auth.attempt_lock(keys[0]):                 # đoán song song không vượt ngưỡng
+        wait = auth.lock_remaining(keys)
+        if wait:
+            raise HTTPException(429, {"kind": "locked", "seconds": wait})
+
+        found = auth.get_trial(login_id)
+        if not found:
+            auth.burn_time()                         # trả lời chậm y như khi ID có thật
+        if not found or not auth.verify_password(password, found[1]):
+            auth.record_failure(keys)
+            raise HTTPException(401, "Email hoặc mật khẩu không đúng")
+        auth.clear_failures(auth.email_keys(keys))       # CHỈ khoá email; khoá IP phải tự hết hạn
     auth.set_cookie(response, auth.start_session(found[0]))
     return found[0].to_json()
+
+
+def _check_captcha(request: Request, body: dict) -> None:
+    """Turnstile (nếu máy chủ có TURNSTILE_SECRET_KEY): kiểm ĐỒNG BỘ trước mọi việc khác, độc lập với email."""
+    if not captcha.verify(body.get("captcha"), auth.client_ip(request)):
+        raise HTTPException(400, {"kind": "captcha"})
 
 
 def _send_verify_mail(user: auth.User, ip: str, lang: str) -> None:
@@ -278,6 +335,7 @@ def register(request: Request, body: dict = Body(...)) -> dict:
 
     Luôn `{ok, sent}` (email đã có cũng vậy — không lộ ai đã đăng ký); mọi việc sau khi kiểm email chạy nền.
     """
+    _check_captcha(request, body)
     try:
         email = auth.check_email(str(body.get("email", "")))
     except auth.AuthError as e:
@@ -290,30 +348,34 @@ def register(request: Request, body: dict = Body(...)) -> dict:
 def login(request: Request, response: Response, body: dict = Body(...)) -> dict:
     """Đăng nhập email + mật khẩu — chỉ cho `member`/`demo` (không bao giờ trúng tài khoản `trial`)."""
     email = str(body.get("email", ""))
+    password = str(body.get("password", ""))
+    if len(email.strip()) > auth.MAX_EMAIL or not auth.encodable(email):
+        auth.burn_time()          # email quá dài/hỏng: 401 như sai mật khẩu, KHÔNG ghi khoá đếm (chặn phình bảng)
+        raise HTTPException(401, "Email hoặc mật khẩu không đúng")
     keys = auth.attempt_keys(email, auth.client_ip(request))
 
-    # Đang bị khoá thì KHÔNG kiểm tra mật khẩu. Kiểm tra rồi mới từ chối là vô
-    # nghĩa: kẻ dò cứ gọi tiếp và vẫn biết được lần đoán nào đúng.
-    wait = auth.lock_remaining(keys)
-    if wait:
-        # detail là dict để giao diện tự dịch sang tiếng người dùng đang xem —
-        # cùng lối với mã lỗi lúc quét (api/jobs.py).
-        raise HTTPException(429, {"kind": "locked", "seconds": wait})
+    with auth.attempt_lock(keys[0]):         # đoán song song không vượt ngưỡng
+        # Đang bị khoá thì KHÔNG kiểm tra mật khẩu. Kiểm tra rồi mới từ chối là vô
+        # nghĩa: kẻ dò cứ gọi tiếp và vẫn biết được lần đoán nào đúng.
+        wait = auth.lock_remaining(keys)
+        if wait:
+            # detail là dict để giao diện tự dịch sang tiếng người dùng đang xem —
+            # cùng lối với mã lỗi lúc quét (api/jobs.py).
+            raise HTTPException(429, {"kind": "locked", "seconds": wait})
 
-    found = auth.get_by_email(email)
-    password = str(body.get("password", ""))
-    # Sai email và sai mật khẩu phải trả CÙNG một câu — nếu khác nhau thì người
-    # ngoài dò được email nào đã có tài khoản.
-    if not found or not found[1] or len(password) > auth.MAX_PASSWORD:
-        auth.burn_time()          # trả lời chậm y như khi email có thật (kể cả tài khoản chưa đặt mật khẩu)
-        ok = False
-    else:
-        ok = auth.verify_password(password, found[1])
-    if not ok:
-        auth.record_failure(keys)
-        raise HTTPException(401, "Email hoặc mật khẩu không đúng")
+        found = auth.get_by_email(email)
+        # Sai email và sai mật khẩu phải trả CÙNG một câu — nếu khác nhau thì người
+        # ngoài dò được email nào đã có tài khoản.
+        if not found or not found[1] or len(password) > auth.MAX_PASSWORD:
+            auth.burn_time()          # trả lời chậm y như khi email có thật (kể cả tài khoản chưa đặt mật khẩu)
+            ok = False
+        else:
+            ok = auth.verify_password(password, found[1])
+        if not ok:
+            auth.record_failure(keys)
+            raise HTTPException(401, "Email hoặc mật khẩu không đúng")
 
-    auth.clear_failures(keys)
+        auth.clear_failures(auth.email_keys(keys))      # CHỈ khoá email; khoá IP phải tự hết hạn
     user = found[0]
     # Chỉ nói «chưa xác minh» SAU KHI mật khẩu đúng (người ngoài không dò được email nào đã đăng ký)
     if user.kind != "demo" and not user.email_verified:
@@ -348,6 +410,7 @@ def _resend_job(email: str, ip: str, lang: str) -> None:
 @app.post("/api/auth/resend")
 def resend_verify(request: Request, body: dict = Body(...)) -> dict:
     """Gửi lại thư xác minh (token mới) cho member chưa xác minh. Luôn 200, trả lời ngay, việc làm nền."""
+    _check_captcha(request, body)
     mailer.background(_resend_job, auth.normalize_email(str(body.get("email", ""))), auth.client_ip(request),
                       str(body.get("lang", "ja")))
     return {"ok": True, "sent": True}
@@ -364,6 +427,7 @@ def _forgot_job(email: str, ip: str, lang: str) -> None:
 @app.post("/api/auth/forgot")
 def forgot_password(request: Request, body: dict = Body(...)) -> dict:
     """Quên mật khẩu: có `member` đã xác minh thì gửi link đặt lại (hạn 30 phút). Luôn 200, trả lời ngay."""
+    _check_captcha(request, body)
     mailer.background(_forgot_job, auth.normalize_email(str(body.get("email", ""))), auth.client_ip(request),
                       str(body.get("lang", "ja")))
     return {"ok": True, "sent": True}
@@ -384,7 +448,8 @@ def reset_password(response: Response, body: dict = Body(...)) -> dict:
     auth.mark_verified(user.id)                       # bấm được link gửi tới email này = chủ email
     user.email_verified = True
     auth.end_all_sessions(user.id)
-    auth.clear_failures([f"e:{auth.normalize_email(user.email)}"])
+    auth.clear_legacy(user.id)                        # chủ hộp thư đã chứng minh → không còn là tài khoản legacy
+    auth.clear_failures(auth.email_keys(auth.attempt_keys(user.email, "")))
     return _login_response(response, user).to_json()
 
 
@@ -1434,6 +1499,11 @@ if WEB_DIR.is_dir():
         # trình viên tưởng đường dẫn đúng.
         if path.startswith("api/"):
             raise HTTPException(404, "Không có API này")
+
+        # Từ chối SỚM, trước mọi thao tác đường dẫn: `\\host\share` (UNC) làm resolve() trên Windows chạm SMB ra ngoài,
+        # `C:/...` là ổ đĩa tuyệt đối, `/...` ghi đè gốc. Không hợp lệ → trả trang chủ.
+        if "\\" in path or ":" in path or "\x00" in path or path.startswith("/"):
+            return FileResponse(WEB_DIR / "index.html")
 
         # Chặn đi ngược thư mục: '../../etc/passwd' phải không ra khỏi web/out
         target = (WEB_DIR / path).resolve()

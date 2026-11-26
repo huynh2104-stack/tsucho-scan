@@ -22,6 +22,13 @@ MODEL = "gemini-3.1-flash-lite"
 MAT_KHAU = "matkhau-demo"
 
 
+def _trial(client, login_id, password="1"):
+    """Tạo tài khoản «お試し» (nếu chưa có) rồi vào bằng /api/auth/trial — /trial không còn tự tạo."""
+    if not auth.get_trial(login_id):
+        auth.create_trial_user(login_id, password)
+    return client.post("/api/auth/trial", json={"id": login_id, "password": password})
+
+
 # ── Dựng môi trường ───────────────────────────────────────────────────
 
 @pytest.fixture
@@ -87,7 +94,7 @@ def _ho_so(client, email="thuong", demo_acc=False):
     if email == "demo@x.test":
         client.post("/api/auth/login", json={"email": email, "password": MAT_KHAU})
     else:
-        client.post("/api/auth/trial", json={"id": email, "password": MAT_KHAU})
+        _trial(client, email, MAT_KHAU)
     ws_id = client.post("/api/ws").json()["id"]
     _them_mat(ws_id, "m", (extract.SAMPLE_DIR / "yucho.jpg").read_bytes())
     _them_mat(ws_id, "n", _jpeg(10))
@@ -241,7 +248,7 @@ def test_uoc_tinh_bo_id_la_va_rong_thi_400(client, model):
 def test_uoc_tinh_ho_so_nguoi_khac_thi_404(client, model):
     ws_id = _ho_so(client, "chu")
     client.post("/api/auth/logout")
-    client.post("/api/auth/trial", json={"id": "ke-la", "password": MAT_KHAU})
+    _trial(client, "ke-la", MAT_KHAU)
     assert _uoc(client, ws_id, ["n"]).status_code == 404
     client.post("/api/auth/logout")
     assert _uoc(client, ws_id, ["n"]).status_code == 401

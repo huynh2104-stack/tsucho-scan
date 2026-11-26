@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import re
 import shutil
@@ -228,15 +229,22 @@ def make_rotated_pdf(path: Path) -> list[int]:
     return need
 
 
+def enter_old_trial(pg_src, pg_new) -> None:
+    """Máy lạ vào CÙNG tài khoản thử: lấy ID + mật khẩu máy đã cất ở trình duyệt đầu, rồi nhập qua 「以前のIDでログイン」."""
+    cred = json.loads(pg_src.evaluate("localStorage.getItem('tsucho.trial')"))
+    pg_new.get_by_role("button", name="以前のIDでログイン").click()
+    pg_new.fill("#trial-id", cred["id"])
+    pg_new.fill("#trial-password", cred["password"])
+    pg_new.click("[data-testid=trial-submit]")
+
+
 # ── các bước ──────────────────────────────────────────────────────────
 
 def step_register(pg, base: str, ctx: dict) -> str:
     """Ô «お試し（登録不要）» (khung riêng dưới form đăng nhập): gõ ID mới là tự tạo tài khoản thử rồi vào luôn."""
     pg.goto(f"{base}/login/")
     pg.locator("[data-testid=trial-box]").wait_for(timeout=10000)
-    pg.fill("#trial-id", EMAIL)
-    pg.fill("#trial-password", PASSWORD)
-    pg.click("[data-testid=trial-submit]")
+    pg.click("[data-testid=trial-onetap]")                        # một chạm: máy tự tạo tài khoản thử, trình duyệt nhớ
     pg.locator('[data-tour="drop"]').wait_for(timeout=15000)      # bàn làm việc đã hiện
     if ctx.get("font_scale"):                                     # --font-scale: chạy cả kịch bản ở cỡ chữ lớn
         assert pg.request.put(f"{base}/api/me/prefs", data={"fontScale": ctx["font_scale"]}).ok
@@ -1390,9 +1398,7 @@ def step_settings(pg, base: str, ctx: dict) -> str:
         pg2.set_default_timeout(10000)
         pg2.goto(f"{base}/login/")
         pg2.locator("[data-testid=trial-box]").wait_for()    # gõ trước khi trang sẵn sàng thì mất chữ
-        pg2.fill("#trial-id", EMAIL)
-        pg2.fill("#trial-password", PASSWORD)
-        pg2.click("[data-testid=trial-submit]")
+        enter_old_trial(pg, pg2)
         pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
         wait_until(lambda: pg2.evaluate("document.documentElement.lang") == "ja", "máy lạ nhận ngôn ngữ đã lưu (ja)")
         wait_until(lambda: pg2.evaluate("document.documentElement.dataset.theme") == "dark", "máy lạ nhận chủ đề đã lưu (tối)")
@@ -1968,9 +1974,7 @@ def step_font_scale(pg, base: str, ctx: dict) -> str:
             pg2.locator("[data-testid=trial-box]").wait_for()
             px = pg2.evaluate("parseFloat(getComputedStyle(document.querySelector('button[type=submit]')).fontSize)")
             assert abs(px - 15) < 0.05, f"máy lạ chưa chọn gì: chữ phải đúng cỡ chuẩn (15px) nhờ --fs mặc định trong CSS, đang là {px}"
-            pg2.fill("#trial-id", EMAIL)
-            pg2.fill("#trial-password", PASSWORD)
-            pg2.click("[data-testid=trial-submit]")
+            enter_old_trial(pg, pg2)
             pg2.locator('[data-tour="drop"]').wait_for(timeout=15000)
             wait_until(lambda: pg2.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--fs').trim()") == "1.3",
                        "máy lạ nhận cỡ chữ đã lưu")
@@ -2207,7 +2211,9 @@ def main() -> int:
         return 2
 
     tmp = Path(tempfile.mkdtemp(prefix="tsucho-e2e-"))
-    env = {**os.environ, "TSUCHO_DATA_DIR": str(tmp / "data"), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    # Không để .env của máy dev lọt vào máy chủ E2E: không gửi thư thật, không đòi Turnstile, không hiện nút Google/LINE
+    clean = {k: ('' if any(x in k.upper() for x in ("TURNSTILE", "GOOGLE_", "LINE_CHANNEL", "RESEND", "TSUCHO_MAIL")) else v) for k, v in os.environ.items()}
+    env = {**clean, "TURNSTILE_SITE_KEY": "", "TURNSTILE_SECRET_KEY": "", "GOOGLE_CLIENT_ID": "", "GOOGLE_CLIENT_SECRET": "", "LINE_CHANNEL_ID": "", "LINE_CHANNEL_SECRET": "", "RESEND_API_KEY": "", "TSUCHO_DATA_DIR": str(tmp / "data"), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
     log = open(tmp / "uvicorn.log", "w", encoding="utf-8")
     server = subprocess.Popen(
         [os.path.abspath(args.server_python), "-W", "ignore", "-m", "uvicorn", "api.main:app",

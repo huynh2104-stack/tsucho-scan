@@ -29,8 +29,10 @@ type Ctx = {
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Không đăng nhập: máy chủ gửi thư xác minh. */
-  register: (email: string, lang: string) => Promise<void>;
+  register: (email: string, lang: string, captcha?: string) => Promise<void>;
   trial: (id: string, password: string) => Promise<void>;
+  /** Tạo tài khoản thử mới, trả ID + mật khẩu để cất vào trình duyệt. */
+  trialNew: (captcha?: string) => Promise<{ id: string; password: string }>;
   /** Dùng cho /verify và /reset: thành công là đã đăng nhập. */
   verify: (token: string, password: string) => Promise<void>;
   reset: (token: string, password: string) => Promise<void>;
@@ -43,6 +45,7 @@ const AuthCtx = createContext<Ctx>({
   login: async () => {},
   register: async () => {},
   trial: async () => {},
+  trialNew: async () => ({ id: "", password: "" }),
   verify: async () => {},
   reset: async () => {},
   logout: async () => {},
@@ -69,12 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await api.login(email, password));
   }, []);
 
-  const register = useCallback(async (email: string, lang: string) => {
-    await api.registerEmail(email, lang);
+  const register = useCallback(async (email: string, lang: string, captcha?: string) => {
+    await api.registerEmail(email, lang, captcha);
   }, []);
 
   const trial = useCallback(async (id: string, password: string) => {
     setUser(await api.trialLogin(id, password));
+  }, []);
+
+  const trialNew = useCallback(async (captcha?: string) => {
+    const { trial_id, trial_password, ...me } = await api.trialNew(captcha);
+    setUser(me);
+    return { id: trial_id, password: trial_password };
   }, []);
 
   const verify = useCallback(async (token: string, password: string) => {
@@ -95,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   return (
-    <AuthCtx.Provider value={{ user, ready, login, register, trial, verify, reset, logout }}>
+    <AuthCtx.Provider value={{ user, ready, login, register, trial, trialNew, verify, reset, logout }}>
       {children}
     </AuthCtx.Provider>
   );

@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import threading
+import urllib.error
 import urllib.request
 from datetime import datetime
 
@@ -210,8 +211,13 @@ def _send_resend(key: str, to: str, subject: str, text: str, html: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             resp.read()
-    except Exception as e:                       # chỉ ghi log — không lộ khoá, không ném
-        log.error("Resend gửi thư thất bại: %s", e)
+            status = getattr(resp, "status", 200)
+            if not 200 <= status < 300:
+                log.error("Resend trả HTTP %s — thư không được gửi", status)
+    except urllib.error.HTTPError as e:           # chỉ ghi mã trạng thái — không lộ khoá hay nội dung thư
+        log.error("Resend trả HTTP %s — thư không được gửi", e.code)
+    except Exception as e:                        # mạng đứt, timeout...: chỉ ghi log, không ném
+        log.error("Resend gửi thư thất bại: %s", type(e).__name__)
 
 
 def _write_outbox(to: str, subject: str, text: str, html: str, purpose: str) -> None:

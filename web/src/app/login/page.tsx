@@ -32,6 +32,7 @@ import LangMenu from "@/components/LangMenu";
 import { BrandMark } from "@/components/ui/Brand";
 import Seal from "@/components/ui/Seal";
 import ProviderButtons from "@/components/ui/ProviderButtons";
+import Turnstile from "@/components/ui/Turnstile";
 import { CheckCircle, CircleNotch, Eye, EyeSlash, WarningCircle } from "@/components/ui/icons";
 import {
   ApiError,
@@ -150,13 +151,14 @@ function Showcase() {
 
 const PRIVACY_URL = "https://tsucho-scan.com/privacy";
 const TERMS_URL = "https://tsucho-scan.com/terms";
+const TRIAL_KEY = "tsucho.trial";
 const ERR_MARK = "mt-4 flex items-start gap-2 rounded-[3px] bg-warnbg px-3 py-2 text-t13 leading-[1.6] text-warnink";
 const LABEL = "block text-t13 font-bold text-ink2";
 const INPUT = "field mt-1.5 min-h-[calc(42px*var(--fs))] text-t15 max-sm:text-t16";
 
 function LoginInner() {
   const { t, lang } = useT();
-  const { user, ready, login, register, trial } = useAuth();
+  const { user, ready, login, register, trial, trialNew } = useAuth();
   const router = useRouter();
   const sp = useSearchParams();
   const next = safeNext(sp.get("next"));
@@ -176,14 +178,34 @@ function LoginInner() {
   const [tPw, setTPw] = useState("");
   const [tBusy, setTBusy] = useState(false);
   const [tErr, setTErr] = useState<unknown>(null);
+  // Tài khoản thử đã cất trong trình duyệt này → bấm nút là vào lại đúng tài khoản đó
+  const [saved, setSaved] = useState<{ id: string; password: string } | null>(null);
+  const [oldOpen, setOldOpen] = useState(false);
+  const [tCap, setTCap] = useState<string | null>(null);
+  const [tCapKey, setTCapKey] = useState(0);
 
   // Gửi lại thư xác nhận: khoá 60 giây
   const [wait, setWait] = useState(0);
   const [resent, setResent] = useState(false);
 
   const [methods, setMethods] = useState<AuthMethods | null>(null);
+  // Chống bot Cloudflare (đăng ký + gửi lại thư). Token dùng một lần: tăng capKey sau mỗi lần gửi để lấy token mới.
+  const [cap, setCap] = useState<string | null>(null);
+  const [capKey, setCapKey] = useState(0);
+  const siteKey = methods?.turnstile_site_key ?? null;
+  const capBlock = !!siteKey && !cap;
   const [demo, setDemo] = useState<{ accounts: DemoAccount[]; scan_limit: number } | null>(null);
   const [dangVao, setDangVao] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(TRIAL_KEY);
+      const v = raw ? JSON.parse(raw) : null;
+      if (v && typeof v.id === "string" && typeof v.password === "string") setSaved(v);
+    } catch {
+      /* trình duyệt chặn localStorage: coi như chưa có */
+    }
+  }, []);
 
   useEffect(() => {
     if (ready && user) router.replace(next);
@@ -214,12 +236,17 @@ function LoginInner() {
   }, [wait]);
 
   async function vao(e: string, mk: string) {
+    if (mode === "up" && capBlock) return;
     setErr(null);
     setResent(false);
     setBusy(true);
     try {
       if (mode === "up") {
-        await register(e, lang);
+        try {
+          await register(e, lang, cap ?? undefined);
+        } finally {
+          setCapKey((k) => k + 1);
+        }
         setMode("sent");
         setWait(60);
         setBusy(false);
@@ -232,6 +259,48 @@ function LoginInner() {
       setBusy(false);
       setDangVao(null);
     }
+  }
+
+  /** Một chạm: có tài khoản cũ của trình duyệt này thì vào lại (không cần Turnstile); không thì máy tự tạo mới. */
+  async function motCham() {
+    setTErr(null);
+    setTBusy(true);
+    try {
+      if (saved) {
+        try {
+          await trial(saved.id, saved.password);
+          router.replace(next);
+          return;
+        } catch (loi) {
+          if (!(loi instanceof Unauthorized)) throw loi;
+          forgetTrial(); // tài khoản cũ đã bị xoá → tạo mới
+        }
+      }
+      let cred: { id: string; password: string };
+      try {
+        cred = await trialNew(tCap ?? undefined);
+      } finally {
+        setTCapKey((k) => k + 1);
+      }
+      try {
+        localStorage.setItem(TRIAL_KEY, JSON.stringify(cred));
+      } catch {
+        /* không cất được thì vẫn vào, chỉ là lần sau tạo mới */
+      }
+      router.replace(next);
+    } catch (loi) {
+      setTErr(loi);
+      setTBusy(false);
+    }
+  }
+
+  function forgetTrial() {
+    try {
+      localStorage.removeItem(TRIAL_KEY);
+    } catch {
+      /* bỏ qua */
+    }
+    setSaved(null);
   }
 
   async function thu() {
@@ -247,12 +316,21 @@ function LoginInner() {
   }
 
   async function guiLai() {
+    if (capBlock) return;
+    setErr(null);
     setWait(60);
     setResent(true);
     try {
-      await resendVerify(email, lang);
-    } catch {
-      /* máy chủ luôn trả 200; lỗi mạng thì người dùng bấm lại sau 60 giây */
+      await resendVerify(email, lang, cap ?? undefined);
+    } catch (loi) {
+      // Máy chủ luôn trả 200 trừ khi chống bot từ chối; lỗi mạng thì người dùng bấm lại sau 60 giây
+      if (loi instanceof ApiError && loi.code === "captcha") {
+        setWait(0);
+        setResent(false);
+        setErr(loi);
+      }
+    } finally {
+      setCapKey((k) => k + 1);
     }
   }
 
@@ -263,6 +341,7 @@ function LoginInner() {
       const so = (k: string, mac: number) => Number(e.info?.[k] ?? mac);
       if (e.code === "locked") return t.authLocked(Math.max(1, Math.ceil(so("seconds", 0) / 60)));
       if (e.code === "unverified") return t.authUnverified;
+      if (e.code === "captcha") return t.authCaptchaFail;
       if (e.code === "trial_off") return t.authTrialOff;
       if (e.code === "trial_new_limit") return t.authTrialNewLimit;
       if (e.code === "email_taken") return t.authEmailTaken;
@@ -282,6 +361,8 @@ function LoginInner() {
   // Máy chủ chưa cài gửi thư (thiếu RESEND_API_KEY) → ẩn đăng ký + quên mật khẩu: báo «đã gửi» mà thư không tới còn tệ hơn không có nút
   const emailOn = methods ? methods.email : true;
   const trialLimit = methods?.trial_limit ?? 5;
+  const keepDays = methods?.trial_keep_days ?? 7;
+  const tCapBlock = !saved && !!siteKey && !tCap;
   const authErrText =
     authError === "cancelled"
       ? t.authErrCancelled
@@ -323,7 +404,19 @@ function LoginInner() {
                 <p className="mt-2 text-t14 leading-[1.7] text-ink2">{t.authSentBody}</p>
                 <p className="mt-1 text-t14 leading-[1.7] text-ink2">{t.authSentSetPw}</p>
                 <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.authSentSpam}</p>
-                <button type="button" disabled={wait > 0} onClick={() => void guiLai()} className="btn btn-lg mt-5 w-full">
+                {siteKey && <Turnstile siteKey={siteKey} onToken={setCap} resetKey={capKey} />}
+                {err !== null && (
+                  <p role="alert" className={ERR_MARK}>
+                    <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                    <span className="min-w-0">{errText(err, false)}</span>
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={wait > 0 || capBlock}
+                  onClick={() => void guiLai()}
+                  className="btn btn-lg mt-5 w-full"
+                >
                   {wait > 0 ? t.authResendWait(wait) : t.authResend}
                 </button>
                 {resent && wait > 0 && (
@@ -442,20 +535,28 @@ function LoginInner() {
                       <div className="min-w-0">
                         <span>{errText(err, false)}</span>
                         {errCode === "unverified" && (
-                          <button
-                            type="button"
-                            disabled={wait > 0}
-                            onClick={() => void guiLai()}
-                            className="btn btn-sm mt-2 block whitespace-normal"
-                          >
-                            {wait > 0 ? t.authResendWait(wait) : t.authResend}
-                          </button>
+                          <>
+                            {siteKey && <Turnstile siteKey={siteKey} onToken={setCap} resetKey={capKey} />}
+                            <button
+                              type="button"
+                              disabled={wait > 0 || capBlock}
+                              onClick={() => void guiLai()}
+                              className="btn btn-sm mt-2 block whitespace-normal"
+                            >
+                              {wait > 0 ? t.authResendWait(wait) : t.authResend}
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
                   )}
 
-                  <button type="submit" disabled={busy} className="btn btn-primary btn-lg mt-5 w-full">
+                  {mode === "up" && siteKey && <Turnstile siteKey={siteKey} onToken={setCap} resetKey={capKey} />}
+                  <button
+                    type="submit"
+                    disabled={busy || (mode === "up" && capBlock)}
+                    className="btn btn-primary btn-lg mt-5 w-full"
+                  >
                     {busy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
                     {busy ? t.authWorking : mode === "up" ? t.signUp : t.signIn}
                   </button>
@@ -484,50 +585,91 @@ function LoginInner() {
           {showTrial && (
             <section data-testid="trial-box" className="mt-5 rounded-[3px] border border-rule bg-card2 px-6 pb-5 pt-4">
               <h2 className="text-t16 font-bold">{t.trialHead}</h2>
-              <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.trialNote(trialLimit)}</p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void thu();
-                }}
+              <p className="mt-1 text-t13 leading-[1.7] text-ink2">{t.trialNote(trialLimit, keepDays)}</p>
+              {!saved && siteKey && <Turnstile siteKey={siteKey} onToken={setTCap} resetKey={tCapKey} />}
+              {tErr !== null && !oldOpen && (
+                <p role="alert" aria-live="assertive" className={ERR_MARK}>
+                  <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                  <span className="min-w-0">{errText(tErr, true)}</span>
+                </p>
+              )}
+              <button
+                type="button"
+                data-testid="trial-onetap"
+                disabled={tBusy || tCapBlock}
+                onClick={() => void motCham()}
+                className="btn btn-primary btn-lg mt-4 w-full"
               >
-                <label className={`${LABEL} mt-3`} htmlFor="trial-id">
-                  {t.trialId}
-                </label>
-                <input
-                  id="trial-id"
-                  type="text"
-                  required
-                  maxLength={100}
-                  autoCapitalize="none"
-                  autoComplete="username"
-                  value={tId}
-                  onChange={(e) => setTId(e.target.value)}
-                  className={INPUT}
-                />
-                <label className={`${LABEL} mt-3`} htmlFor="trial-password">
-                  {t.authPassword}
-                </label>
-                <input
-                  id="trial-password"
-                  type={hienMk ? "text" : "password"}
-                  required
-                  autoComplete="current-password"
-                  value={tPw}
-                  onChange={(e) => setTPw(e.target.value)}
-                  className={INPUT}
-                />
-                {tErr !== null && (
-                  <p role="alert" aria-live="assertive" className={ERR_MARK}>
-                    <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
-                    <span className="min-w-0">{errText(tErr, true)}</span>
-                  </p>
-                )}
-                <button type="submit" data-testid="trial-submit" disabled={tBusy} className="btn btn-lg mt-4 w-full">
-                  {tBusy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
-                  {tBusy ? t.authWorking : t.trialGo}
+                {tBusy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                {tBusy ? t.authWorking : saved ? t.trialContinue : t.trialOneTap}
+              </button>
+              {saved && (
+                <button
+                  type="button"
+                  disabled={tBusy}
+                  onClick={forgetTrial}
+                  className="btn btn-ghost btn-sm mt-1 w-full font-normal text-accent hover:text-accenthover"
+                >
+                  {t.trialFresh}
                 </button>
-              </form>
+              )}
+
+              <button
+                type="button"
+                aria-expanded={oldOpen}
+                onClick={() => {
+                  setOldOpen((v) => !v);
+                  setTErr(null);
+                }}
+                className="mt-3 cursor-pointer text-t12 text-ink3 underline hover:text-ink2"
+              >
+                {t.trialOld}
+              </button>
+              {oldOpen && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void thu();
+                  }}
+                >
+                  <label className={`${LABEL} mt-3`} htmlFor="trial-id">
+                    {t.trialId}
+                  </label>
+                  <input
+                    id="trial-id"
+                    type="text"
+                    required
+                    maxLength={100}
+                    autoCapitalize="none"
+                    autoComplete="username"
+                    value={tId}
+                    onChange={(e) => setTId(e.target.value)}
+                    className={INPUT}
+                  />
+                  <label className={`${LABEL} mt-3`} htmlFor="trial-password">
+                    {t.authPassword}
+                  </label>
+                  <input
+                    id="trial-password"
+                    type={hienMk ? "text" : "password"}
+                    required
+                    autoComplete="current-password"
+                    value={tPw}
+                    onChange={(e) => setTPw(e.target.value)}
+                    className={INPUT}
+                  />
+                  {tErr !== null && (
+                    <p role="alert" aria-live="assertive" className={ERR_MARK}>
+                      <WarningCircle size={16} aria-hidden className="mt-[calc(2px*var(--fs))] flex-none" />
+                      <span className="min-w-0">{errText(tErr, true)}</span>
+                    </p>
+                  )}
+                  <button type="submit" data-testid="trial-submit" disabled={tBusy} className="btn btn-lg mt-4 w-full">
+                    {tBusy && <CircleNotch size={18} aria-hidden className="animate-spin motion-reduce:animate-none" />}
+                    {tBusy ? t.authWorking : t.trialGo}
+                  </button>
+                </form>
+              )}
             </section>
           )}
 

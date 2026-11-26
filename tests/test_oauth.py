@@ -11,7 +11,7 @@ import urllib.parse
 import pytest
 
 from api import auth, oauth, workspace
-from test_api_auth import client, register  # noqa: F401 — fixture dùng chung: CSDL tạm
+from test_api_auth import client, register, trial  # noqa: F401 — fixture dùng chung: CSDL tạm
 
 
 def jwt(claims: dict) -> str:
@@ -338,7 +338,7 @@ def test_noi_google_vao_member_da_xac_minh_cung_email(client, fake):
 
 def test_khong_noi_vao_trial_cung_ten(client, fake, monkeypatch):
     monkeypatch.setattr(auth, "OPEN_LOGIN", True)
-    t = client.post("/api/auth/trial", json={"id": "nguoi@vd.com", "password": "1"}).json()
+    t = trial(client, "nguoi@vd.com").json()
     client.post("/api/auth/logout")
     ok(login_google(client, fake)[0])
     assert me(client)["id"] != t["id"] and me(client)["kind"] == "member"
@@ -356,7 +356,7 @@ def test_khong_noi_vao_demo_dung_google_sub(client, fake, monkeypatch):
 
 
 def test_khong_noi_vao_admin_cu_legacy_va_khong_thanh_admin(client, fake, monkeypatch):
-    monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "nguoi@vd.com")
+    monkeypatch.setenv("TSUCHO_ADMIN_EMAILS", "nguoi-khac@vd.com")       # legacy KHÔNG nằm trong danh sách admin → không nối
     with auth._db() as conn:
         conn.execute("INSERT INTO users (id, email, password_hash, role, created_at, kind, email_verified, legacy)"
                      " VALUES ('old000000001', 'nguoi@vd.com', ?, 'admin', 0, 'member', 1, 1)", (auth.hash_password("x" * 9),))
